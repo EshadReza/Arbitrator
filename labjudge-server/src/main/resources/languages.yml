@@ -1,0 +1,29 @@
+# FR-21: per-language compile/run commands. Adding a language = adding a block
+# here + an enum constant in labjudge-common; no judge-engine code changes.
+# Owner: Mahir (rules.md Rule 1).
+#
+# Placeholders:
+#   {src}  absolute path of the source file inside the work dir
+#   {exe}  absolute path of the produced binary (compiled languages)
+#   {dir}  the per-submission work dir
+labjudge:
+  judge:
+    languages:
+      cpp17:
+        source-file: main.cpp
+        # No -static: the sandbox's isolation comes from unshare/prlimit/fsize,
+        # not static linking, and -static fails outright on macOS dev machines
+        # (no static libc — "ld: library 'crt0.o' not found"). Dynamic linking
+        # works fine inside the Linux sandbox too, since unshare -Urn doesn't
+        # hide the filesystem, only the network namespace.
+        compile: "g++ -O2 -std=c++17 -o {exe} {src}"
+        run: "{exe}"
+      java17:
+        source-file: Main.java
+        compile: "javac -d {dir} {src}"
+        # -Xss256m avoids spurious stack RE on deep recursion problems
+        run: "java -XX:+UseSerialGC -Xss256m -cp {dir} Main"
+      python310:
+        source-file: main.py
+        compile: ""                      # interpreted: no compile step
+        run: "python3 {src}"

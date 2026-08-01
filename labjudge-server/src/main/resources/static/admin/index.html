@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LabJudge Admin</title>
+<style>
+  /* Codeforces-style boxed panels, same visual grammar as the client */
+  body { font-family: Verdana, Arial, sans-serif; font-size: 13px;
+         background: #fff; color: #222; margin: 0; padding: 16px; }
+  .box { border: 1px solid #b9b9b9; border-radius: 4px; margin-bottom: 14px; }
+  .box .head { background: #e1e1e1; padding: 5px 10px; font-weight: bold;
+               border-bottom: 1px solid #b9b9b9; border-radius: 4px 4px 0 0; }
+  .box .body { padding: 10px; }
+  input, button { font-family: inherit; font-size: 13px; padding: 4px 8px; }
+  button { cursor: pointer; }
+  a { color: #0b60c4; }
+  .ok  { color: #1a7a1a; }
+  .err { color: #c0392b; }
+  #out { white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+  .note { color: #666; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="head">LabJudge — Admin Panel</div>
+    <div class="body">
+      Served from the server machine only (loopback lock, decision D3).
+      All calls also require an ADMIN JWT.
+      <div class="note">Bundle 1 skeleton — Dashboard, Submissions, Users and
+      Announcements pages arrive in chunks S2-A4 / S3-A3.</div>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="head">1 &middot; Login (ADMIN)</div>
+    <div class="body">
+      <input id="u" placeholder="username" value="admin">
+      <input id="p" placeholder="password" type="password">
+      <button onclick="login()">Login</button>
+      <span id="who"></span>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="head">2 &middot; Contest control (FR-04, FR-08)</div>
+    <div class="body">
+      <button onclick="current()">Show current contest</button>
+      <br><br>
+      <input id="title" placeholder="new contest title">
+      <input id="dur" placeholder="duration (min)" value="120" size="10">
+      <button onclick="createContest()">Create</button>
+      <br><br>
+      <input id="cid" placeholder="contest id" size="10">
+      <button onclick="startContest()">Start</button>
+      <button onclick="endContest()">End</button>
+      <span class="note">End rejects all later submissions (BR-02).</span>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="head">3 &middot; Problems (FR-05)</div>
+    <div class="body">
+      <button onclick="listProblems()">Refresh list</button>
+      <div id="problems" class="note" style="margin-top:8px">not loaded</div>
+
+      <hr style="border:0;border-top:1px solid #ddd;margin:12px 0">
+
+      <b>Upload problem package</b>
+      <div class="note" style="margin:4px 0 8px">
+        ZIP containing <code>config.json</code>, <code>statement/statement.html</code>,
+        and <code>tests/NN.in</code> + <code>tests/NN.out</code> pairs.
+        A single wrapping folder is fine. Rejected packages import nothing at all.
+      </div>
+      <input type="file" id="pkg" accept=".zip">
+      <button onclick="uploadPackage()">Upload</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="head">Response</div>
+    <div class="body"><div id="out">—</div></div>
+  </div>
+
+<script>
+let token = null;
+
+async function api(method, path, params) {
+  const url = params ? path + '?' + new URLSearchParams(params) : path;
+  const res = await fetch(url, {
+    method,
+    headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+  });
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = text; }
+  show(res.status, body);
+  return { status: res.status, body };
+}
+
+function show(status, body) {
+  const out = document.getElementById('out');
+  out.className = status < 300 ? 'ok' : 'err';
+  out.textContent = 'HTTP ' + status + '\n' + JSON.stringify(body, null, 2);
+}
+
+async function login() {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: document.getElementById('u').value,
+      password: document.getElementById('p').value
+    })
+  });
+  const body = await res.json().catch(() => ({}));
+  show(res.status, body);
+  if (res.ok && body.role === 'ADMIN') {
+    token = body.token;
+    document.getElementById('who').textContent = ' ✓ ' + body.username;
+  } else if (res.ok) {
+    token = null;
+    show(403, 'Logged in, but role is not ADMIN — admin calls will be rejected.');
+  }
+}
+
+async function listProblems() {
+  const { status, body } = await api('GET', '/api/admin/problems');
+  const el = document.getElementById('problems');
+  if (status >= 300 || !Array.isArray(body)) {
+    el.textContent = 'could not load';
+    return;
+  }
+  if (body.length === 0) {
+    el.textContent = 'No problems in this contest yet — upload a package below.';
+    return;
+  }
+  el.innerHTML = body.map(p =>
+    `<div style="padding:2px 0">
+       <b>${p.code}</b>. ${escapeHtml(p.title)}
+       <button style="margin-left:8px" onclick="deleteProblem(${p.id}, '${p.code}')">Delete</button>
+     </div>`).join('');
+}
+
+async function deleteProblem(id, code) {
+  // UIF-22: destructive actions require explicit confirmation
+  if (!confirm(`Delete problem ${code}? This cannot be undone.`)) return;
+  await api('DELETE', '/api/admin/problems/' + id);
+  listProblems();
+}
+
+async function uploadPackage() {
+  const input = document.getElementById('pkg');
+  if (!input.files.length) { show(400, 'Choose a .zip file first'); return; }
+
+  const form = new FormData();
+  form.append('file', input.files[0]);
+  const res = await fetch('/api/admin/problems/upload', {
+    method: 'POST',
+    headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+    body: form                        // no Content-Type: the browser sets the boundary
+  });
+  const body = await res.json().catch(() => ({}));
+  show(res.status, body);
+  if (res.ok) listProblems();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+const current       = () => api('GET',  '/api/contests/current');
+const createContest = () => api('POST', '/api/admin/contests', {
+  title: document.getElementById('title').value,
+  durationMinutes: document.getElementById('dur').value || '120'
+});
+const startContest  = () => api('POST', '/api/admin/contests/' + document.getElementById('cid').value + '/start');
+const endContest    = () => api('POST', '/api/admin/contests/' + document.getElementById('cid').value + '/end');
+</script>
+</body>
+</html>

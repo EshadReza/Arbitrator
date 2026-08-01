@@ -1,0 +1,32 @@
+# Integration-test profile. Points at a SEPARATE schema so tests never touch
+# a developer's working data. Create it once with:
+#   mysql -u root -e "CREATE DATABASE labjudge_test CHARACTER SET utf8mb4;
+#                     GRANT ALL ON labjudge_test.* TO 'labjudge'@'localhost';"
+spring:
+  config:
+    import: optional:classpath:languages.yml
+  datasource:
+    url: jdbc:mysql://localhost:3306/labjudge_test?serverTimezone=UTC&createDatabaseIfNotExist=true
+    username: ${DB_USER:labjudge}
+    password: ${DB_PASS:changeme}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    # Wipe and re-migrate every run so each test starts from a known schema.
+    clean-disabled: false
+    clean-on-validation-error: true
+    locations: classpath:db/migration
+
+labjudge:
+  jwt:
+    secret: test-only-secret-0123456789abcdef0123456789abcdef0123456789
+    expiry-hours: 1
+  judge:
+    threads: 4
+    submit-cooldown-seconds: 0     # BR-01 rate limit off; tests submit rapidly
+
+logging:
+  level:
+    com.labjudge: INFO
