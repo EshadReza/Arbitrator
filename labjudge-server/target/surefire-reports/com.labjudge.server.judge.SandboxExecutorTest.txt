@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.labjudge.server.judge.SandboxExecutorTest
--------------------------------------------------------------------------------
-Tests run: 7, Failures: 0, Errors: 0, Skipped: 2, Time elapsed: 4.425 s -- in com.labjudge.server.judge.SandboxExecutorTest

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # sandbox-run.sh — owner: Mahir (rules.md Rule 1)
 #
-# Runs one untrusted program inside the LabJudge sandbox (FR-10, NFR-S03/S04,
+# Runs one untrusted program inside the Arbitrator sandbox (FR-10, NFR-S03/S04,
 # NFR-R04, FMEA-02/08). Linux only (decision D2).
 #
 #   unshare -Urn   new user + NETWORK namespace  -> no network access

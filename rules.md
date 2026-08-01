@@ -10,10 +10,10 @@ Read this before your first commit. Every rule here exists because breaking it c
 
 | Owner | Paths |
 |---|---|
-| **Eshad** | `labjudge-server/src/main/java/com/labjudge/server/{config,security,entity,repo}/**`<br>`.../service/{user,contest,problem,report}/**` · `.../controller/{auth,admin,contest,problem,user}/**`<br>`labjudge-server/src/main/resources/db/migration/**` · `.../static/admin/**`<br>root `pom.xml` · `README.md` · `.github/**` |
-| **Mahir** | `labjudge-server/src/main/java/com/labjudge/server/{judge,realtime,leaderboard}/**`<br>`.../service/{submission,announcement}/**` · `.../controller/{submission,announcement}/**`<br>`labjudge-server/src/main/resources/languages.yml` · `scripts/sandbox-run.sh` |
-| **Zahin** | `labjudge-client/**` (everything, including `codeforces.css`) |
-| **Shared** | `labjudge-common/**` — see Rule 2 |
+| **Eshad** | `arbitrator-server/src/main/java/com/arbitrator/server/{config,security,entity,repo}/**`<br>`.../service/{user,contest,problem,report}/**` · `.../controller/{auth,admin,contest,problem,user}/**`<br>`arbitrator-server/src/main/resources/db/migration/**` · `.../static/admin/**`<br>root `pom.xml` · `README.md` · `.github/**` |
+| **Mahir** | `arbitrator-server/src/main/java/com/arbitrator/server/{judge,realtime,leaderboard}/**`<br>`.../service/{submission,announcement}/**` · `.../controller/{submission,announcement}/**`<br>`arbitrator-server/src/main/resources/languages.yml` · `scripts/sandbox-run.sh` |
+| **Zahin** | `arbitrator-client/**` (everything, including `codeforces.css`) |
+| **Shared** | `arbitrator-common/**` — see Rule 2 |
 
 **If you need a change in someone else's file, you do not edit it.** Open a GitHub issue titled `[contract-change] <what you need>`, assign the owner, and keep working on something else. The owner lands it, usually same day.
 
@@ -21,20 +21,20 @@ Git cannot produce a conflict in a file only one person edits. This rule alone r
 
 ---
 
-### After anyone changes `labjudge-common`, everyone runs Alt+F5
+### After anyone changes `arbitrator-common`, everyone runs Alt+F5
 
 Adding a DTO or constant is allowed without ceremony (see below) — but on **every other machine**, Eclipse's
 build path goes stale the moment it happens. Eclipse then compiles error-stub `.class` files over the top of
 Maven's good output, and the app fails at runtime with an unqualified `ClassNotFoundException` even though
 `mvn clean install` reported success.
 
-So: when a PR touching `labjudge-common` lands on `dev`, after you pull —
+So: when a PR touching `arbitrator-common` lands on `dev`, after you pull —
 **select all four projects → Maven → Update Project (Alt+F5) → Project → Clean all → `mvn clean install`.**
 Ten seconds, and it saves an hour of debugging a build that "should" work.
 
 ---
 
-## Rule 2 — `labjudge-common` is frozen after day 3
+## Rule 2 — `arbitrator-common` is frozen after day 3
 
 We design it together on day 2 and push it on day 3. After that:
 
@@ -105,8 +105,8 @@ Everyone runs a local `mysql-server-8.0`. Commit `application.yml` with placehol
 ```yaml
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/labjudge?serverTimezone=UTC
-    username: ${DB_USER:labjudge}
+    url: jdbc:mysql://localhost:3306/arbitrator?serverTimezone=UTC
+    username: ${DB_USER:arbitrator}
     password: ${DB_PASS:changeme}
 ```
 
@@ -172,7 +172,7 @@ git diff --name-only --diff-filter=U
 
 Then, by file type:
 
-- **`labjudge-common`** → stop. Message the group chat. Whoever changed the contract without an issue reverts, and we redo it under Rule 2.
+- **`arbitrator-common`** → stop. Message the group chat. Whoever changed the contract without an issue reverts, and we redo it under Rule 2.
 - **A file you own** → your version is authoritative. Fix it, `git add`, `git commit`.
 - **A file you don't own** → you violated Rule 1. `git checkout --theirs <file>` to take the owner's version, then open the `contract-change` issue you should have opened.
 - **`pom.xml`** → almost always both people added a dependency. Keep both blocks, save, run `mvn clean install`.
@@ -198,5 +198,5 @@ Then, by file type:
 - [ ] `config/eclipse-formatter.xml` + `eclipse.importorder` committed, all three imported them
 - [ ] All four Maven modules import cleanly; `mvn clean install` green on all three machines
 - [ ] Local MySQL 8 running for each dev, `application-local.yml` created, not tracked
-- [ ] `labjudge-common` designed together (day 2) and pushed (day 3)
+- [ ] `arbitrator-common` designed together (day 2) and pushed (day 3)
 - [ ] Everyone has read this file

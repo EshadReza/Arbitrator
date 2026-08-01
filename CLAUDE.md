@@ -1,4 +1,4 @@
-# LabJudge — context for Claude
+# Arbitrator — context for Claude
 
 Offline LAN Online Judge for university programming labs.
 **Read `STATUS.md` first** — it says what is done and what is next.
@@ -18,7 +18,7 @@ Everything project-related lives in **this folder** — there are no docs one le
 | `WORKFLOW_PLAN.md` | the 4-sprint plan, ownership, GitHub bootstrap | rarely; it's the baseline |
 | `rules.md` | collaboration rules | only by group agreement |
 | `README.md` | setup + run instructions for a new developer | when setup steps change |
-| `LABJUDGE_BUNDLE.txt` | generated single-file copy of the whole tree, for handoff without git | never edit — regenerate with `python3 scripts/make-bundle.py` (git-ignored) |
+| `ARBITRATOR_BUNDLE.txt` | generated single-file copy of the whole tree, for handoff without git | never edit — regenerate with `python3 scripts/make-bundle.py` (git-ignored) |
 
 ## The team and who owns what
 
@@ -26,7 +26,7 @@ Everything project-related lives in **this folder** — there are no docs one le
 |---|---|---|
 | **Eshad** | Platform & Data | `server/{config,security,entity,repo}`, contest/problem/user services + controllers, Flyway `V1`–`V49`, admin panel |
 | **Mahir** | Judge & Real-time | `server/{judge,realtime,leaderboard}`, submission + announcement services/controllers, `languages.yml`, `scripts/sandbox-run.sh`, Flyway `V50`–`V79` |
-| **Zahin** | JavaFX Client | all of `labjudge-client/**` including `codeforces.css` |
+| **Zahin** | JavaFX Client | all of `arbitrator-client/**` including `arbitrator.css` |
 
 **Rule 1 is not advisory.** Before editing, check who owns the file. Cross-track changes go through a `contract-change` issue, not a quiet edit.
 
@@ -39,7 +39,7 @@ Everything project-related lives in **this folder** — there are no docs one le
 | D3 | Admin surface = **loopback filter AND ADMIN JWT**, both layers. |
 | D4 | **HTTPS deferred** to post-v1.0. Plain HTTP/WS over the closed LAN. `server.scheme` stays configurable so enabling TLS later is one line. |
 
-UI reference is **Codeforces (light)**, not the SRS §4 "dark theme" line — that sentence is superseded.
+UI reference is **Codeforces-derived, information-dense** — now themed light AND dark (top-bar toggle or Ctrl+D), which supersedes both the SRS §4 "dark-themed" line and the earlier light-only note.
 
 ## Work vocabulary
 
@@ -52,16 +52,21 @@ When starting work, say which chunk. When finishing, update `STATUS.md`.
 
 ```bash
 mvn clean install                                    # all three modules
-mvn -pl labjudge-server spring-boot:run              # server (port 8080)
-mvn -pl labjudge-client javafx:run                   # client
-mvn -pl labjudge-client javafx:run -Dlabjudge.mock=true   # client, no server needed
+mvn -pl arbitrator-server spring-boot:run              # server (port 8080)
+mvn -pl arbitrator-client exec:java -Dexec.mainClass=com.arbitrator.client.app.Launcher
+#   ... add -Darbitrator.mock=true for canned data with no server
 ```
 
 Demo credentials (seeded on first boot into an empty DB): `admin`/`admin123`, `alice`/`alice123`.
 
-**JavaFX in Eclipse:** use `Run As → Maven Build...` with goal `javafx:run`. Plain "Run As → Java Application"
-needs a hand-maintained `--module-path` (and will fail on missing transitive modules like `javafx.media`).
-Don't commit machine-specific module paths.
+**Run the client via `com.arbitrator.client.app.Launcher`**, never `ArbitratorApp` and never
+`mvn javafx:run`. In Eclipse: *Run As → Java Application* on `Launcher`, with **no VM arguments**.
+
+Why: `javafx-web` declares `requires jdk.jsobject`, a module removed from the JDK in Java 11 and never
+published to Maven Central, so JavaFX can never resolve on the **module path** from Maven deps alone
+(`Module jdk.jsobject not found`). Launching from the **classpath** skips the module graph entirely.
+`Launcher` also dodges "JavaFX runtime components are missing", which the JVM only raises when the main
+class itself extends `Application`. Net effect: no `--module-path`, no machine-specific SDK paths.
 
 ## Things that bite (learned the hard way)
 
@@ -75,13 +80,13 @@ Don't commit machine-specific module paths.
 - **Port 8080 conflicts**: a server left running in Eclipse blocks any terminal-launched restart. Check
   `lsof -i :8080 -sTCP:LISTEN` before assuming a fix didn't work.
 - **Eclipse silently overwrites Maven's output with broken classes.** When anything is added to
-  `labjudge-common`, Eclipse's build path goes stale, its compiler emits *error-stub* `.class` files into
+  `arbitrator-common`, Eclipse's build path goes stale, its compiler emits *error-stub* `.class` files into
   `target/classes` (they throw `Unresolved compilation problems: X cannot be resolved` at runtime), and it
   overwrites whatever Maven just built. Symptom: `mvn clean install` says BUILD SUCCESS but the app dies with
   an **unqualified** `ClassNotFoundException`/`NoClassDefFoundError`.
   Fix: select all four projects → **Maven → Update Project (Alt+F5)** with "Force Update" ticked →
   **Project → Clean all**. Diagnose with:
-  `javap -p -c labjudge-server/target/classes/<Class>.class | grep "Unresolved compilation"`.
+  `javap -p -c arbitrator-server/target/classes/<Class>.class | grep "Unresolved compilation"`.
   **Always run `mvn clean install` after an Alt+F5**, and prefer Maven over Eclipse launchers when a change
   spans modules.
 - **`peakMemoryKb` is `-1` on macOS.** Expected — real peak RSS only comes from the Linux sandbox script.
@@ -90,7 +95,7 @@ Don't commit machine-specific module paths.
   machine-local time; on a +06 machine that puts the contest six hours in the future and **every submission
   returns 403** with no obvious cause. JPA writes (`Instant`) are already correct — this only bites hand-written
   SQL and DB tools.
-- **Start testing from a clean slate**: `mysql -u root labjudge < scripts/reset-dev-data.sql`. Stale solved
+- **Start testing from a clean slate**: `mysql -u root arbitrator < scripts/reset-dev-data.sql`. Stale solved
   state makes badge behaviour look broken — a solved problem shows its green tick and hides later failures,
   which is correct but confusing if the "solved" came from someone else's test run.
 - **The client's WebSocket needs `tomcat-api` explicitly.** `tomcat-websocket` uses

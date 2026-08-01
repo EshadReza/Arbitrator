@@ -1,0 +1,12 @@
+com/arbitrator/server/service/ProblemPackageServiceTest.class
+com/arbitrator/server/leaderboard/LeaderboardServiceTest.class
+com/arbitrator/server/realtime/VerdictPushIntegrationTest$2.class
+com/arbitrator/server/realtime/VerdictPushIntegrationTest.class
+com/arbitrator/server/judge/SandboxExecutorTest.class
+com/arbitrator/server/realtime/VerdictPushIntegrationTest$1.class
+com/arbitrator/server/judge/VerdictEvaluatorTest.class
+com/arbitrator/server/service/ProblemPackageServiceTest$1.class
+com/arbitrator/server/leaderboard/LeaderboardServiceTest$RepoHandler.class
+com/arbitrator/server/service/ProblemPackageServiceTest$RepoHandler.class
+com/arbitrator/server/leaderboard/LeaderboardServiceTest$1.class
+com/arbitrator/server/realtime/VerdictPushIntegrationTest$3.class
