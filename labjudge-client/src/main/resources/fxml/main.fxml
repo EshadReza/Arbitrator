@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.SplitPane?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.web.WebView?>
+
+<!-- Main contest view (§4.2/4.3): StackPane root so toasts and verdict
+     banners overlay the whole window. -->
+<StackPane xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+           fx:controller="com.labjudge.client.controller.MainController"
+           fx:id="rootStack">
+
+    <BorderPane>
+
+        <!-- UIF-05: persistent top status bar -->
+        <top>
+            <HBox alignment="CENTER_LEFT" spacing="14" styleClass="top-bar">
+                <padding><Insets top="6" right="14" bottom="6" left="14"/></padding>
+                <Label text="%app.title" styleClass="logo-small"/>
+                <Label fx:id="contestTitleLabel" styleClass="contest-title"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="timerLabel" styleClass="timer"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="userLabel"/>
+                <Label fx:id="connLabel" styleClass="conn-ok"/>
+            </HBox>
+        </top>
+
+        <center>
+            <!-- §4.5: the leaderboard lives on a tab in the main navigation -->
+            <TabPane fx:id="tabs" tabClosingPolicy="UNAVAILABLE">
+
+                <Tab text="%main.tab.problems">
+                    <SplitPane dividerPositions="0.18, 0.58">
+
+                        <!-- Left: problem list with status badges -->
+                        <VBox styleClass="box" minWidth="180">
+                            <Label text="%main.problems" styleClass="box-head" maxWidth="Infinity"/>
+                            <ListView fx:id="problemList" VBox.vgrow="ALWAYS"/>
+                        </VBox>
+
+                        <!-- Center: statement -->
+                        <VBox styleClass="box">
+                            <Label fx:id="problemHeader" styleClass="box-head" maxWidth="Infinity"/>
+                            <WebView fx:id="statementView" VBox.vgrow="ALWAYS"/>
+                        </VBox>
+
+                        <!-- Right: editor + submission -->
+                        <fx:include source="editor-panel.fxml" fx:id="editorPanel"/>
+
+                    </SplitPane>
+                </Tab>
+
+                <Tab text="%main.tab.standings">
+                    <fx:include source="leaderboard-panel.fxml" fx:id="leaderboardPanel"/>
+                </Tab>
+
+            </TabPane>
+        </center>
+
+    </BorderPane>
+</StackPane>

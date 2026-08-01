@@ -1,0 +1,12 @@
+com/labjudge/server/service/ProblemPackageServiceTest$RepoHandler.class
+com/labjudge/server/judge/VerdictEvaluatorTest.class
+com/labjudge/server/judge/SandboxExecutorTest.class
+com/labjudge/server/realtime/VerdictPushIntegrationTest.class
+com/labjudge/server/service/ProblemPackageServiceTest.class
+com/labjudge/server/leaderboard/LeaderboardServiceTest.class
+com/labjudge/server/realtime/VerdictPushIntegrationTest$2.class
+com/labjudge/server/realtime/VerdictPushIntegrationTest$3.class
+com/labjudge/server/leaderboard/LeaderboardServiceTest$RepoHandler.class
+com/labjudge/server/realtime/VerdictPushIntegrationTest$1.class
+com/labjudge/server/leaderboard/LeaderboardServiceTest$1.class
+com/labjudge/server/service/ProblemPackageServiceTest$1.class
