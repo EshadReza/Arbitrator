@@ -5,7 +5,7 @@
      Everyone uses THIS profile — whitespace-only diffs are half of all
      false merge conflicts. -->
 <profiles version="21">
-  <profile kind="CodeFormatterProfile" name="LabJudge" version="21">
+  <profile kind="CodeFormatterProfile" name="Arbitrator" version="21">
     <setting id="org.eclipse.jdt.core.formatter.tabulation.char" value="space"/>
     <setting id="org.eclipse.jdt.core.formatter.tabulation.size" value="4"/>
     <setting id="org.eclipse.jdt.core.formatter.indentation.size" value="4"/>

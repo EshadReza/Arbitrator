@@ -14,17 +14,17 @@
     <relativePath/>
   </parent>
 
-  <groupId>com.labjudge</groupId>
-  <artifactId>labjudge</artifactId>
+  <groupId>com.arbitrator</groupId>
+  <artifactId>arbitrator</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
-  <name>LabJudge</name>
+  <name>Arbitrator</name>
   <description>Offline LAN Online Judge for university visual programming labs</description>
 
   <modules>
-    <module>labjudge-common</module>
-    <module>labjudge-server</module>
-    <module>labjudge-client</module>
+    <module>arbitrator-common</module>
+    <module>arbitrator-server</module>
+    <module>arbitrator-client</module>
   </modules>
 
   <properties>
@@ -40,8 +40,8 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>com.labjudge</groupId>
-        <artifactId>labjudge-common</artifactId>
+        <groupId>com.arbitrator</groupId>
+        <artifactId>arbitrator-common</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

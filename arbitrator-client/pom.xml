@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.arbitrator</groupId>
+    <artifactId>arbitrator</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>arbitrator-client</artifactId>
+  <name>Arbitrator :: JavaFX Client</name>
+
+  <!-- Owner: Zahin — entire module (rules.md Rule 1).
+       JavaFX comes in as plain Maven dependencies; NEVER configure an
+       Eclipse JavaFX SDK / module-path (rules.md, WORKFLOW_PLAN §2).
+       Run with:  java -cp <deps> com.arbitrator.client.app.Launcher
+       or in Eclipse: Run As -> Java Application on Launcher (no VM args).
+       NOTE: `mvn javafx:run` puts JavaFX on the MODULE path, where javafx-web
+       cannot resolve — jdk.jsobject was dropped from the JDK in 11 and is not
+       on Maven Central. Classpath launching avoids the module graph entirely.
+       Mock mode: mvn -pl arbitrator-client javafx:run -Darbitrator.mock=true -->
+
+  <dependencies>
+    <dependency>
+      <groupId>com.arbitrator</groupId>
+      <artifactId>arbitrator-common</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-controls</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-fxml</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-web</artifactId>
+    </dependency>
+
+    <!-- Code editor (SRS §4.2 permits CodeArea; do not attempt Monaco) -->
+    <dependency>
+      <groupId>org.fxmisc.richtext</groupId>
+      <artifactId>richtextfx</artifactId>
+    </dependency>
+
+    <!-- REST: java.net.http + Jackson -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- STOMP over WebSocket: Spring's client works standalone (no Boot).
+         tomcat-websocket supplies the JSR-356 implementation. -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-websocket</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-messaging</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.tomcat</groupId>
+      <artifactId>tomcat-websocket</artifactId>
+      <!-- not in the Boot BOM (only the embed variant is); track its version -->
+      <version>${tomcat.version}</version>
+    </dependency>
+    <!-- tomcat-websocket needs org.apache.tomcat.InstanceManagerBindings at
+         runtime but does NOT declare it. Without this the client's WebSocket
+         dies with NoClassDefFoundError the moment it tries to connect, so
+         verdicts and live standings silently never arrive. The server module
+         never hits this because tomcat-embed-core bundles the class. -->
+    <dependency>
+      <groupId>org.apache.tomcat</groupId>
+      <artifactId>tomcat-api</artifactId>
+      <version>${tomcat.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.2.0</version>
+        <configuration>
+          <mainClass>com.arbitrator.client.app.Launcher</mainClass>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx-maven-plugin</artifactId>
+        <version>0.0.8</version>
+        <configuration>
+          <mainClass>com.arbitrator.client.app.Launcher</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

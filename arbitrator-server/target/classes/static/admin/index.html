@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arbitrator — Instructor Console</title>
+<style>
+  :root {
+    --bg: #eef1f5; --surface: #fff; --surface2: #f5f7fa;
+    --border: #d6dbe3; --ink: #1c2430; --muted: #6b7684;
+    --blue: #2f6fd0; --green: #21a366; --red: #d64545; --amber: #e5a50a;
+    --purple: #8257c7;
+  }
+  /* Follows the OS setting; the client has its own toggle (Ctrl+D). */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181f; --surface: #1c222c; --surface2: #232a36;
+      --border: #313a49; --ink: #e6eaf0; --muted: #9aa5b4;
+      --blue: #5b9bf5; --green: #35c98a; --red: #ef6a6a; --amber: #f2c14e;
+      --purple: #a883ee;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Inter, sans-serif; font-size: 13px;
+         background: var(--bg); color: var(--ink); margin: 0; padding: 22px; }
+  .dim { color: var(--muted); font-weight: 400; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+
+  .box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+         margin-bottom: 16px; overflow: hidden;
+         box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .box > .head { background: var(--surface2); padding: 10px 14px; font-weight: 600;
+                 border-bottom: 1px solid var(--border); }
+  .box > .body { padding: 14px; }
+
+  button { font: inherit; padding: 7px 14px; border: 1px solid var(--border);
+           background: var(--surface2); color: var(--ink);
+           border-radius: 7px; cursor: pointer; transition: background .12s; }
+  button:hover:not(:disabled) { background: var(--border); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--blue); color: #fff; border-color: var(--blue);
+                   font-weight: 600; }
+  button.primary:hover:not(:disabled) { filter: brightness(.92); }
+  button.danger  { background: var(--red); color: #fff; border-color: var(--red);
+                   font-weight: 600; }
+  button.danger:hover:not(:disabled) { filter: brightness(.92); }
+  input, select { font: inherit; padding: 7px 10px; border: 1px solid var(--border);
+                  border-radius: 7px; background: var(--surface); color: var(--ink); }
+  input:focus { outline: none; border-color: var(--blue); }
+
+  /* live contest panel */
+  .clocks { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .clock { flex: 1 1 150px; background: var(--surface2); border: 1px solid var(--border);
+           border-radius: 9px; padding: 11px 13px; }
+  .clock .label { color: var(--muted); font-size: 11px; text-transform: uppercase;
+                  letter-spacing: .04em; }
+  .clock .value { font-family: ui-monospace, Menlo, monospace; font-size: 21px;
+                  font-weight: 600; margin-top: 2px; }
+  .value.warn { color: var(--red); }
+
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px;
+           font-size: 11px; font-weight: 700; color: #fff; vertical-align: 2px; }
+  .s-DRAFT  { background: var(--muted); }
+  .s-ACTIVE { background: var(--green); }
+  .s-PAUSED { background: var(--amber); }
+  .s-FROZEN { background: var(--purple); }
+  .s-ENDED  { background: #6b7280; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .hint { color: var(--muted); font-size: 11px; margin: 6px 0 0; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  tr.sel td { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+  th, td { border-bottom: 1px solid var(--border); }
+
+  #log { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace;
+         font-size: 11px; max-height: 140px; overflow: auto; color: var(--muted); }
+  .ok { color: var(--green); } .err { color: var(--red); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Arbitrator <span class="dim">Instructor Console</span></h1>
+  <div class="sub">Server machine only. All actions require an ADMIN login.</div>
+
+  <!-- login -->
+  <div class="box" id="loginBox">
+    <div class="head">Sign in</div>
+    <div class="body row">
+      <input id="u" placeholder="username" value="admin">
+      <input id="p" type="password" placeholder="password" onkeydown="if(event.key==='Enter')login()">
+      <button class="primary" onclick="login()">Sign in</button>
+      <span id="who" class="hint"></span>
+    </div>
+  </div>
+
+  <!-- live contest -->
+  <div class="box" id="liveBox" style="display:none">
+    <div class="head">Contest control — <span id="cTitle">—</span> <span id="cState" class="badge">—</span></div>
+    <div class="body">
+
+      <div class="clocks">
+        <div class="clock"><div class="label">Now (server)</div><div class="value" id="kNow">—</div></div>
+        <div class="clock"><div class="label">Started</div><div class="value" id="kStart">—</div></div>
+        <div class="clock"><div class="label">Elapsed</div><div class="value" id="kElapsed">—</div></div>
+        <div class="clock"><div class="label">Remaining</div><div class="value" id="kLeft">—</div></div>
+        <div class="clock"><div class="label">Ends at</div><div class="value" id="kEnd">—</div></div>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="bStart"   onclick="act('start')">▶ Start</button>
+        <button           id="bPause"   onclick="act('pause')">⏸ Pause</button>
+        <button class="primary" id="bResume"  onclick="act('resume')">▶ Resume</button>
+        <button           id="bFreeze"  onclick="act('freeze')">🔒 Freeze standings</button>
+        <button           id="bUnfreeze" onclick="act('unfreeze')">🔓 Unfreeze</button>
+        <button class="danger" id="bEnd" onclick="confirmEnd()">■ End contest</button>
+      </div>
+
+      <p class="hint">
+        <b>Start</b> begins the contest and starts the clock from zero.
+        <b>Pause</b> stops the clock and blocks submissions — the remaining time is kept, not spent.
+        <b>Freeze</b> keeps the contest running but holds the public standings so nobody sees the
+        final positions. <b>End</b> closes it permanently; submissions are refused after that.
+      </p>
+
+      <div class="row" style="margin-top:10px">
+        <b>Add time:</b>
+        <button onclick="extend(5)">+5 min</button>
+        <button onclick="extend(15)">+15 min</button>
+        <button onclick="extend(30)">+30 min</button>
+        <button onclick="extend(-5)">−5 min</button>
+        <input id="extMin" type="number" value="10" style="width:70px">
+        <button onclick="extend(parseInt(document.getElementById('extMin').value||'0',10))">Apply</button>
+        <span class="hint">Changes the deadline immediately for everyone.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- contests -->
+  <div class="box" id="contestsBox" style="display:none">
+    <div class="head">Contests</div>
+    <div class="body">
+      <table id="cTable">
+        <thead><tr><th></th><th>Title</th><th>State</th><th>Problems</th><th>Duration</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="row" style="margin-top:12px">
+        <input id="newTitle" placeholder="new contest title">
+        <input id="newDur" type="number" value="120" style="width:80px" title="minutes">
+        <button onclick="createContest()">Create contest</button>
+        <span class="hint">Created as a draft — press Start when you're ready.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- problems -->
+  <div class="box" id="probBox" style="display:none">
+    <div class="head">Problems in the selected contest</div>
+    <div class="body">
+      <table id="pTable">
+        <thead><tr><th>Code</th><th>Title</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="row" style="margin-top:12px">
+        <input type="file" id="pkg" accept=".zip">
+        <button onclick="uploadPackage()">Upload package</button>
+      </div>
+      <p class="hint">
+        ZIP with <code>config.json</code>, <code>statement/statement.html</code> and
+        <code>tests/NN.in</code> + <code>tests/NN.out</code> pairs. A wrapping folder is fine.
+        A package is imported whole or rejected whole.
+      </p>
+    </div>
+  </div>
+
+  <!-- live monitoring -->
+  <div class="box" id="monitorBox" style="display:none">
+    <div class="head">
+      Live monitoring — <span id="onlineCount">0</span> online
+      <button style="float:right;padding:3px 10px" onclick="loadMonitor()">⟳ Refresh</button>
+    </div>
+    <div class="body">
+      <div class="row" style="margin-bottom:10px">
+        <button id="tabParticipants" class="primary" onclick="showMonitor('participants')">Participants</button>
+        <button id="tabFeed" onclick="showMonitor('feed')">All submissions</button>
+        <label class="hint"><input type="checkbox" id="autoRefresh" checked> auto-refresh every 5s</label>
+      </div>
+
+      <div id="participantsView">
+        <table id="partTable">
+          <thead><tr><th></th><th>Participant</th><th>Rank</th><th>Solved</th>
+                     <th>Penalty</th><th>Submissions</th><th>Last</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div id="feedView" style="display:none">
+        <table id="feedTable">
+          <thead><tr><th>Time</th><th>Problem · Who</th><th>Language</th>
+                     <th>Verdict</th><th>Time</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div id="sourceBox" style="display:none;margin-top:12px">
+        <div class="row"><b id="sourceTitle">Source</b>
+          <button onclick="document.getElementById('sourceBox').style.display='none'">Close</button></div>
+        <pre id="sourceCode" style="background:var(--surface2);border:1px solid var(--border);
+             border-radius:8px;padding:12px;overflow:auto;max-height:340px;
+             font-family:ui-monospace,Menlo,monospace;font-size:12px;
+             white-space:pre;tab-size:4;line-height:1.45"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="box"><div class="head">Activity</div><div class="body"><div id="log">—</div></div></div>
+</div>
+
+<script>
+let token = null, selected = null, state = null, tick = null, monitorTick = null;
+
+const $ = id => document.getElementById(id);
+const two = n => String(n).padStart(2, '0');
+const clock = ms => {
+  if (ms == null || ms < 0) return '—';
+  const s = Math.floor(ms / 1000);
+  return `${two(Math.floor(s/3600))}:${two(Math.floor(s/60)%60)}:${two(s%60)}`;
+};
+const timeOf = ms => ms > 0 ? new Date(ms).toLocaleTimeString() : '—';
+
+function log(status, body) {
+  const el = $('log');
+  el.className = status < 300 ? 'ok' : 'err';
+  el.textContent = `HTTP ${status}  ${typeof body === 'string' ? body : JSON.stringify(body)}`;
+}
+
+async function api(method, path, params) {
+  const url = params ? path + '?' + new URLSearchParams(params) : path;
+  const res = await fetch(url, { method, headers: token ? { Authorization: 'Bearer ' + token } : {} });
+  const text = await res.text();
+  let body; try { body = JSON.parse(text); } catch { body = text; }
+  log(res.status, body);
+  return { status: res.status, body };
+}
+
+async function login() {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: $('u').value, password: $('p').value })
+  });
+  const body = await res.json().catch(() => ({}));
+  log(res.status, res.ok ? 'signed in as ' + body.username : body);
+  if (!res.ok) return;
+  if (body.role !== 'ADMIN') { log(403, 'That account is not an ADMIN.'); return; }
+  token = body.token;
+  $('who').textContent = '✓ ' + body.displayName;
+  ['liveBox','contestsBox','probBox','monitorBox'].forEach(i => $(i).style.display = '');
+  await loadContests();
+  if (!tick) tick = setInterval(paintClocks, 1000);
+  if (!monitorTick) monitorTick = setInterval(() => {
+    if ($('autoRefresh').checked && selected != null) loadMonitor();
+  }, 5000);
+}
+
+async function loadContests() {
+  const { body } = await api('GET', '/api/admin/contests');
+  if (!Array.isArray(body)) return;
+  const tb = $('cTable').querySelector('tbody');
+  tb.innerHTML = body.map(c => `
+    <tr class="${c.id === selected ? 'sel' : ''}">
+      <td><input type="radio" name="csel" ${c.id === selected ? 'checked' : ''}
+                 onchange="selectContest(${c.id})"></td>
+      <td>${esc(c.title)}</td>
+      <td><span class="badge s-${c.state}">${c.state}</span></td>
+      <td>${c.problemCount}</td>
+      <td>${c.durationMinutes} min</td>
+      <td>
+        ${c.id === selected ? '' : `<button onclick="selectContest(${c.id})">Select</button>`}
+        <button class="danger" onclick="deleteContest(${c.id}, '${esc(c.title)}')">Delete</button>
+      </td>
+    </tr>`).join('');
+
+  if (selected == null && body.length) {
+    const live = body.find(c => c.state !== 'DRAFT' && c.state !== 'ENDED') || body[0];
+    await selectContest(live.id);
+  } else if (selected != null) {
+    await refreshSelected();
+  }
+}
+
+async function deleteContest(id, title) {
+  // UIF-22: destructive, and refused server-side once anything was submitted.
+  if (!confirm(`Delete "${title}"? Its problems and tests go too. `
+             + `This is refused if anyone has already submitted.`)) return;
+  const { status } = await api('DELETE', '/api/admin/contests/' + id);
+  if (status < 300 && selected === id) { selected = null; state = null; }
+  await loadContests();
+}
+
+async function selectContest(id) {
+  selected = id;
+  await loadContests();
+  await refreshSelected();
+  await listProblems();
+  await loadMonitor();
+}
+
+async function refreshSelected() {
+  if (selected == null) return;
+  const { status, body } = await api('GET', '/api/contests/' + selected);
+  if (status >= 300) return;
+  state = body;
+  // Stamp the local time of this reading so paintClocks() can correct for
+  // any skew between the browser and the authoritative server clock.
+  state.clientAt = Date.now();
+  $('cTitle').textContent = body.title;
+  $('cState').textContent = body.state;
+  $('cState').className = 'badge s-' + body.state;
+
+  const s = body.state;
+  $('bStart').disabled    = !(s === 'DRAFT' || s === 'ENDED');
+  $('bPause').disabled    = !(s === 'ACTIVE' || s === 'FROZEN');
+  $('bResume').disabled   = s !== 'PAUSED';
+  $('bFreeze').disabled   = s !== 'ACTIVE';
+  $('bUnfreeze').disabled = s !== 'FROZEN';
+  $('bEnd').disabled      = s === 'DRAFT' || s === 'ENDED';
+  paintClocks();
+}
+
+/** Runs once a second off the server clock offset, so it never drifts (FMEA-06). */
+function paintClocks() {
+  if (!state) return;
+  const skew = state.serverTimeMs - state.clientAt;
+  const now = Date.now() + (isNaN(skew) ? 0 : skew);
+  $('kNow').textContent   = new Date(now).toLocaleTimeString();
+  $('kStart').textContent = timeOf(state.startTimeMs);
+  $('kEnd').textContent   = timeOf(state.endTimeMs);
+
+  if (state.startTimeMs > 0) {
+    const paused = state.state === 'PAUSED';
+    $('kElapsed').textContent = clock(now - state.startTimeMs);
+    const left = state.endTimeMs - now;
+    $('kLeft').textContent = paused ? 'paused' : clock(left);
+    $('kLeft').className = 'value' + (!paused && left > 0 && left < 5 * 60000 ? ' warn' : '');
+  } else {
+    $('kElapsed').textContent = '—';
+    $('kLeft').textContent = 'not started';
+    $('kLeft').className = 'value';
+  }
+}
+
+async function act(what) {
+  if (selected == null) return;
+  await api('POST', `/api/admin/contests/${selected}/${what}`);
+  await loadContests();
+}
+
+async function extend(min) {
+  if (selected == null || !min) return;
+  await api('POST', `/api/admin/contests/${selected}/extend`, { minutes: min });
+  await refreshSelected();
+}
+
+function confirmEnd() {
+  // UIF-22: destructive actions need explicit confirmation
+  if (confirm('End this contest? Submissions will be refused from now on.')) act('end');
+}
+
+async function createContest() {
+  const title = $('newTitle').value.trim();
+  if (!title) { log(400, 'Enter a title first'); return; }
+  const { status, body } = await api('POST', '/api/admin/contests',
+    { title, durationMinutes: $('newDur').value || '120' });
+  if (status < 300) { $('newTitle').value = ''; selected = body.id; await loadContests(); }
+}
+
+async function listProblems() {
+  const { body } = await api('GET', '/api/admin/problems');
+  const tb = $('pTable').querySelector('tbody');
+  if (!Array.isArray(body) || !body.length) {
+    tb.innerHTML = '<tr><td colspan="3" class="hint">No problems yet — upload a package below.</td></tr>';
+    return;
+  }
+  tb.innerHTML = body.map(p => `<tr>
+      <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
+      <td><button class="danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
+    </tr>`).join('');
+}
+
+async function delProblem(id, code) {
+  if (!confirm(`Delete problem ${code}? This cannot be undone.`)) return;
+  await api('DELETE', '/api/admin/problems/' + id);
+  await listProblems();
+}
+
+async function uploadPackage() {
+  const input = $('pkg');
+  if (!input.files.length) { log(400, 'Choose a .zip first'); return; }
+  const form = new FormData();
+  form.append('file', input.files[0]);
+  const res = await fetch('/api/admin/problems/upload', {
+    method: 'POST', headers: token ? { Authorization: 'Bearer ' + token } : {}, body: form
+  });
+  const body = await res.json().catch(() => ({}));
+  log(res.status, res.ok ? `imported ${body.code} with ${body.testCaseCount} tests`
+                         : (body.errors || body));
+  if (res.ok) { await listProblems(); await loadContests(); }
+}
+
+function showMonitor(which) {
+  const participants = which === 'participants';
+  $('participantsView').style.display = participants ? '' : 'none';
+  $('feedView').style.display = participants ? 'none' : '';
+  $('tabParticipants').className = participants ? 'primary' : '';
+  $('tabFeed').className = participants ? '' : 'primary';
+  loadMonitor();
+}
+
+async function loadMonitor() {
+  if (selected == null) return;
+  const feed = $('feedView').style.display !== 'none';
+
+  const p = await api('GET', `/api/admin/contests/${selected}/participants`);
+  if (Array.isArray(p.body)) {
+    $('onlineCount').textContent = p.body.filter(x => x.online).length;
+    $('partTable').querySelector('tbody').innerHTML = p.body.length
+      ? p.body.map(x => `<tr>
+          <td>${x.online ? '🟢' : '⚪'}</td>
+          <td><b>${esc(x.displayName)}</b> <span class="hint">${esc(x.username)}</span></td>
+          <td>${x.rank || '—'}</td><td>${x.solved}</td><td>${x.penaltyMinutes}</td>
+          <td>${x.submissionCount}</td>
+          <td>${x.lastSubmissionMs > 0 ? new Date(x.lastSubmissionMs).toLocaleTimeString() : '—'}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="hint">Nobody has joined yet.</td></tr>';
+  }
+
+  if (feed) {
+    const f = await api('GET', `/api/admin/contests/${selected}/submissions`);
+    if (Array.isArray(f.body)) {
+      $('feedTable').querySelector('tbody').innerHTML = f.body.length
+        ? f.body.map(s => `<tr>
+            <td>${new Date(s.submittedAtMs).toLocaleTimeString()}</td>
+            <td>${esc(s.problemCode)}</td><td>${esc(s.language)}</td>
+            <td>${verdictBadge(s.verdict)}</td>
+            <td>${s.execTimeMs >= 0 ? s.execTimeMs + ' ms' : '—'}</td>
+            <td><button onclick="viewSource(${s.id})">View code</button></td>
+          </tr>`).join('')
+        : '<tr><td colspan="6" class="hint">No submissions yet.</td></tr>';
+    }
+  }
+}
+
+function verdictBadge(v) {
+  if (!v) return '<span class="hint">judging…</span>';
+  const colour = v === 'AC' ? 'var(--green)' : v === 'CE' ? 'var(--purple)' : 'var(--red)';
+  return `<b style="color:${colour}">${v}</b>`;
+}
+
+async function viewSource(id) {
+  const { status, body } = await api('GET', '/api/admin/submissions/' + id + '/source');
+  if (status >= 300) return;
+  $('sourceTitle').textContent =
+    `Submission #${body.id} — ${body.problemCode} by ${body.username} (${body.verdict || 'judging'})`;
+  $('sourceCode').textContent =
+    (body.sourceCode || '') + (body.compilerOutput ? '\n\n--- compiler output ---\n' + body.compilerOutput : '');
+  $('sourceBox').style.display = '';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+</script>
+</body>
+</html>

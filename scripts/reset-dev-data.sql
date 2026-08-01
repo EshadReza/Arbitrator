@@ -1,6 +1,6 @@
 -- DEVELOPMENT ONLY. Wipes all submissions so you can test from a clean slate.
 --
---   mysql -u root labjudge < scripts/reset-dev-data.sql
+--   mysql -u root arbitrator < scripts/reset-dev-data.sql
 --
 -- This deliberately violates DBR-04 (submissions are never deleted). That rule
 -- protects a real contest's academic-integrity record; it does not apply to a
@@ -31,10 +31,20 @@ ALTER TABLE submission_results AUTO_INCREMENT = 1;
 -- JDBC url sets serverTimezone=UTC, so Java reads whatever is stored as UTC.
 -- NOW() writes local time, which on a +06 machine puts the contest six hours
 -- in the future and makes every submission fail with 403.
+-- Only the contest that actually holds problems is reopened, and every other
+-- contest is closed. Activating them all (an UPDATE with no WHERE) leaves two
+-- ACTIVE contests, "current contest" resolves to the empty newer one, and
+-- every submission fails 403 — which is exactly what happened once already.
+UPDATE contests SET state = 'ENDED';
+
 UPDATE contests
    SET state = 'ACTIVE',
        start_time = UTC_TIMESTAMP(),
-       duration_minutes = 180;
+       duration_minutes = 180
+ WHERE id = (SELECT contest_id FROM (
+                 SELECT contest_id FROM problems
+                 GROUP BY contest_id ORDER BY COUNT(*) DESC, contest_id ASC LIMIT 1
+             ) AS pick);
 
 SET FOREIGN_KEY_CHECKS = 1;
 

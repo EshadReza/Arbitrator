@@ -1,5 +1,0 @@
-# Local-only, git-ignored (rules.md Rule 6). Matches scripts/init-db.sql.
-spring:
-  datasource:
-    username: labjudge
-    password: changeme

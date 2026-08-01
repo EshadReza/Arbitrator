@@ -1,4 +1,4 @@
-# LabJudge
+# Arbitrator
 
 Offline, LAN-only Online Judge for university programming labs.
 Spring Boot 3.2 judge server + JavaFX 21 student client + MySQL 8. Linux only.
@@ -28,8 +28,8 @@ unshare -Urn true && echo "user namespaces OK"
 sudo mysql < scripts/init-db.sql
 
 # 2. your local credentials (git-ignored)
-cp labjudge-server/src/main/resources/application-local.yml.example \
-   labjudge-server/src/main/resources/application-local.yml
+cp arbitrator-server/src/main/resources/application-local.yml.example \
+   arbitrator-server/src/main/resources/application-local.yml
 # edit the password to match what you set in init-db.sql
 
 # 3. build everything
@@ -41,13 +41,13 @@ mvn clean install
 ```bash
 # server (Flyway migrates, demo data seeds on first boot:
 #         admin/admin123, alice/alice123, contest "Lab Contest #1")
-mvn -pl labjudge-server spring-boot:run
+mvn -pl arbitrator-server spring-boot:run
 
 # client (in a second terminal)
-mvn -pl labjudge-client javafx:run
+mvn -pl arbitrator-client javafx:run
 
 # client against canned data, no server needed (Zahin's daily mode)
-mvn -pl labjudge-client javafx:run -Dlabjudge.mock=true
+mvn -pl arbitrator-client javafx:run -Darbitrator.mock=true
 ```
 
 Admin panel: http://localhost:8080/admin — server machine only (loopback
@@ -55,7 +55,7 @@ lock + ADMIN JWT, decision D3).
 
 ## Verify the vertical slice
 
-1. `mvn test -pl labjudge-server` — VerdictEvaluator tests pass anywhere;
+1. `mvn test -pl arbitrator-server` — VerdictEvaluator tests pass anywhere;
    the sandbox fixture suite (6 verdicts + fork bomb) passes on Linux.
 2. Start server, start client, log in as `alice`.
 3. Open problem A, paste the reference solution, submit:
@@ -71,9 +71,9 @@ int main() { long long a, b; std::cin >> a >> b; std::cout << a + b << "\n"; }
 
 | Module | Owner | Contents |
 |---|---|---|
-| `labjudge-common` | frozen contract | DTOs, enums, path/topic constants |
-| `labjudge-server` | Eshad + Mahir (see rules.md Rule 1) | REST, auth, judge engine, STOMP |
-| `labjudge-client` | Zahin | JavaFX UI, Codeforces-style theme |
+| `arbitrator-common` | frozen contract | DTOs, enums, path/topic constants |
+| `arbitrator-server` | Eshad + Mahir (see rules.md Rule 1) | REST, auth, judge engine, STOMP |
+| `arbitrator-client` | Zahin | JavaFX UI, Codeforces-style theme |
 
 Eclipse: `File → Import → Maven → Existing Maven Projects` → repo root.
 Import `config/eclipse-formatter.xml`, enable format-on-save. Never commit

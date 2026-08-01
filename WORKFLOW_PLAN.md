@@ -1,9 +1,9 @@
-# LabJudge — Workflow & Work-Split Plan
+# Arbitrator — Workflow & Work-Split Plan
 
 **Team:** Eshad · Mahir · Zahin
 **Stack:** Spring Boot 3.2 + JavaFX 21 + MySQL 8 · Linux only · Eclipse IDE · offline LAN
 **UI reference:** Codeforces (m1.codeforces.com)
-**Source SRS:** `LabJudge_SRS_v1.1.docx` · **Reference project:** `XOROJ-main` (partial reuse only)
+**Source SRS:** `Arbitrator_SRS_v1.1.docx` · **Reference project:** `XOROJ-main` (partial reuse only)
 
 ---
 
@@ -19,7 +19,7 @@
 **Additional consequence of D2 — the sandbox stops being hand-wavy.** This is the single biggest win. Dev-B's executor runs each submission as:
 
 ```
-sudo -u labjudge-sandbox \
+sudo -u arbitrator-sandbox \
   unshare -Urn \                          # new user + NETWORK namespace → no network (NFR-S04, FMEA-08)
   prlimit --cpu=<tl+1> --as=<ml*2> --nproc=64 --fsize=64M --nofile=64 \
   <compiled binary>                        # cwd = per-submission temp dir only (NFR-S03)
@@ -62,25 +62,25 @@ Keep from Codeforces: the boxed-panel grammar, the standings table (rank / handl
 One Git repo, four Maven projects, one Eclipse workspace.
 
 ```
-labjudge/
+arbitrator/
 ├─ pom.xml                     parent aggregator (versions only)
 ├─ rules.md                    ← collaboration rules, read before first commit
 ├─ WORKFLOW_PLAN.md            this file
 ├─ config/
 │   ├─ eclipse-formatter.xml
 │   └─ eclipse.importorder
-├─ labjudge-common/            SHARED CONTRACT — frozen day 3
-│   └─ src/main/java/com/labjudge/common/{dto,enums,api}
-├─ labjudge-server/
-│   ├─ src/main/java/com/labjudge/server/
+├─ arbitrator-common/            SHARED CONTRACT — frozen day 3
+│   └─ src/main/java/com/arbitrator/common/{dto,enums,api}
+├─ arbitrator-server/
+│   ├─ src/main/java/com/arbitrator/server/
 │   │    {config,security,entity,repo,service,controller,judge,realtime,leaderboard}
 │   └─ src/main/resources/{application.yml, db/migration, languages.yml, static/admin}
-└─ labjudge-client/
-    ├─ src/main/java/com/labjudge/client/{app,view,controller,net,model,util}
+└─ arbitrator-client/
+    ├─ src/main/java/com/arbitrator/client/{app,view,controller,net,model,util}
     └─ src/main/resources/{fxml,css,i18n,images}
 ```
 
-Zahin never opens a file under `labjudge-server`. Eshad and Mahir never open a file under `labjudge-client`. The only shared code is `labjudge-common`, which is deliberately tiny and frozen on day 3.
+Zahin never opens a file under `arbitrator-server`. Eshad and Mahir never open a file under `arbitrator-client`. The only shared code is `arbitrator-common`, which is deliberately tiny and frozen on day 3.
 
 ### Eclipse setup — identical on all three machines
 
@@ -101,10 +101,10 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 
 | Track | Owner | Exclusively owned paths |
 |---|---|---|
-| Shared contract | **All three** (co-designed day 2, frozen day 3) | `labjudge-common/**` |
+| Shared contract | **All three** (co-designed day 2, frozen day 3) | `arbitrator-common/**` |
 | **A — Platform, Data & Admin** | **Eshad** | `server/config`, `server/security`, `server/entity`, `server/repo`, `server/service/{user,contest,problem,report}`, `server/controller/{auth,admin,contest,problem,user}`, `resources/db/migration`, `resources/static/admin` |
 | **B — Judge Engine & Real-time** | **Mahir** | `server/judge/**`, `server/realtime/**`, `server/leaderboard/**`, `server/service/{submission,announcement}`, `server/controller/{submission,announcement}`, `resources/languages.yml`, `scripts/sandbox-run.sh` |
-| **C — JavaFX Client** | **Zahin** | `labjudge-client/**` (entire project, including `codeforces.css`) |
+| **C — JavaFX Client** | **Zahin** | `arbitrator-client/**` (entire project, including `codeforces.css`) |
 | Build, CI, docs | **Eshad** (PR-reviewed) | root `pom.xml`, `README.md`, `.github/` |
 
 *Roles are labels — swapping any two is a find-and-replace in this file and `rules.md`. Decide in the day-1 meeting and don't revisit.*
@@ -122,7 +122,7 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 
 ## 4. The contract — build this first (Sprint 1, days 2–3)
 
-`labjudge-common` holds exactly three things. Once it's frozen, nobody blocks anybody.
+`arbitrator-common` holds exactly three things. Once it's frozen, nobody blocks anybody.
 
 **Enums** — `Verdict {AC,WA,TLE,MLE,CE,RE}` · `Language {CPP17,JAVA17,PYTHON310}` · `ContestState {DRAFT,ACTIVE,FROZEN,ENDED}` · `Role {STUDENT,ADMIN}`
 
@@ -147,7 +147,7 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 ## 5. Nobody waits on anybody
 
 - **Mahir** does not wait for Eshad's database. The judge engine (`SandboxExecutor`, `VerdictEvaluator`, `CheckerRunner`) takes **file paths and limits, not entities**, and is developed with plain JUnit against fixtures in `src/test/resources`. Wiring it to `SubmissionRepository` is a one-day task in Sprint 3.
-- **Zahin** does not wait for the server. The client talks to an interface `JudgeApi` with two implementations: `HttpJudgeApi` (real) and `FakeJudgeApi` (canned problems, fake verdicts on a timer, fake leaderboard ticks), switched by `-Dlabjudge.mock=true`. The **entire UI is demoable before the server exists**.
+- **Zahin** does not wait for the server. The client talks to an interface `JudgeApi` with two implementations: `HttpJudgeApi` (real) and `FakeJudgeApi` (canned problems, fake verdicts on a timer, fake leaderboard ticks), switched by `-Darbitrator.mock=true`. The **entire UI is demoable before the server exists**.
 - **Eshad** starts at the bottom of the stack and is never blocked.
 
 ---
@@ -161,7 +161,7 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 | **Eshad** | `S1-A1` repo + parent pom + 4 modules + `.gitignore` + formatter · `S1-A2` MySQL 8 schema via Flyway: `user, contest, problem, test_case, submission, submission_result, announcement, leaderboard_snapshot` (DBR-03) · `S1-A3` JPA entities + repositories (port from XorOJ) · `S1-A4` auth: register/login, bcrypt(12), JWT 12 h, `SecurityConfig` path rules + **loopback filter for `/admin/**`** (FR-01/02/03, D3) | `mvn clean install` green · login returns a JWT · ADMIN endpoint 403s for a STUDENT token · `/admin` 403s from another machine |
 | **Mahir** | `S1-B1` `sandbox-run.sh` + `SandboxExecutor`: `unshare -Urn` + `prlimit` + kill at 2× TL, real peak-RSS read (FR-10, NFR-R04, NFR-S03/S04) · `S1-B2` `languages.yml` compile/run command config (FR-21) · `S1-B3` JUnit fixture suite: AC / WA / TLE / **MLE** / CE / RE programs · `S1-B4` **spike the STOMP + JWT handshake** in the remaining time | All six fixture programs produce the correct verdict from a unit test, no Spring context needed · a fork-bomb fixture is contained |
 | **Zahin** | `S1-C1` JavaFX project, Maven run/package · `S1-C2` **`codeforces.css`** — boxed panels, header strips, link blues, monospace blocks · `S1-C3` login screen (UIF-01…04) with connection-status dot · `S1-C4` app shell: three-panel layout + top status bar + nav tabs · `S1-C5` `JudgeApi` interface + `FakeJudgeApi` | Client reaches login in < 5 s (NFR-P05) · shell is navigable keyboard-only (NFR-U04) · side-by-side screenshot against m1.codeforces.com looks like a sibling |
-| **All** | `S1-X` `labjudge-common` designed together day 2, pushed day 3, **frozen** | Module compiles; all three depend on it |
+| **All** | `S1-X` `arbitrator-common` designed together day 2, pushed day 3, **frozen** | Module compiles; all three depend on it |
 
 **Checkpoint I1 (end of week 2):** Zahin's client logs into Eshad's real server and receives a JWT.
 
@@ -190,7 +190,7 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 | Dev | Chunks |
 |---|---|
 | **Eshad** | `S4-A1` HikariCP 5/20, DB-level FKs, soft-delete (DBR-04/06/07) · `S4-A2` deployment: single fat JAR + `install-server.md`, pre-contest disk-space check (FMEA-04) · `S4-A3` JaCoCo ≥ 70 % on server · `S4-A4` OWASP dependency-check + `NOTICES` file (NFR-C03, LRR-03) · `S4-A5` systemd unit with auto-restart (FMEA-01) |
-| **Mahir** | `S4-B1` sandbox hardening review: dedicated `labjudge-sandbox` user, sudoers entry, process-group kill, verify no network from inside (NFR-S03/S04, FMEA-02/08) · `S4-B2` crash recovery — requeue `PENDING` submissions on startup (NFR-R02, FMEA-01) · `S4-B3` JMeter, 30 virtual users, P95 ≤ 500 ms (NFR-P01) · `S4-B4` admin dashboard metrics feed: queue depth, submission rate, connected clients (UIF-23) |
+| **Mahir** | `S4-B1` sandbox hardening review: dedicated `arbitrator-sandbox` user, sudoers entry, process-group kill, verify no network from inside (NFR-S03/S04, FMEA-02/08) · `S4-B2` crash recovery — requeue `PENDING` submissions on startup (NFR-R02, FMEA-01) · `S4-B3` JMeter, 30 virtual users, P95 ≤ 500 ms (NFR-P01) · `S4-B4` admin dashboard metrics feed: queue depth, submission rate, connected clients (UIF-23) |
 | **Zahin** | `S4-C1` i18n resource bundle, UTF-8 throughout (I18N-01/02) · `S4-C2` silent installer script for lab machines + `server.properties` (host, port, **scheme**) · `S4-C3` TestFX automated tests for UIF-01/08/10 · `S4-C4` smoke test on Ubuntu 22.04 · `S4-C5` one-page student quick-start (NFR-U01) |
 | **All** | `S4-X` dress rehearsal: 20+ machines, 6 problems, 2-hour mock contest, then bug triage |
 
@@ -206,7 +206,7 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 
 Everything in Bundle 1 maps to a Sprint 1 or Sprint 2 chunk. Nothing from Sprint 3–4 is included.
 
-**Naming:** repo name and base package are yours to set. Below they appear as `labjudge` / `com.labjudge` — substitute freely; the name occurs only in the four `pom.xml` files and in `package`/`import` declarations.
+**Naming:** repo name and base package are yours to set. Below they appear as `arbitrator` / `com.arbitrator` — substitute freely; the name occurs only in the four `pom.xml` files and in `package`/`import` declarations.
 
 ### Root — 8 files
 ```
@@ -218,7 +218,7 @@ scripts/sandbox-run.sh         unshare -Urn + prlimit wrapper   [Mahir]
 scripts/init-db.sql            creates schema + labjudge user   [Eshad]
 ```
 
-### `labjudge-common` — 14 files · shared, frozen day 3
+### `arbitrator-common` — 14 files · shared, frozen day 3
 ```
 pom.xml
 enums/   Verdict · Language · ContestState · Role
@@ -227,10 +227,10 @@ dto/     LoginRequest · LoginResponse · ProblemSummaryDto · ProblemDetailDto
 api/     ApiPaths · StompDestinations
 ```
 
-### `labjudge-server` — ~40 files
+### `arbitrator-server` — ~40 files
 | Package | Files | Owner |
 |---|---|---|
-| root | `pom.xml`, `application.yml`, `application-local.yml.example`, `languages.yml`, `LabJudgeServerApplication` | Eshad (`languages.yml` → Mahir) |
+| root | `pom.xml`, `application.yml`, `application-local.yml.example`, `languages.yml`, `ArbitratorServerApplication` | Eshad (`languages.yml` → Mahir) |
 | `db/migration` | `V1__baseline.sql` — user, contest, problem, test_case, submission, submission_result | Eshad |
 | `config` | `SecurityConfig`, `PasswordConfig`, `JacksonConfig`, **`LoopbackAdminFilter`** | Eshad |
 | `security` | `JwtService`, `JwtAuthFilter`, `UserDetailsServiceImpl`, **`JwtHandshakeInterceptor`** | Eshad (interceptor co-reviewed with Mahir) |
@@ -243,10 +243,10 @@ api/     ApiPaths · StompDestinations
 | `realtime` | `WebSocketConfig`, `VerdictPublisher` | Mahir |
 | `src/test` | `SandboxExecutorTest` + 7 fixtures: `ac.cpp`, `wa.cpp`, `tle.cpp`, `mle.cpp`, `ce.cpp`, `re.cpp`, `forkbomb.cpp` | Mahir |
 
-### `labjudge-client` — ~22 files · all Zahin
+### `arbitrator-client` — ~22 files · all Zahin
 ```
 pom.xml                        openjfx 21 + javafx-maven-plugin + richtextfx
-app/       LabJudgeApp · AppState · SceneRouter
+app/       ArbitratorApp · AppState · SceneRouter
 net/       JudgeApi (interface) · HttpJudgeApi · FakeJudgeApi · StompClientAdapter
 controller/ LoginController · MainController · EditorController · VerdictBanner
 fxml/      login.fxml · main.fxml · problem-panel.fxml · editor-panel.fxml
@@ -275,7 +275,7 @@ Bundle 1 is a single coherent tree that must compile as a unit. Splitting it acr
 
 # 2. unpack the bundle into an empty folder
 mkdir labjudge && cd labjudge
-# place LABJUDGE_BUNDLE.txt here and run the python3 snippet embedded in
+# place ARBITRATOR_BUNDLE.txt here and run the python3 snippet embedded in
 # its header — it writes all 96 files and chmods scripts/sandbox-run.sh
 
 # 3. sanity-check BEFORE the first commit
@@ -284,7 +284,7 @@ mvn clean install           # must be green
 # 4. first commit — .gitignore goes in first, before Eclipse ever touches the folder
 git init -b main
 git add .gitignore && git commit -m "chore: gitignore before anything else"
-git add . && git commit -m "feat: LabJudge vertical slice — common, server, client"
+git add . && git commit -m "feat: Arbitrator vertical slice — common, server, client"
 git remote add origin git@github.com:<org>/<repo>.git
 git push -u origin main
 
@@ -304,8 +304,8 @@ git clone git@github.com:<org>/<repo>.git && cd <repo>
 mvn clean install                                    # must be green before Eclipse
 sudo apt install mysql-server-8.0 g++ openjdk-17-jdk python3.10 util-linux
 sudo mysql < scripts/init-db.sql
-cp labjudge-server/src/main/resources/application-local.yml.example \
-   labjudge-server/src/main/resources/application-local.yml   # git-ignored; put your password here
+cp arbitrator-server/src/main/resources/application-local.yml.example \
+   arbitrator-server/src/main/resources/application-local.yml   # git-ignored; put your password here
 ```
 Then in Eclipse: `File → Import → Maven → Existing Maven Projects` → repo root → all four appear. Import `config/eclipse-formatter.xml`, enable Save Actions (rules.md Rule 4). Verify `git status` is **clean** — if `.classpath` or `.settings/` shows up, the `.gitignore` didn't land and you fix that before anything else.
 

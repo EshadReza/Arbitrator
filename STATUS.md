@@ -1,6 +1,7 @@
 # STATUS
 
 **Last updated:** 2026-08-01
+**Product name:** Arbitrator — rename COMPLETE: packages `com.arbitrator.*`, modules `arbitrator-*`, classes `ArbitratorApp` / `ArbitratorServerApplication`, config prefix `arbitrator.*`, MySQL schema `arbitrator`, project folder `Arbitrator/arbitrator/`.
 **Current phase:** Sprint 2 complete, checkpoint **I2 closed**. Leaderboard end-to-end (engine + client view).
 Next: announcements (S3-B5), freeze controls (S3-B4), submission history UI (S3-C4).
 
@@ -19,7 +20,7 @@ Roughly **Sprint 1 + half of Sprint 2** of the 4-sprint plan in `WORKFLOW_PLAN.m
 
 | Chunk | What | Verified |
 |---|---|---|
-| S1-X | `labjudge-common` frozen contract: 4 enums, 9 DTOs, path/topic constants | compiles, both modules depend on it |
+| S1-X | `arbitrator-common` frozen contract: 4 enums, 9 DTOs, path/topic constants | compiles, both modules depend on it |
 | S1-A1 | Repo, parent pom, 3 modules, `.gitignore`, Eclipse formatter config | `mvn clean install` green |
 | S1-A2 | MySQL 8 Flyway baseline `V1__baseline.sql` — 6 tables, FKs, soft-delete | migrates cleanly on real MySQL 8.4 |
 | S1-A3 | JPA entities + 5 repositories | schema validation passes |
@@ -38,7 +39,20 @@ Roughly **Sprint 1 + half of Sprint 2** of the 4-sprint plan in `WORKFLOW_PLAN.m
 | **S2-A4** | **Admin panel Problems page** — list, upload, delete with confirm (UIF-22) | served at `/admin`, loopback+ADMIN verified (student token → 403) |
 | **S2-B4** | **STOMP verdict push proven end-to-end** | `VerdictPushIntegrationTest`: real handshake → subscribe → submit → verdict frame; plus unauthenticated handshake refused |
 | **S3-B3** | **Leaderboard + penalty engine** (FR-17/18, BR-03/04/06) + 30 s broadcast | 10 unit tests incl. **Gherkin scenario 5 verbatim**; live board matches real submissions |
-| **NFR-P03** | **Standings pushed on every verdict**, not just the 30 s tick | measured **898 ms** from submit to updated board (budget 5 s) |
+| **NFR-P03** | **Standings pushed on every verdict**, not just the 30 s tick | measured **898 ms** from submit to updated board (budget 5 s); 2-client broadcast verified at ~1.15 s |
+| **FR-09** | **All three languages judged** — C++17, Java 17, Python | each produced **AC** live; previously only C++ had ever run |
+| **S2-A1** | Single-live-contest enforcement + clearer cross-contest error | starting a contest ends any other live one |
+| **FR-01** | **Registration screen** in the client | 201/400/409 verified; always creates STUDENT |
+| **FR-06** | **Contest state pushed to clients** — the countdown now obeys pause/extend/end | verified: server-side pause reached a connected client (`state=PAUSED`) |
+| **FR-16** | **Submissions tab** (UIF-12) — history table + detail pane, refreshes on every verdict | third tab beside Problems and Standings |
+| UIF-12 | **Submitted code in submission details** — lazy-loaded per row; LRR-02 enforced (another student gets 403) | verified live |
+| UIF-21 | **Live monitoring in the console** — who's online, rank/solved/penalty/submission count, full submission feed, view any code | presence tracked from STOMP subscriptions |
+| UI | **Sign out**, **switch contest**, **manual refresh** (⟳) in the client | refresh re-pulls contest state, problems, standings and history |
+| UI | **Dark mode** (top-bar toggle / Ctrl+D), fullscreen statement (F11) and editor, collapsible problem list (Ctrl+B), restyled client + instructor console | one stylesheet, palette swapped by a `.dark` root class |
+| **FR-06/08** | **Contest controls**: start, pause/resume (clock genuinely stops), extend ±minutes, freeze/unfreeze, end | pause held remaining at 6019s across 6 s; +15 min moved the deadline exactly 15 min |
+| **UIF-20/21** | **Instructor console rebuilt** — live server clock, elapsed/remaining, state badge, state-aware buttons, contest table, problem upload | replaces the bland skeleton; every control explains what it does |
+| — | **Multi-contest**: student contest picker; submissions derive their contest from the problem; standings broadcast per contest | picker auto-skips when only one contest is joinable |
+| — | **Error messages now reach clients** (`server.error.include-message`) | Spring was dropping every `ResponseStatusException` reason — clients only ever saw "Forbidden" |
 | **S3-C1** | **Client standings view** (UIF-13..16) — Standings tab, runtime problem columns, self-row highlight, freeze banner, "last updated" | compiles; **needs a visual pass on Linux/macOS — see Known issue 7** |
 
 ## Next up — Sprint 2 remainder
@@ -69,9 +83,12 @@ submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoC
 1. **The Linux sandbox has never actually run.** `sandbox-run.sh` is written and wired, but every verification
    so far used the macOS fallback path (plain `ProcessBuilder`, no isolation, `peakMemoryKb = -1`).
    **MLE, network isolation, and fork-bomb containment are unproven.** First task on a real Linux box:
-   `unshare -Urn true` must succeed, then `mvn test -pl labjudge-server` — the two skipped tests must go green.
-2. **Multi-contest is not supported.** Bundle 1 assumes exactly one non-DRAFT contest
-   (`ContestRepository.findFirstByStateNotOrderByIdDesc`). Fine for one lab session; needs revisiting.
+   `unshare -Urn true` must succeed, then `mvn test -pl arbitrator-server` — the two skipped tests must go green.
+2. **Single live contest by design (was a bug, now enforced).** Starting a contest now ENDs any other
+   ACTIVE/FROZEN one, and `requireCurrent()` prefers a live contest over a finished one. Previously two
+   ACTIVE contests made "current" resolve to whichever had the higher id — orphaning the other's problems
+   and failing every submission with a misleading 403. Genuine multi-contest (browsing past contests)
+   is still out of scope.
 3. **Flyway 9.22 warns on MySQL 8.4** ("newer than tested"). Harmless so far; upgrade Flyway if it becomes real.
 4. **PDF statements are not supported.** The SRS (FR-05) allows PDF or HTML; the importer accepts
    `.html`/`.htm`/`.txt`/`.md` and rejects PDF-only packages with an actionable message. Rendering PDF needs
@@ -89,9 +106,9 @@ submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoC
    but no one has *looked* at the standings table, the self-row highlight, the freeze banner, or the
    verdict banner rendering. Two acceptance criteria in §4.8 are specifically visual —
    "30 students x 6 problems with no horizontal scroll at 1280 px" (UIF-13) and the verdict banner timing
-   (UIF-10). Run `mvn -pl labjudge-client javafx:run -Dlabjudge.mock=true` and eyeball it against
+   (UIF-10). Run `mvn -pl arbitrator-client javafx:run -Darbitrator.mock=true` and eyeball it against
    m1.codeforces.com before claiming §4 is done. This is the largest unverified surface in the project.
-5. `LABJUDGE_BUNDLE.txt` is a **snapshot** and goes stale after every change. Regenerate with
+5. `ARBITRATOR_BUNDLE.txt` is a **snapshot** and goes stale after every change. Regenerate with
    `python3 scripts/make-bundle.py` before handing it to anyone — or just use git once the repo is pushed.
 
 ## Fixes applied after the initial build (don't re-break these)

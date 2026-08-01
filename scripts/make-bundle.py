@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Lives inside the repo folder so every project doc sits in one place.
 # It is git-ignored and self-excluded below (bundling itself would double
 # the file on every regeneration).
-OUT = os.path.join(ROOT, "LABJUDGE_BUNDLE.txt")
+OUT = os.path.join(ROOT, "ARBITRATOR_BUNDLE.txt")
 SKIP_DIRS = {"target", ".git", ".settings", "bin", ".metadata"}
 # Mirror .gitignore: anything git won't track must never enter the bundle.
 # application-local.yml holds each developer's real DB password (rules.md Rule 6).
@@ -24,7 +24,7 @@ SKIP_FILES = {
     ".env",
     ".classpath",
     ".project",
-    "LABJUDGE_BUNDLE.txt",   # never bundle the bundle
+    "ARBITRATOR_BUNDLE.txt",   # never bundle the bundle
 }
 
 HEADER = """\
@@ -35,11 +35,11 @@ HEADER = """\
 
  HOW TO UNPACK (any machine with python3):
 
-   1. Save this file as LABJUDGE_BUNDLE.txt in an empty folder
+   1. Save this file as ARBITRATOR_BUNDLE.txt in an empty folder
    2. Run:
         python3 - <<'EOF'
         import os, re
-        with open('LABJUDGE_BUNDLE.txt', encoding='utf-8') as f:
+        with open('ARBITRATOR_BUNDLE.txt', encoding='utf-8') as f:
             text = f.read()
         parts = re.split(r'^=== FILE: (.+?) ===$', text, flags=re.M)[1:]
         for path, body in zip(parts[::2], parts[1::2]):

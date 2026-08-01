@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Hyperlink?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.VBox?>
+
+<!-- FR-01 registration. Same visual grammar as the login screen. -->
+<VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.arbitrator.client.controller.RegisterController"
+      alignment="CENTER" spacing="10" styleClass="login-root">
+
+    <Label text="%app.title" styleClass="logo"/>
+    <Label text="%register.subtitle" styleClass="subtitle"/>
+
+    <VBox alignment="CENTER" spacing="8" maxWidth="340" styleClass="box">
+        <padding><Insets top="20" right="24" bottom="20" left="24"/></padding>
+
+        <TextField fx:id="usernameField" promptText="%register.username"/>
+        <TextField fx:id="displayNameField" promptText="%register.displayName"/>
+        <PasswordField fx:id="passwordField" promptText="%register.password"/>
+        <!-- Enter in the last field submits, matching the login screen (UIF-02) -->
+        <PasswordField fx:id="confirmField" promptText="%register.confirm"
+                       onAction="#onRegister"/>
+
+        <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>
+
+        <Button fx:id="registerButton" text="%register.button" onAction="#onRegister"
+                defaultButton="true" maxWidth="Infinity"/>
+        <Hyperlink text="%register.backToLogin" onAction="#onBackToLogin"/>
+    </VBox>
+</VBox>
