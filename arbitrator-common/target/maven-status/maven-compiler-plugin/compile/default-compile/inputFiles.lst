@@ -1,5 +1,6 @@
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/enums/Verdict.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/ProblemSummaryDto.java
+/Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/CustomRunRequest.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/enums/Language.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/LeaderboardCellDto.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/LeaderboardRowDto.java
@@ -12,6 +13,7 @@
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/SubmitAckDto.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/ContestStateDto.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/LoginRequest.java
+/Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/CustomRunResultDto.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/ParticipantDto.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/api/StompDestinations.java
 /Users/mahirlabib/Downloads/Arbitrator/arbitrator/arbitrator-common/src/main/java/com/arbitrator/common/dto/LeaderboardDto.java

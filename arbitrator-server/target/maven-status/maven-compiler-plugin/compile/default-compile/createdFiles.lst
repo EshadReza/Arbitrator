@@ -1,8 +1,10 @@
+com/arbitrator/server/service/ContestResetListener.class
 com/arbitrator/server/controller/ProblemController.class
 com/arbitrator/server/entity/Submission.class
 com/arbitrator/server/judge/JudgeWorker.class
 com/arbitrator/server/service/UserService.class
 com/arbitrator/server/judge/JudgeQueue.class
+com/arbitrator/server/config/ContestBootReset.class
 com/arbitrator/server/ArbitratorServerApplication.class
 com/arbitrator/server/security/JwtService.class
 com/arbitrator/server/controller/AdminContestController.class
@@ -38,6 +40,7 @@ com/arbitrator/server/entity/Submission$Status.class
 com/arbitrator/server/leaderboard/LeaderboardBroadcaster.class
 com/arbitrator/server/judge/JudgeWorker$Outcome.class
 com/arbitrator/server/service/ProblemService.class
+com/arbitrator/server/judge/CustomRunService.class
 com/arbitrator/server/config/SecurityConfig.class
 com/arbitrator/server/leaderboard/LeaderboardService$Tally.class
 com/arbitrator/server/realtime/WebSocketConfig.class

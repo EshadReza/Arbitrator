@@ -89,6 +89,17 @@ class itself extends `Application`. Net effect: no `--module-path`, no machine-s
   `javap -p -c arbitrator-server/target/classes/<Class>.class | grep "Unresolved compilation"`.
   **Always run `mvn clean install` after an Alt+F5**, and prefer Maven over Eclipse launchers when a change
   spans modules.
+- **Untrusted-process containment has three layers; do not remove any of them.**
+  (1) `ulimit` in a shell wrapper around BOTH compile and run — sandboxing only the run step let
+  `#include </dev/urandom>` drive the *preprocessor* to eat all host RAM. (2) A **relative** `ulimit -u`
+  (current user process count + 32) on the run phase only: `RLIMIT_NPROC` is **per-UID** on macOS/BSD, so an
+  absolute value like 64 breaks even the compiler (`posix_spawn failed: Resource temporarily unavailable`),
+  and no cap at all lets a fork bomb fill the process table until the whole machine stops forking.
+  (3) A `pkill -f <workDir>` sweep in `cleanup()` and at startup — `ProcessHandle.descendants()` is only a
+  *snapshot*, so a rapidly forking program outruns it and children survive as orphaned `prog` processes
+  that no longer belong to the JVM and are never reaped.
+  **Never test a fork bomb on a dev machine** — use a bounded fork loop whose children `_exit(0)`, or the
+  Linux box where `prlimit --nproc` bounds the process tree properly.
 - **`peakMemoryKb` is `-1` on macOS.** Expected — real peak RSS only comes from the Linux sandbox script.
 - **Raw SQL touching times must use `UTC_TIMESTAMP()`, never `NOW()`.** `contests.start_time` is a zoneless
   `DATETIME` and the JDBC url sets `serverTimezone=UTC`, so Java reads stored values as UTC. `NOW()` writes
@@ -109,6 +120,29 @@ class itself extends `Application`. Net effect: no `--module-path`, no machine-s
   The project *targets* 17, so teammates on openjdk-17 won't see it, but tests must run everywhere.
   Use `java.lang.reflect.Proxy` fakes for repository interfaces and anonymous subclasses for concrete
   services — see `ProblemPackageServiceTest` for the pattern.
+
+## Contest lifecycle
+
+`DRAFT → LOBBY → ACTIVE ⇄ PAUSED/FROZEN → ENDED`
+
+`LOBBY` is the holding room: students may enter and wait, but **problems are not
+released and no clock runs** — releasing statements early would let people read
+and plan before the timer starts. `ContestState` carries the rules
+(`isJoinable`, `acceptsSubmissions`, `releasesProblems`, `hasStarted`); check
+there rather than comparing states by hand.
+
+A freshly booted server starts **nothing**, and this is enforced, not merely
+seeded: `ContestBootReset` returns every LOBBY/ACTIVE/PAUSED/FROZEN contest to
+DRAFT and clears its clock at startup. Contest state lives in MySQL, so without
+this a contest left ACTIVE at shutdown came back ACTIVE with a clock that had
+been running against the wall clock the whole time the server was down — the
+first student to open the client walked into a contest nobody had started.
+ENDED contests are left alone. Set `arbitrator.contest.reset-on-boot=false` only
+if the server is meant to be bounced mid-contest and resumed.
+
+Consequence for tests and scripts: **do not look up "the contest" by
+`state != DRAFT`** — after a boot there isn't one. Take the contest by id, or
+take the first row, then set the state you need.
 
 ## House style
 

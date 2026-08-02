@@ -10,6 +10,8 @@ import java.util.function.Consumer;
 
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.LeaderboardCellDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
@@ -134,6 +136,12 @@ public class FakeJudgeApi implements JudgeApi {
         }, 2, TimeUnit.SECONDS);
 
         return new SubmitAckDto(id, 1);
+    }
+
+    @Override
+    public CustomRunResultDto runCustom(CustomRunRequest request) {
+        return new CustomRunResultDto(true, "",
+                "(mock) echoed input:\n" + request.input(), "", 12, false);
     }
 
     @Override

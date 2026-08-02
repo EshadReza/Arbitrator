@@ -1,6 +1,7 @@
 package com.arbitrator.server.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
@@ -71,6 +72,10 @@ public class ContestService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest has not started yet");
         }
+        if (c.endTime() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "The contest has not started yet");
+        }
         if (!Instant.now().isBefore(c.endTime())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest has ended");
@@ -88,6 +93,23 @@ public class ContestService {
     }
 
     /**
+     * Opens the doors without starting the contest. Students can enter and
+     * wait; problems stay hidden and no clock runs until {@link #start(long)}.
+     */
+    public Contest openLobby(long id) {
+        Contest c = require(id);
+        if (c.getState() == ContestState.ENDED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This contest has already ended");
+        }
+        c.setState(ContestState.LOBBY);
+        c.setStartTime(null);          // no clock yet
+        c.setPausedAt(null);
+        c.setPausedMillis(0);
+        return contests.save(c);
+    }
+
+    /**
      * Starts (or restarts) a contest. Several contests may run at once — the
      * student picks which to join, and a submission's contest is derived from
      * its problem, so there is no ambiguous "current contest" to get wrong.
@@ -98,7 +120,22 @@ public class ContestService {
         c.setStartTime(Instant.now());
         c.setPausedAt(null);
         c.setPausedMillis(0);          // a restart resets the clock entirely
-        return contests.save(c);
+        Contest saved = contests.save(c);
+        // A restart is a fresh contest: last run's submissions must not leave
+        // problems pre-solved or carry penalty into the new standings. They are
+        // flagged inactive rather than deleted — DBR-04 keeps the record.
+        onStarted.forEach(hook -> hook.accept(saved.getId()));
+        return saved;
+    }
+
+    /**
+     * Callbacks run when a contest starts. Used to reset per-contest state that
+     * lives outside this service, without ContestService depending on it.
+     */
+    private final List<java.util.function.Consumer<Long>> onStarted = new ArrayList<>();
+
+    public void onContestStarted(java.util.function.Consumer<Long> hook) {
+        onStarted.add(hook);
     }
 
     public Contest end(long id) {

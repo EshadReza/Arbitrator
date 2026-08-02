@@ -4,6 +4,8 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
@@ -27,6 +29,22 @@
 
     <!-- CodeArea is inserted here at runtime (index 1: below the toolbar,
          above the status bar) — see EditorController.initialize -->
+
+    <!-- Custom input / output: run without submitting -->
+    <TitledPane fx:id="customPane" text="%editor.custom" expanded="false" animated="false">
+        <VBox spacing="6">
+            <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
+            <HBox spacing="8" alignment="CENTER_LEFT">
+                <Button fx:id="runButton" text="%editor.run" onAction="#onRunCustom"/>
+                <Label fx:id="runStatus" styleClass="subtitle"/>
+            </HBox>
+            <Label text="%editor.customInput" styleClass="subtitle"/>
+            <TextArea fx:id="customInput" prefRowCount="3" styleClass="compiler-log"/>
+            <Label text="%editor.customOutput" styleClass="subtitle"/>
+            <TextArea fx:id="customOutput" prefRowCount="4" editable="false"
+                      styleClass="compiler-log"/>
+        </VBox>
+    </TitledPane>
 
     <HBox alignment="CENTER_RIGHT" styleClass="editor-statusbar">
         <padding><Insets top="3" right="8" bottom="3" left="8"/></padding>

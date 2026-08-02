@@ -88,6 +88,37 @@ public class SubmissionsPanelController {
     }
 
     /**
+     * Selects one submission, refreshing first if it isn't in the table yet —
+     * a verdict banner can be clicked before the history poll has caught up.
+     */
+    public void selectSubmission(long submissionId) {
+        var existing = table.getItems().stream()
+                .filter(r -> r.id() == submissionId).findFirst();
+        if (existing.isPresent()) {
+            table.getSelectionModel().select(existing.get());
+            table.scrollTo(existing.get());
+            return;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                List<SubmissionHistoryDto> rows = state.api().mySubmissions();
+                Platform.runLater(() -> {
+                    table.setItems(FXCollections.observableArrayList(rows));
+                    rows.stream().filter(r -> r.id() == submissionId).findFirst()
+                            .ifPresent(r -> {
+                                table.getSelectionModel().select(r);
+                                table.scrollTo(r);
+                            });
+                });
+            } catch (Exception ignored) {
+                // the periodic refresh will pick it up shortly
+            }
+        }, "history-select");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
      * Source is fetched lazily per row rather than carried in the history list,
      * which is polled on every verdict and would otherwise ship every blob.
      */
@@ -175,13 +206,19 @@ public class SubmissionsPanelController {
         @Override
         protected void updateItem(Verdict verdict, boolean empty) {
             super.updateItem(verdict, empty);
-            getStyleClass().removeAll("cell-solved", "cell-failed");
-            if (empty || verdict == null) {
-                setText(empty ? null : "judging…");
+            // Drop any previous verdict class; cells are recycled while scrolling.
+            getStyleClass().removeIf(c -> c.startsWith("v-"));
+            if (empty) {
+                setText(null);
+                return;
+            }
+            if (verdict == null) {
+                setText("judging…");
+                getStyleClass().add("v-pending");
                 return;
             }
             setText(verdict.name() + " — " + verdict.label());
-            getStyleClass().add(verdict == Verdict.AC ? "cell-solved" : "cell-failed");
+            getStyleClass().add("v-" + verdict.name());
         }
     }
 }

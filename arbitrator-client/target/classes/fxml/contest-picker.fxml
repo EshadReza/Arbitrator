@@ -5,6 +5,9 @@
 <?import javafx.scene.control.Hyperlink?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <!-- Contest picker (shown after login when more than one contest is joinable) -->
@@ -17,6 +20,15 @@
 
     <VBox alignment="CENTER" spacing="8" maxWidth="460" maxHeight="360" styleClass="box">
         <padding><Insets top="16" right="18" bottom="16" left="18"/></padding>
+
+        <!-- The list refreshes itself every few seconds; the button is for
+             the impatient, and makes it obvious the screen is live. -->
+        <HBox alignment="CENTER_LEFT" spacing="8">
+            <Label text="%picker.available" styleClass="subtitle"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button fx:id="refreshButton" text="%picker.refresh" onAction="#onRefresh"
+                    styleClass="refresh-button"/>
+        </HBox>
 
         <ListView fx:id="contestList" prefHeight="220" VBox.vgrow="ALWAYS"/>
         <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>

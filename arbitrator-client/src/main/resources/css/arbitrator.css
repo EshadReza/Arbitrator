@@ -167,6 +167,7 @@
 
 .timer-critical { -fx-text-fill: -c-red; }
 .timer-paused   { -fx-text-fill: -c-amber; }
+.timer-waiting  { -fx-text-fill: -c-muted; -fx-font-size: 20px; }
 
 .conn-ok   { -fx-text-fill: -c-green; -fx-font-weight: bold; }
 .conn-lost { -fx-text-fill: -c-red;   -fx-font-weight: bold; }
@@ -266,6 +267,12 @@
 }
 
 .code-area .text { -fx-fill: -c-text; }
+
+/* The caret defaults to black and is invisible on a dark editor background. */
+.code-area .caret { -fx-stroke: -c-text; -fx-stroke-width: 2; }
+.root.dark .code-area .caret { -fx-stroke: white; -fx-stroke-width: 2; }
+.code-area .selection { -fx-fill: derive(-c-accent, 60%); }
+.root.dark .code-area .selection { -fx-fill: derive(-c-accent, -40%); }
 .keyword { -fx-fill: -c-accent; -fx-font-weight: bold; }
 .root.dark .keyword { -fx-fill: #7fb4ff; }
 
@@ -283,6 +290,7 @@
 .banner-MLE { -fx-background-color: -c-orange; }
 .banner-RE  { -fx-background-color: -c-orange; }
 .banner-CE  { -fx-background-color: -c-purple; }
+.banner-OLE { -fx-background-color: -c-orange; }
 
 .compiler-log {
     -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
@@ -290,6 +298,45 @@
     -fx-control-inner-background: -c-surface;
     -fx-text-fill: -c-text;
 }
+
+/* --- text areas + titled panes -------------------------------------------- */
+/* A TextArea paints its own inner background; -fx-background-color does NOT
+   reach it, which is why the custom I/O boxes stayed white in dark mode. */
+.text-area {
+    -fx-control-inner-background: -c-surface;
+    -fx-text-fill: -c-text;
+    -fx-background-color: -c-border;
+    -fx-background-radius: 6px;
+}
+
+.text-area .content { -fx-background-color: -c-surface; -fx-background-radius: 6px; }
+.text-area .scroll-pane, .text-area .viewport { -fx-background-color: transparent; }
+.text-area:focused { -fx-background-color: -c-accent; }
+
+.titled-pane > .title {
+    -fx-background-color: -c-surface-2;
+    -fx-border-color: -c-border;
+    -fx-background-radius: 6px 6px 0 0;
+}
+
+.titled-pane > .title > .text { -fx-fill: -c-text; -fx-font-weight: bold; }
+.titled-pane > .title > .arrow-button .arrow { -fx-background-color: -c-muted; }
+.titled-pane > *.content {
+    -fx-background-color: -c-surface;
+    -fx-border-color: -c-border;
+    -fx-background-radius: 0 0 6px 6px;
+}
+
+/* --- per-verdict colours (NFR-U02: colour + full descriptive text) --------- */
+
+.v-AC  { -fx-text-fill: -c-green;  -fx-font-weight: bold; }
+.v-WA  { -fx-text-fill: -c-red;    -fx-font-weight: bold; }
+.v-TLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-MLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-RE  { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-OLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-CE  { -fx-text-fill: -c-purple; -fx-font-weight: bold; }
+.v-pending { -fx-text-fill: -c-muted; }
 
 /* --- standings extras --------------------------------------------------------- */
 

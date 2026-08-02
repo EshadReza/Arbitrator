@@ -117,7 +117,10 @@ public class JudgeWorker {
         if (spec.getCompile() != null && !spec.getCompile().isBlank()) {
             ExecutionResult c = sandbox.compile(workDir, render(spec.getCompile(), src, exe, workDir));
             if (!c.ok()) {
-                String msg = truncate(c.stderr().isBlank() ? c.stdout() : c.stderr());
+                String raw = c.stderr().isBlank() ? c.stdout() : c.stderr();
+                // Students see a clean "main.cpp:4:5: error", not the sandbox path.
+                String msg = truncate(
+                        CustomRunService.stripPaths(raw, workDir));
                 return Outcome.ce(msg);
             }
         }
@@ -144,6 +147,10 @@ public class JudgeWorker {
                 v = Verdict.TLE;
             } else if (r.peakMemoryKb() > 0 && r.peakMemoryKb() > problem.getMemoryLimitKb()) {
                 v = Verdict.MLE;
+            } else if (r.stdout().length() >= SandboxExecutor.OUTPUT_CAP) {
+                // A program printing without bound would otherwise be judged on
+                // truncated output and look like a plain WA.
+                v = Verdict.OLE;
             } else if (r.exitCode() != 0) {
                 v = Verdict.RE;
             } else if (evaluator.matches(tc.getExpectedOutput(), r.stdout())) {

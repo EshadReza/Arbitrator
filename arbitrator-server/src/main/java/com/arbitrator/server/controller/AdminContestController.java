@@ -65,6 +65,12 @@ public class AdminContestController {
         return summarise(contestService.create(title, durationMinutes));
     }
 
+    /** Doors open, clock not running — students wait in the lobby. */
+    @PostMapping(ApiPaths.ADMIN_CONTEST_OPEN)
+    public ContestStateDto open(@PathVariable long id) {
+        return applied(contestService.openLobby(id));
+    }
+
     @PostMapping(ApiPaths.ADMIN_CONTEST_START)
     public ContestStateDto start(@PathVariable long id) {
         return applied(contestService.start(id));

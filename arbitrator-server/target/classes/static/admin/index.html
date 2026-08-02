@@ -5,476 +5,497 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Arbitrator — Instructor Console</title>
 <style>
-  :root {
-    --bg: #eef1f5; --surface: #fff; --surface2: #f5f7fa;
-    --border: #d6dbe3; --ink: #1c2430; --muted: #6b7684;
-    --blue: #2f6fd0; --green: #21a366; --red: #d64545; --amber: #e5a50a;
-    --purple: #8257c7;
+/* ── palette ─────────────────────────────────────────────────────────────── */
+:root{
+  --bg:#eef1f5; --surface:#fff; --surface2:#f5f7fa; --surface3:#e9edf3;
+  --border:#d6dbe3; --ink:#1c2430; --muted:#6b7684;
+  --accent:#2f6fd0; --accent-ink:#fff;
+  --green:#21a366; --red:#d64545; --amber:#e5a50a; --purple:#8257c7; --grey:#8b95a3;
+  --radius:10px; --shadow:0 1px 3px rgba(16,24,40,.06),0 1px 2px rgba(16,24,40,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0f1319; --surface:#171d26; --surface2:#1e2530; --surface3:#273040;
+    --border:#2b3441; --ink:#e6eaf0; --muted:#94a0b0;
+    --accent:#5b9bf5; --accent-ink:#0e1218;
+    --green:#35c98a; --red:#ef6a6a; --amber:#f2c14e; --purple:#a883ee; --grey:#7d8796;
+    --shadow:0 1px 3px rgba(0,0,0,.4);
   }
-  /* Follows the OS setting; the client has its own toggle (Ctrl+D). */
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14181f; --surface: #1c222c; --surface2: #232a36;
-      --border: #313a49; --ink: #e6eaf0; --muted: #9aa5b4;
-      --blue: #5b9bf5; --green: #35c98a; --red: #ef6a6a; --amber: #f2c14e;
-      --purple: #a883ee;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, "Segoe UI", Inter, sans-serif; font-size: 13px;
-         background: var(--bg); color: var(--ink); margin: 0; padding: 22px; }
-  .dim { color: var(--muted); font-weight: 400; }
-  .wrap { max-width: 1000px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 -apple-system,"Segoe UI",Inter,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+button,input,select,textarea{font:inherit;color:inherit}
 
-  .box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-         margin-bottom: 16px; overflow: hidden;
-         box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-  .box > .head { background: var(--surface2); padding: 10px 14px; font-weight: 600;
-                 border-bottom: 1px solid var(--border); }
-  .box > .body { padding: 14px; }
+/* ── app shell: sidebar + content ─────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+@media (max-width:820px){ .app{grid-template-columns:1fr} .side{display:none} }
 
-  button { font: inherit; padding: 7px 14px; border: 1px solid var(--border);
-           background: var(--surface2); color: var(--ink);
-           border-radius: 7px; cursor: pointer; transition: background .12s; }
-  button:hover:not(:disabled) { background: var(--border); }
-  button:disabled { opacity: .4; cursor: not-allowed; }
-  button.primary { background: var(--blue); color: #fff; border-color: var(--blue);
-                   font-weight: 600; }
-  button.primary:hover:not(:disabled) { filter: brightness(.92); }
-  button.danger  { background: var(--red); color: #fff; border-color: var(--red);
-                   font-weight: 600; }
-  button.danger:hover:not(:disabled) { filter: brightness(.92); }
-  input, select { font: inherit; padding: 7px 10px; border: 1px solid var(--border);
-                  border-radius: 7px; background: var(--surface); color: var(--ink); }
-  input:focus { outline: none; border-color: var(--blue); }
+.side{background:var(--surface);border-right:1px solid var(--border);
+      display:flex;flex-direction:column;gap:2px;padding:16px 10px}
+.brand{font-size:17px;font-weight:700;color:var(--accent);padding:4px 10px 14px}
+.brand small{display:block;font-size:11px;font-weight:500;color:var(--muted)}
+.nav{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;
+     cursor:pointer;color:var(--muted);font-weight:500;border:none;background:none;
+     width:100%;text-align:left}
+.nav:hover{background:var(--surface2);color:var(--ink)}
+.nav.on{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.nav .ic{width:18px;text-align:center}
+.side-foot{margin-top:auto;padding:10px;color:var(--muted);font-size:11px;line-height:1.5}
 
-  /* live contest panel */
-  .clocks { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-  .clock { flex: 1 1 150px; background: var(--surface2); border: 1px solid var(--border);
-           border-radius: 9px; padding: 11px 13px; }
-  .clock .label { color: var(--muted); font-size: 11px; text-transform: uppercase;
-                  letter-spacing: .04em; }
-  .clock .value { font-family: ui-monospace, Menlo, monospace; font-size: 21px;
-                  font-weight: 600; margin-top: 2px; }
-  .value.warn { color: var(--red); }
+.main{padding:20px 24px;max-width:1080px}
+h1{font-size:19px;font-weight:650;margin-bottom:3px}
+.lede{color:var(--muted);font-size:13px;margin-bottom:18px}
 
-  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px;
-           font-size: 11px; font-weight: 700; color: #fff; vertical-align: 2px; }
-  .s-DRAFT  { background: var(--muted); }
-  .s-ACTIVE { background: var(--green); }
-  .s-PAUSED { background: var(--amber); }
-  .s-FROZEN { background: var(--purple); }
-  .s-ENDED  { background: #6b7280; }
+/* ── cards ───────────────────────────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+      box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
+.card>header{padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2);
+             font-weight:600;display:flex;align-items:center;gap:10px}
+.card>header .spacer{margin-left:auto}
+.card>.body{padding:16px}
 
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .hint { color: var(--muted); font-size: 11px; margin: 6px 0 0; }
+/* ── buttons ─────────────────────────────────────────────────────────────── */
+.btn{padding:8px 14px;border:1px solid var(--border);background:var(--surface2);
+     border-radius:8px;cursor:pointer;font-weight:500;transition:.12s}
+.btn:hover:not(:disabled){background:var(--surface3)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+.btn.primary:hover:not(:disabled),.btn.danger:hover:not(:disabled){filter:brightness(.92)}
+.btn.sm{padding:5px 10px;font-size:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
-  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
-  tr.sel td { background: color-mix(in srgb, var(--amber) 18%, transparent); }
-  th, td { border-bottom: 1px solid var(--border); }
+input[type=text],input[type=password],input[type=number]{
+  padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+input:focus{outline:none;border-color:var(--accent)}
 
-  #log { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace;
-         font-size: 11px; max-height: 140px; overflow: auto; color: var(--muted); }
-  .ok { color: var(--green); } .err { color: var(--red); }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* ── clocks ──────────────────────────────────────────────────────────────── */
+.clocks{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px}
+.clock{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 13px}
+.clock .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.clock .v{font:600 21px/1.3 ui-monospace,Menlo,monospace;margin-top:3px}
+.clock .v.warn{color:var(--red)}
+.clock .v.calm{color:var(--muted);font-size:16px}
+
+/* ── badges ──────────────────────────────────────────────────────────────── */
+.badge{display:inline-block;padding:2.5px 10px;border-radius:999px;font-size:11px;font-weight:700;color:#fff}
+.b-DRAFT{background:var(--grey)} .b-LOBBY{background:var(--accent)}
+.b-ACTIVE{background:var(--green)} .b-PAUSED{background:var(--amber);color:#3a2f00}
+.b-FROZEN{background:var(--purple)} .b-ENDED{background:#5b6673}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.on{background:var(--green)} .dot.off{background:var(--grey)}
+
+/* ── tables ──────────────────────────────────────────────────────────────── */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:8px 10px;font-size:10.5px;text-transform:uppercase;
+   letter-spacing:.05em;color:var(--muted);border-bottom:1px solid var(--border)}
+td{padding:9px 10px;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface2)}
+tr.sel{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.empty{color:var(--muted);text-align:center;padding:22px}
+
+/* ── verdict colours (mirrors the client) ────────────────────────────────── */
+.v-AC{color:var(--green);font-weight:700}
+.v-WA{color:var(--red);font-weight:700}
+.v-TLE,.v-MLE,.v-RE,.v-OLE{color:var(--amber);font-weight:700}
+.v-CE{color:var(--purple);font-weight:700}
+.v-none{color:var(--muted)}
+
+.hint{color:var(--muted);font-size:12px;line-height:1.55}
+.hint b{color:var(--ink)}
+pre.code{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:13px;
+         overflow:auto;max-height:360px;white-space:pre;tab-size:4;
+         font:12px/1.5 ui-monospace,Menlo,monospace}
+#log{font:11.5px/1.6 ui-monospace,Menlo,monospace;color:var(--muted);white-space:pre-wrap;
+     max-height:120px;overflow:auto}
+.ok{color:var(--green)} .err{color:var(--red)}
+.hide{display:none!important}
+
+/* ── login gate ──────────────────────────────────────────────────────────── */
+.gate{display:grid;place-items:center;min-height:100vh;padding:20px}
+.gate .card{width:min(400px,100%);margin:0}
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <h1>Arbitrator <span class="dim">Instructor Console</span></h1>
-  <div class="sub">Server machine only. All actions require an ADMIN login.</div>
-
-  <!-- login -->
-  <div class="box" id="loginBox">
-    <div class="head">Sign in</div>
-    <div class="body row">
-      <input id="u" placeholder="username" value="admin">
-      <input id="p" type="password" placeholder="password" onkeydown="if(event.key==='Enter')login()">
-      <button class="primary" onclick="login()">Sign in</button>
-      <span id="who" class="hint"></span>
-    </div>
-  </div>
-
-  <!-- live contest -->
-  <div class="box" id="liveBox" style="display:none">
-    <div class="head">Contest control — <span id="cTitle">—</span> <span id="cState" class="badge">—</span></div>
+<div class="gate" id="gate">
+  <div class="card">
+    <header>Arbitrator — Instructor Console</header>
     <div class="body">
-
-      <div class="clocks">
-        <div class="clock"><div class="label">Now (server)</div><div class="value" id="kNow">—</div></div>
-        <div class="clock"><div class="label">Started</div><div class="value" id="kStart">—</div></div>
-        <div class="clock"><div class="label">Elapsed</div><div class="value" id="kElapsed">—</div></div>
-        <div class="clock"><div class="label">Remaining</div><div class="value" id="kLeft">—</div></div>
-        <div class="clock"><div class="label">Ends at</div><div class="value" id="kEnd">—</div></div>
-      </div>
-
-      <div class="actions">
-        <button class="primary" id="bStart"   onclick="act('start')">▶ Start</button>
-        <button           id="bPause"   onclick="act('pause')">⏸ Pause</button>
-        <button class="primary" id="bResume"  onclick="act('resume')">▶ Resume</button>
-        <button           id="bFreeze"  onclick="act('freeze')">🔒 Freeze standings</button>
-        <button           id="bUnfreeze" onclick="act('unfreeze')">🔓 Unfreeze</button>
-        <button class="danger" id="bEnd" onclick="confirmEnd()">■ End contest</button>
-      </div>
-
-      <p class="hint">
-        <b>Start</b> begins the contest and starts the clock from zero.
-        <b>Pause</b> stops the clock and blocks submissions — the remaining time is kept, not spent.
-        <b>Freeze</b> keeps the contest running but holds the public standings so nobody sees the
-        final positions. <b>End</b> closes it permanently; submissions are refused after that.
+      <p class="hint" style="margin-bottom:14px">
+        Available on the server machine only. Requires an ADMIN account.
       </p>
-
-      <div class="row" style="margin-top:10px">
-        <b>Add time:</b>
-        <button onclick="extend(5)">+5 min</button>
-        <button onclick="extend(15)">+15 min</button>
-        <button onclick="extend(30)">+30 min</button>
-        <button onclick="extend(-5)">−5 min</button>
-        <input id="extMin" type="number" value="10" style="width:70px">
-        <button onclick="extend(parseInt(document.getElementById('extMin').value||'0',10))">Apply</button>
-        <span class="hint">Changes the deadline immediately for everyone.</span>
+      <div class="row"><input type="text" id="u" value="admin" placeholder="username" style="flex:1"></div>
+      <div class="row" style="margin-top:8px">
+        <input type="password" id="p" placeholder="password" style="flex:1"
+               onkeydown="if(event.key==='Enter')login()">
       </div>
-    </div>
-  </div>
-
-  <!-- contests -->
-  <div class="box" id="contestsBox" style="display:none">
-    <div class="head">Contests</div>
-    <div class="body">
-      <table id="cTable">
-        <thead><tr><th></th><th>Title</th><th>State</th><th>Problems</th><th>Duration</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
       <div class="row" style="margin-top:12px">
-        <input id="newTitle" placeholder="new contest title">
-        <input id="newDur" type="number" value="120" style="width:80px" title="minutes">
-        <button onclick="createContest()">Create contest</button>
-        <span class="hint">Created as a draft — press Start when you're ready.</span>
+        <button class="btn primary" onclick="login()" style="flex:1">Sign in</button>
       </div>
+      <div id="gateMsg" class="hint err" style="margin-top:10px"></div>
     </div>
   </div>
+</div>
 
-  <!-- problems -->
-  <div class="box" id="probBox" style="display:none">
-    <div class="head">Problems in the selected contest</div>
-    <div class="body">
-      <table id="pTable">
-        <thead><tr><th>Code</th><th>Title</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div class="row" style="margin-top:12px">
-        <input type="file" id="pkg" accept=".zip">
-        <button onclick="uploadPackage()">Upload package</button>
-      </div>
-      <p class="hint">
-        ZIP with <code>config.json</code>, <code>statement/statement.html</code> and
-        <code>tests/NN.in</code> + <code>tests/NN.out</code> pairs. A wrapping folder is fine.
-        A package is imported whole or rejected whole.
-      </p>
+<div class="app hide" id="app">
+  <aside class="side">
+    <div class="brand">Arbitrator<small>Instructor Console</small></div>
+    <button class="nav on" data-sec="control"  onclick="go('control')"><span class="ic">⏱</span>Contest</button>
+    <button class="nav"    data-sec="problems" onclick="go('problems')"><span class="ic">📄</span>Problems</button>
+    <button class="nav"    data-sec="people"   onclick="go('people')"><span class="ic">👥</span>Participants</button>
+    <button class="nav"    data-sec="feed"     onclick="go('feed')"><span class="ic">📊</span>Submissions</button>
+    <button class="nav"    data-sec="contests" onclick="go('contests')"><span class="ic">🗂</span>All contests</button>
+    <div class="side-foot">
+      <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
+      <div style="margin-top:6px" id="whoami"></div>
     </div>
-  </div>
+  </aside>
 
-  <!-- live monitoring -->
-  <div class="box" id="monitorBox" style="display:none">
-    <div class="head">
-      Live monitoring — <span id="onlineCount">0</span> online
-      <button style="float:right;padding:3px 10px" onclick="loadMonitor()">⟳ Refresh</button>
-    </div>
-    <div class="body">
-      <div class="row" style="margin-bottom:10px">
-        <button id="tabParticipants" class="primary" onclick="showMonitor('participants')">Participants</button>
-        <button id="tabFeed" onclick="showMonitor('feed')">All submissions</button>
-        <label class="hint"><input type="checkbox" id="autoRefresh" checked> auto-refresh every 5s</label>
+  <main class="main">
+
+    <section id="sec-control">
+      <h1>Contest control</h1>
+      <div class="lede"><span id="cTitle">—</span> · <span id="cState" class="badge">—</span></div>
+
+      <div class="card"><div class="body">
+        <div class="clocks">
+          <div class="clock"><div class="k">Server time</div><div class="v" id="kNow">—</div></div>
+          <div class="clock"><div class="k">Started</div><div class="v calm" id="kStart">—</div></div>
+          <div class="clock"><div class="k">Elapsed</div><div class="v" id="kElapsed">—</div></div>
+          <div class="clock"><div class="k">Remaining</div><div class="v" id="kLeft">—</div></div>
+          <div class="clock"><div class="k">Ends at</div><div class="v calm" id="kEnd">—</div></div>
+        </div>
+      </div></div>
+
+      <div class="card">
+        <header>Lifecycle</header>
+        <div class="body">
+          <div class="row">
+            <button class="btn"         id="bOpen"     onclick="act('open')">🚪 Open lobby</button>
+            <button class="btn primary" id="bStart"    onclick="act('start')">▶ Start contest</button>
+            <button class="btn"         id="bPause"    onclick="act('pause')">⏸ Pause</button>
+            <button class="btn primary" id="bResume"   onclick="act('resume')">▶ Resume</button>
+            <button class="btn"         id="bFreeze"   onclick="act('freeze')">🔒 Freeze standings</button>
+            <button class="btn"         id="bUnfreeze" onclick="act('unfreeze')">🔓 Unfreeze</button>
+            <button class="btn danger"  id="bEnd"      onclick="confirmEnd()">■ End contest</button>
+          </div>
+          <p class="hint" style="margin-top:12px">
+            <b>Open lobby</b> lets students enter and wait — no problems shown, no clock.
+            <b>Start contest</b> releases the problems, starts the clock, and clears the previous run's
+            submissions. <b>Pause</b> stops the clock and blocks submissions; the remaining time is kept.
+            <b>Freeze</b> keeps judging but holds the public standings. <b>End</b> closes it for good.
+          </p>
+        </div>
       </div>
 
-      <div id="participantsView">
-        <table id="partTable">
-          <thead><tr><th></th><th>Participant</th><th>Rank</th><th>Solved</th>
-                     <th>Penalty</th><th>Submissions</th><th>Last</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <div class="card">
+        <header>Adjust time</header>
+        <div class="body">
+          <div class="row">
+            <label for="extMin">Minutes</label>
+            <input type="number" id="extMin" value="5" min="1" step="1" style="width:90px">
+            <button class="btn sm" onclick="extendBy(1)">+ Add</button>
+            <button class="btn sm" onclick="extendBy(-1)">− Remove</button>
+          </div>
+          <p class="hint" style="margin-top:10px">
+            Type a number of minutes, then <b>Add</b> to extend the deadline or
+            <b>Remove</b> to shorten it. The change reaches every client immediately.
+          </p>
+        </div>
       </div>
+    </section>
 
-      <div id="feedView" style="display:none">
-        <table id="feedTable">
-          <thead><tr><th>Time</th><th>Problem · Who</th><th>Language</th>
-                     <th>Verdict</th><th>Time</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
+    <section id="sec-problems" class="hide">
+      <h1>Problems</h1>
+      <div class="lede">Problems in the selected contest. Uploads reach students immediately.</div>
+      <div class="card">
+        <header>In this contest <span class="spacer"></span>
+          <button class="btn sm" onclick="listProblems()">⟳ Refresh</button></header>
+        <div class="body" style="padding:0">
+          <table id="pTable"><thead><tr><th style="width:70px">Code</th><th>Title</th>
+            <th style="width:110px"></th></tr></thead><tbody></tbody></table>
+        </div>
       </div>
-
-      <div id="sourceBox" style="display:none;margin-top:12px">
-        <div class="row"><b id="sourceTitle">Source</b>
-          <button onclick="document.getElementById('sourceBox').style.display='none'">Close</button></div>
-        <pre id="sourceCode" style="background:var(--surface2);border:1px solid var(--border);
-             border-radius:8px;padding:12px;overflow:auto;max-height:340px;
-             font-family:ui-monospace,Menlo,monospace;font-size:12px;
-             white-space:pre;tab-size:4;line-height:1.45"></pre>
+      <div class="card">
+        <header>Upload a package</header>
+        <div class="body">
+          <div class="row"><input type="file" id="pkg" accept=".zip">
+            <button class="btn primary" onclick="uploadPackage()">Upload</button></div>
+          <p class="hint" style="margin-top:10px">
+            ZIP containing <b>config.json</b>, <b>statement/statement.html</b> and
+            <b>tests/NN.in</b> + <b>tests/NN.out</b> pairs. A single wrapping folder is fine.
+            A package is imported whole or rejected whole, and every fault is listed at once.
+          </p>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <div class="box"><div class="head">Activity</div><div class="body"><div id="log">—</div></div></div>
+    <section id="sec-people" class="hide">
+      <h1>Participants</h1>
+      <div class="lede">Who has joined, who is connected right now, and how they are doing.</div>
+      <div class="card">
+        <header>Standing <span class="spacer"></span>
+          <label class="hint"><input type="checkbox" id="autoRefresh" checked> auto-refresh</label>
+          <button class="btn sm" onclick="loadMonitor()">⟳</button></header>
+        <div class="body" style="padding:0">
+          <table id="partTable"><thead><tr><th style="width:44px"></th><th>Participant</th>
+            <th style="width:64px">Rank</th><th style="width:70px">Solved</th>
+            <th style="width:78px">Penalty</th><th style="width:64px">Subs</th>
+            <th style="width:92px">Last</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section id="sec-feed" class="hide">
+      <h1>Submissions</h1>
+      <div class="lede">Every submission in this contest, newest first.</div>
+      <div class="card">
+        <header>Feed <span class="spacer"></span><button class="btn sm" onclick="loadFeed()">⟳</button></header>
+        <div class="body" style="padding:0">
+          <table id="feedTable"><thead><tr><th style="width:92px">Time</th><th>Problem · Who</th>
+            <th style="width:110px">Language</th><th style="width:150px">Verdict</th>
+            <th style="width:88px">Time</th><th style="width:110px"></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card hide" id="sourceCard">
+        <header><span id="sourceTitle">Source</span><span class="spacer"></span>
+          <button class="btn sm" onclick="document.getElementById('sourceCard').classList.add('hide')">Close</button>
+        </header>
+        <div class="body"><pre class="code" id="sourceCode"></pre></div>
+      </div>
+    </section>
+
+    <section id="sec-contests" class="hide">
+      <h1>All contests</h1>
+      <div class="lede">Select the contest these panels act on, or create a new one.</div>
+      <div class="card">
+        <header>Contests</header>
+        <div class="body" style="padding:0">
+          <table id="cTable"><thead><tr><th style="width:44px"></th><th>Title</th>
+            <th style="width:96px">State</th><th style="width:86px">Problems</th>
+            <th style="width:92px">Duration</th><th style="width:96px"></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card">
+        <header>Create</header>
+        <div class="body row">
+          <input type="text" id="newTitle" placeholder="Contest title" style="flex:1;min-width:200px">
+          <input type="number" id="newDur" value="120" style="width:90px" title="minutes">
+          <button class="btn primary" onclick="createContest()">Create as draft</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="card"><header>Activity</header><div class="body"><div id="log">—</div></div></div>
+  </main>
 </div>
 
 <script>
-let token = null, selected = null, state = null, tick = null, monitorTick = null;
+let token=null, selected=null, state=null, tick=null, monitorTick=null;
+const $=id=>document.getElementById(id);
+const two=n=>String(n).padStart(2,'0');
+const clock=ms=>{ if(ms==null||ms<0) return '—';
+  const s=Math.floor(ms/1000);
+  return `${two(Math.floor(s/3600))}:${two(Math.floor(s/60)%60)}:${two(s%60)}`; };
+const at=ms=>ms>0?new Date(ms).toLocaleTimeString():'—';
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-const $ = id => document.getElementById(id);
-const two = n => String(n).padStart(2, '0');
-const clock = ms => {
-  if (ms == null || ms < 0) return '—';
-  const s = Math.floor(ms / 1000);
-  return `${two(Math.floor(s/3600))}:${two(Math.floor(s/60)%60)}:${two(s%60)}`;
-};
-const timeOf = ms => ms > 0 ? new Date(ms).toLocaleTimeString() : '—';
-
-function log(status, body) {
-  const el = $('log');
-  el.className = status < 300 ? 'ok' : 'err';
-  el.textContent = `HTTP ${status}  ${typeof body === 'string' ? body : JSON.stringify(body)}`;
+function log(status,body){
+  const el=$('log'); el.className=status<300?'ok':'err';
+  el.textContent=`HTTP ${status}  ${typeof body==='string'?body:JSON.stringify(body)}`;
 }
 
-async function api(method, path, params) {
-  const url = params ? path + '?' + new URLSearchParams(params) : path;
-  const res = await fetch(url, { method, headers: token ? { Authorization: 'Bearer ' + token } : {} });
-  const text = await res.text();
-  let body; try { body = JSON.parse(text); } catch { body = text; }
-  log(res.status, body);
-  return { status: res.status, body };
+async function api(method,path,params){
+  const url=params?path+'?'+new URLSearchParams(params):path;
+  const res=await fetch(url,{method,headers:token?{Authorization:'Bearer '+token}:{}});
+  const text=await res.text(); let body;
+  try{body=JSON.parse(text)}catch{body=text}
+  log(res.status,body); return {status:res.status,body};
 }
 
-async function login() {
-  const res = await fetch('/api/auth/login', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: $('u').value, password: $('p').value })
-  });
-  const body = await res.json().catch(() => ({}));
-  log(res.status, res.ok ? 'signed in as ' + body.username : body);
-  if (!res.ok) return;
-  if (body.role !== 'ADMIN') { log(403, 'That account is not an ADMIN.'); return; }
-  token = body.token;
-  $('who').textContent = '✓ ' + body.displayName;
-  ['liveBox','contestsBox','probBox','monitorBox'].forEach(i => $(i).style.display = '');
+function go(sec){
+  ['control','problems','people','feed','contests']
+    .forEach(s=>$('sec-'+s).classList.toggle('hide',s!==sec));
+  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('on',n.dataset.sec===sec));
+  if(sec==='problems') listProblems();
+  if(sec==='people')   loadMonitor();
+  if(sec==='feed')     loadFeed();
+  if(sec==='contests') loadContests();
+}
+
+async function login(){
+  const res=await fetch('/api/auth/login',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:$('u').value,password:$('p').value})});
+  const body=await res.json().catch(()=>({}));
+  if(!res.ok){ $('gateMsg').textContent=body.message||'Sign in failed'; return; }
+  if(body.role!=='ADMIN'){ $('gateMsg').textContent='That account is not an ADMIN.'; return; }
+  token=body.token; $('whoami').textContent='Signed in as '+body.displayName;
+  $('gate').classList.add('hide'); $('app').classList.remove('hide');
   await loadContests();
-  if (!tick) tick = setInterval(paintClocks, 1000);
-  if (!monitorTick) monitorTick = setInterval(() => {
-    if ($('autoRefresh').checked && selected != null) loadMonitor();
-  }, 5000);
+  if(!tick) tick=setInterval(paintClocks,1000);
+  if(!monitorTick) monitorTick=setInterval(()=>{
+    if($('autoRefresh').checked && selected!=null && !$('sec-people').classList.contains('hide')) loadMonitor();
+  },5000);
 }
 
-async function loadContests() {
-  const { body } = await api('GET', '/api/admin/contests');
-  if (!Array.isArray(body)) return;
-  const tb = $('cTable').querySelector('tbody');
-  tb.innerHTML = body.map(c => `
-    <tr class="${c.id === selected ? 'sel' : ''}">
-      <td><input type="radio" name="csel" ${c.id === selected ? 'checked' : ''}
-                 onchange="selectContest(${c.id})"></td>
-      <td>${esc(c.title)}</td>
-      <td><span class="badge s-${c.state}">${c.state}</span></td>
-      <td>${c.problemCount}</td>
-      <td>${c.durationMinutes} min</td>
-      <td>
-        ${c.id === selected ? '' : `<button onclick="selectContest(${c.id})">Select</button>`}
-        <button class="danger" onclick="deleteContest(${c.id}, '${esc(c.title)}')">Delete</button>
-      </td>
-    </tr>`).join('');
+async function loadContests(){
+  const {body}=await api('GET','/api/admin/contests');
+  if(!Array.isArray(body)) return;
+  $('cTable').querySelector('tbody').innerHTML = body.length? body.map(c=>`
+    <tr class="${c.id===selected?'sel':''}">
+      <td><input type="radio" name="csel" ${c.id===selected?'checked':''} onchange="selectContest(${c.id})"></td>
+      <td><b>${esc(c.title)}</b></td>
+      <td><span class="badge b-${c.state}">${c.state}</span></td>
+      <td>${c.problemCount}</td><td>${c.durationMinutes} min</td>
+      <td><button class="btn sm danger" onclick="deleteContest(${c.id},'${esc(c.title)}')">Delete</button></td>
+    </tr>`).join('') : '<tr><td colspan="6" class="empty">No contests yet — create one below.</td></tr>';
 
-  if (selected == null && body.length) {
-    const live = body.find(c => c.state !== 'DRAFT' && c.state !== 'ENDED') || body[0];
+  if(selected==null && body.length){
+    const live=body.find(c=>c.state!=='DRAFT'&&c.state!=='ENDED')||body[0];
     await selectContest(live.id);
-  } else if (selected != null) {
-    await refreshSelected();
-  }
+  } else if(selected!=null){ await refreshSelected(); }
 }
 
-async function deleteContest(id, title) {
-  // UIF-22: destructive, and refused server-side once anything was submitted.
-  if (!confirm(`Delete "${title}"? Its problems and tests go too. `
-             + `This is refused if anyone has already submitted.`)) return;
-  const { status } = await api('DELETE', '/api/admin/contests/' + id);
-  if (status < 300 && selected === id) { selected = null; state = null; }
+async function selectContest(id){
+  selected=id; await loadContests(); await refreshSelected();
+  if(!$('sec-problems').classList.contains('hide')) listProblems();
+}
+
+async function deleteContest(id,title){
+  if(!confirm(`Delete "${title}"? Its problems and tests go too.\nRefused if anyone has already submitted.`)) return;
+  const {status}=await api('DELETE','/api/admin/contests/'+id);
+  if(status<300&&selected===id){selected=null;state=null;}
   await loadContests();
 }
 
-async function selectContest(id) {
-  selected = id;
-  await loadContests();
-  await refreshSelected();
-  await listProblems();
-  await loadMonitor();
-}
+async function refreshSelected(){
+  if(selected==null) return;
+  const {status,body}=await api('GET','/api/contests/'+selected);
+  if(status>=300) return;
+  state=body; state.clientAt=Date.now();
+  $('cTitle').textContent=body.title;
+  $('cState').textContent=body.state; $('cState').className='badge b-'+body.state;
 
-async function refreshSelected() {
-  if (selected == null) return;
-  const { status, body } = await api('GET', '/api/contests/' + selected);
-  if (status >= 300) return;
-  state = body;
-  // Stamp the local time of this reading so paintClocks() can correct for
-  // any skew between the browser and the authoritative server clock.
-  state.clientAt = Date.now();
-  $('cTitle').textContent = body.title;
-  $('cState').textContent = body.state;
-  $('cState').className = 'badge s-' + body.state;
-
-  const s = body.state;
-  $('bStart').disabled    = !(s === 'DRAFT' || s === 'ENDED');
-  $('bPause').disabled    = !(s === 'ACTIVE' || s === 'FROZEN');
-  $('bResume').disabled   = s !== 'PAUSED';
-  $('bFreeze').disabled   = s !== 'ACTIVE';
-  $('bUnfreeze').disabled = s !== 'FROZEN';
-  $('bEnd').disabled      = s === 'DRAFT' || s === 'ENDED';
+  const s=body.state;
+  $('bOpen').disabled     = !(s==='DRAFT'||s==='ENDED');
+  $('bStart').disabled    = !(s==='DRAFT'||s==='LOBBY'||s==='ENDED');
+  $('bPause').disabled    = !(s==='ACTIVE'||s==='FROZEN');
+  $('bResume').disabled   = s!=='PAUSED';
+  $('bFreeze').disabled   = s!=='ACTIVE';
+  $('bUnfreeze').disabled = s!=='FROZEN';
+  $('bEnd').disabled      = s==='DRAFT'||s==='ENDED';
   paintClocks();
 }
 
-/** Runs once a second off the server clock offset, so it never drifts (FMEA-06). */
-function paintClocks() {
-  if (!state) return;
-  const skew = state.serverTimeMs - state.clientAt;
-  const now = Date.now() + (isNaN(skew) ? 0 : skew);
-  $('kNow').textContent   = new Date(now).toLocaleTimeString();
-  $('kStart').textContent = timeOf(state.startTimeMs);
-  $('kEnd').textContent   = timeOf(state.endTimeMs);
+/* Ticks off the server-clock offset so it never drifts (FMEA-06). */
+function paintClocks(){
+  if(!state) return;
+  const skew=state.serverTimeMs-state.clientAt;
+  const now=Date.now()+(isNaN(skew)?0:skew);
+  $('kNow').textContent=new Date(now).toLocaleTimeString();
+  $('kStart').textContent=at(state.startTimeMs);
+  $('kEnd').textContent=at(state.endTimeMs);
 
-  if (state.startTimeMs > 0) {
-    const paused = state.state === 'PAUSED';
-    $('kElapsed').textContent = clock(now - state.startTimeMs);
-    const left = state.endTimeMs - now;
-    $('kLeft').textContent = paused ? 'paused' : clock(left);
-    $('kLeft').className = 'value' + (!paused && left > 0 && left < 5 * 60000 ? ' warn' : '');
-  } else {
-    $('kElapsed').textContent = '—';
-    $('kLeft').textContent = 'not started';
-    $('kLeft').className = 'value';
-  }
+  const left=$('kLeft');
+  if(state.state==='LOBBY'||state.state==='DRAFT'){
+    $('kElapsed').textContent='—';
+    left.textContent=state.state==='LOBBY'?'in lobby':'not started';
+    left.className='v calm';
+  } else if(state.startTimeMs>0){
+    $('kElapsed').textContent=clock(now-state.startTimeMs);
+    if(state.state==='PAUSED'){ left.textContent='paused'; left.className='v calm'; }
+    else { const ms=state.endTimeMs-now; left.textContent=clock(ms);
+           left.className='v'+(ms>0&&ms<5*60000?' warn':''); }
+  } else { $('kElapsed').textContent='—'; left.textContent='not started'; left.className='v calm'; }
 }
 
-async function act(what) {
-  if (selected == null) return;
-  await api('POST', `/api/admin/contests/${selected}/${what}`);
-  await loadContests();
+async function act(what){ if(selected==null) return;
+  await api('POST',`/api/admin/contests/${selected}/${what}`); await loadContests(); }
+async function extend(min){ if(selected==null||!min) return;
+  await api('POST',`/api/admin/contests/${selected}/extend`,{minutes:min}); await refreshSelected(); }
+
+// One input, two directions: `sign` is +1 for Add and -1 for Remove, so the
+// instructor types the amount instead of hunting for a fixed-size button.
+function extendBy(sign){
+  const n=Math.abs(parseInt($('extMin').value,10));
+  if(!n){ log(400,'Enter a number of minutes first'); return; }
+  extend(sign*n);
+}
+function confirmEnd(){ if(confirm('End this contest? Submissions are refused from now on.')) act('end'); }
+
+async function createContest(){
+  const title=$('newTitle').value.trim();
+  if(!title){ log(400,'Enter a title first'); return; }
+  const {status,body}=await api('POST','/api/admin/contests',
+    {title,durationMinutes:$('newDur').value||'120'});
+  if(status<300){ $('newTitle').value=''; selected=body.id; await loadContests(); }
 }
 
-async function extend(min) {
-  if (selected == null || !min) return;
-  await api('POST', `/api/admin/contests/${selected}/extend`, { minutes: min });
-  await refreshSelected();
+async function listProblems(){
+  const {body}=await api('GET','/api/admin/problems');
+  $('pTable').querySelector('tbody').innerHTML =
+    Array.isArray(body)&&body.length ? body.map(p=>`<tr>
+        <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
+        <td><button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="3" class="empty">No problems yet — upload a package below.</td></tr>';
 }
 
-function confirmEnd() {
-  // UIF-22: destructive actions need explicit confirmation
-  if (confirm('End this contest? Submissions will be refused from now on.')) act('end');
+async function delProblem(id,code){
+  if(!confirm(`Delete problem ${code}? This cannot be undone.`)) return;
+  await api('DELETE','/api/admin/problems/'+id); await listProblems(); await loadContests();
 }
 
-async function createContest() {
-  const title = $('newTitle').value.trim();
-  if (!title) { log(400, 'Enter a title first'); return; }
-  const { status, body } = await api('POST', '/api/admin/contests',
-    { title, durationMinutes: $('newDur').value || '120' });
-  if (status < 300) { $('newTitle').value = ''; selected = body.id; await loadContests(); }
+async function uploadPackage(){
+  const input=$('pkg');
+  if(!input.files.length){ log(400,'Choose a .zip first'); return; }
+  const form=new FormData(); form.append('file',input.files[0]);
+  const res=await fetch('/api/admin/problems/upload',
+    {method:'POST',headers:token?{Authorization:'Bearer '+token}:{},body:form});
+  const body=await res.json().catch(()=>({}));
+  log(res.status,res.ok?`imported ${body.code} with ${body.testCaseCount} tests`:(body.errors||body));
+  if(res.ok){ input.value=''; await listProblems(); await loadContests(); }
 }
 
-async function listProblems() {
-  const { body } = await api('GET', '/api/admin/problems');
-  const tb = $('pTable').querySelector('tbody');
-  if (!Array.isArray(body) || !body.length) {
-    tb.innerHTML = '<tr><td colspan="3" class="hint">No problems yet — upload a package below.</td></tr>';
-    return;
-  }
-  tb.innerHTML = body.map(p => `<tr>
-      <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
-      <td><button class="danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
-    </tr>`).join('');
+async function loadMonitor(){
+  if(selected==null) return;
+  const {body}=await api('GET',`/api/admin/contests/${selected}/participants`);
+  if(!Array.isArray(body)) return;
+  $('onlineCount').textContent=body.filter(x=>x.online).length;
+  $('partTable').querySelector('tbody').innerHTML = body.length? body.map(x=>`<tr>
+      <td><span class="dot ${x.online?'on':'off'}"></span></td>
+      <td><b>${esc(x.displayName)}</b> <span class="hint">${esc(x.username)}</span></td>
+      <td>${x.rank||'—'}</td><td>${x.solved}</td><td>${x.penaltyMinutes}</td>
+      <td>${x.submissionCount}</td>
+      <td>${x.lastSubmissionMs>0?new Date(x.lastSubmissionMs).toLocaleTimeString():'—'}</td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">Nobody has joined yet.</td></tr>';
 }
 
-async function delProblem(id, code) {
-  if (!confirm(`Delete problem ${code}? This cannot be undone.`)) return;
-  await api('DELETE', '/api/admin/problems/' + id);
-  await listProblems();
+async function loadFeed(){
+  if(selected==null) return;
+  const {body}=await api('GET',`/api/admin/contests/${selected}/submissions`);
+  $('feedTable').querySelector('tbody').innerHTML =
+    Array.isArray(body)&&body.length ? body.map(s=>`<tr>
+        <td>${new Date(s.submittedAtMs).toLocaleTimeString()}</td>
+        <td>${esc(s.problemCode)}</td><td>${esc(s.language)}</td>
+        <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
+        <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
+        <td><button class="btn sm" onclick="viewSource(${s.id})">View code</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="empty">No submissions yet.</td></tr>';
 }
 
-async function uploadPackage() {
-  const input = $('pkg');
-  if (!input.files.length) { log(400, 'Choose a .zip first'); return; }
-  const form = new FormData();
-  form.append('file', input.files[0]);
-  const res = await fetch('/api/admin/problems/upload', {
-    method: 'POST', headers: token ? { Authorization: 'Bearer ' + token } : {}, body: form
-  });
-  const body = await res.json().catch(() => ({}));
-  log(res.status, res.ok ? `imported ${body.code} with ${body.testCaseCount} tests`
-                         : (body.errors || body));
-  if (res.ok) { await listProblems(); await loadContests(); }
-}
-
-function showMonitor(which) {
-  const participants = which === 'participants';
-  $('participantsView').style.display = participants ? '' : 'none';
-  $('feedView').style.display = participants ? 'none' : '';
-  $('tabParticipants').className = participants ? 'primary' : '';
-  $('tabFeed').className = participants ? '' : 'primary';
-  loadMonitor();
-}
-
-async function loadMonitor() {
-  if (selected == null) return;
-  const feed = $('feedView').style.display !== 'none';
-
-  const p = await api('GET', `/api/admin/contests/${selected}/participants`);
-  if (Array.isArray(p.body)) {
-    $('onlineCount').textContent = p.body.filter(x => x.online).length;
-    $('partTable').querySelector('tbody').innerHTML = p.body.length
-      ? p.body.map(x => `<tr>
-          <td>${x.online ? '🟢' : '⚪'}</td>
-          <td><b>${esc(x.displayName)}</b> <span class="hint">${esc(x.username)}</span></td>
-          <td>${x.rank || '—'}</td><td>${x.solved}</td><td>${x.penaltyMinutes}</td>
-          <td>${x.submissionCount}</td>
-          <td>${x.lastSubmissionMs > 0 ? new Date(x.lastSubmissionMs).toLocaleTimeString() : '—'}</td>
-        </tr>`).join('')
-      : '<tr><td colspan="7" class="hint">Nobody has joined yet.</td></tr>';
-  }
-
-  if (feed) {
-    const f = await api('GET', `/api/admin/contests/${selected}/submissions`);
-    if (Array.isArray(f.body)) {
-      $('feedTable').querySelector('tbody').innerHTML = f.body.length
-        ? f.body.map(s => `<tr>
-            <td>${new Date(s.submittedAtMs).toLocaleTimeString()}</td>
-            <td>${esc(s.problemCode)}</td><td>${esc(s.language)}</td>
-            <td>${verdictBadge(s.verdict)}</td>
-            <td>${s.execTimeMs >= 0 ? s.execTimeMs + ' ms' : '—'}</td>
-            <td><button onclick="viewSource(${s.id})">View code</button></td>
-          </tr>`).join('')
-        : '<tr><td colspan="6" class="hint">No submissions yet.</td></tr>';
-    }
-  }
-}
-
-function verdictBadge(v) {
-  if (!v) return '<span class="hint">judging…</span>';
-  const colour = v === 'AC' ? 'var(--green)' : v === 'CE' ? 'var(--purple)' : 'var(--red)';
-  return `<b style="color:${colour}">${v}</b>`;
-}
-
-async function viewSource(id) {
-  const { status, body } = await api('GET', '/api/admin/submissions/' + id + '/source');
-  if (status >= 300) return;
-  $('sourceTitle').textContent =
-    `Submission #${body.id} — ${body.problemCode} by ${body.username} (${body.verdict || 'judging'})`;
-  $('sourceCode').textContent =
-    (body.sourceCode || '') + (body.compilerOutput ? '\n\n--- compiler output ---\n' + body.compilerOutput : '');
-  $('sourceBox').style.display = '';
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+async function viewSource(id){
+  const {status,body}=await api('GET','/api/admin/submissions/'+id+'/source');
+  if(status>=300) return;
+  $('sourceTitle').textContent=
+    `#${body.id} — ${body.problemCode} by ${body.username} (${body.verdict||'judging'})`;
+  $('sourceCode').textContent=(body.sourceCode||'')+
+    (body.compilerOutput?'\n\n--- compiler output ---\n'+body.compilerOutput:'');
+  $('sourceCard').classList.remove('hide');
 }
 </script>
 </body>

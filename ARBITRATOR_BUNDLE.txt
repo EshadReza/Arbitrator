@@ -152,6 +152,17 @@ class itself extends `Application`. Net effect: no `--module-path`, no machine-s
   `javap -p -c arbitrator-server/target/classes/<Class>.class | grep "Unresolved compilation"`.
   **Always run `mvn clean install` after an Alt+F5**, and prefer Maven over Eclipse launchers when a change
   spans modules.
+- **Untrusted-process containment has three layers; do not remove any of them.**
+  (1) `ulimit` in a shell wrapper around BOTH compile and run — sandboxing only the run step let
+  `#include </dev/urandom>` drive the *preprocessor* to eat all host RAM. (2) A **relative** `ulimit -u`
+  (current user process count + 32) on the run phase only: `RLIMIT_NPROC` is **per-UID** on macOS/BSD, so an
+  absolute value like 64 breaks even the compiler (`posix_spawn failed: Resource temporarily unavailable`),
+  and no cap at all lets a fork bomb fill the process table until the whole machine stops forking.
+  (3) A `pkill -f <workDir>` sweep in `cleanup()` and at startup — `ProcessHandle.descendants()` is only a
+  *snapshot*, so a rapidly forking program outruns it and children survive as orphaned `prog` processes
+  that no longer belong to the JVM and are never reaped.
+  **Never test a fork bomb on a dev machine** — use a bounded fork loop whose children `_exit(0)`, or the
+  Linux box where `prlimit --nproc` bounds the process tree properly.
 - **`peakMemoryKb` is `-1` on macOS.** Expected — real peak RSS only comes from the Linux sandbox script.
 - **Raw SQL touching times must use `UTC_TIMESTAMP()`, never `NOW()`.** `contests.start_time` is a zoneless
   `DATETIME` and the JDBC url sets `serverTimezone=UTC`, so Java reads stored values as UTC. `NOW()` writes
@@ -172,6 +183,29 @@ class itself extends `Application`. Net effect: no `--module-path`, no machine-s
   The project *targets* 17, so teammates on openjdk-17 won't see it, but tests must run everywhere.
   Use `java.lang.reflect.Proxy` fakes for repository interfaces and anonymous subclasses for concrete
   services — see `ProblemPackageServiceTest` for the pattern.
+
+## Contest lifecycle
+
+`DRAFT → LOBBY → ACTIVE ⇄ PAUSED/FROZEN → ENDED`
+
+`LOBBY` is the holding room: students may enter and wait, but **problems are not
+released and no clock runs** — releasing statements early would let people read
+and plan before the timer starts. `ContestState` carries the rules
+(`isJoinable`, `acceptsSubmissions`, `releasesProblems`, `hasStarted`); check
+there rather than comparing states by hand.
+
+A freshly booted server starts **nothing**, and this is enforced, not merely
+seeded: `ContestBootReset` returns every LOBBY/ACTIVE/PAUSED/FROZEN contest to
+DRAFT and clears its clock at startup. Contest state lives in MySQL, so without
+this a contest left ACTIVE at shutdown came back ACTIVE with a clock that had
+been running against the wall clock the whole time the server was down — the
+first student to open the client walked into a contest nobody had started.
+ENDED contests are left alone. Set `arbitrator.contest.reset-on-boot=false` only
+if the server is meant to be bounced mid-contest and resumed.
+
+Consequence for tests and scripts: **do not look up "the contest" by
+`state != DRAFT`** — after a boot there isn't one. Take the contest by id, or
+take the first row, then set the state you need.
 
 ## House style
 
@@ -327,6 +361,21 @@ Roughly **Sprint 1 + half of Sprint 2** of the 4-sprint plan in `WORKFLOW_PLAN.m
 | **FR-01** | **Registration screen** in the client | 201/400/409 verified; always creates STUDENT |
 | **FR-06** | **Contest state pushed to clients** — the countdown now obeys pause/extend/end | verified: server-side pause reached a connected client (`state=PAUSED`) |
 | **FR-16** | **Submissions tab** (UIF-12) — history table + detail pane, refreshes on every verdict | third tab beside Problems and Standings |
+| DOC-7 | **Live updates fixed** — clients refresh on *every* contest-state push, not only on state changes; problem upload/delete now pushes too | probe confirmed pushes arriving; a new problem no longer needs sign-out to appear |
+| DOC-8 | **Manual refresh rewritten** — fetches contest state first, then problems (order matters: state decides whether problems are released at all) | previously it could apply a stale list |
+| DOC-9 | **Restarting a contest archives the previous run's submissions** — problems no longer start pre-solved and standings begin empty | verified: `solved=[True]` → `solved=[False]`, standings 0 rows |
+| DOC-10 | **Instructor console rebuilt** — sidebar navigation, five sections, CSS grid/flexbox, dark mode, verdict colours matching the client | all endpoints verified 200 |
+| DOC-11 | **Uploaded statements no longer render white-on-white in dark mode** — an uploaded package is a whole HTML document carrying its own `<style>`, which appeared *after* the theme block and won on source order; the theme now reclaims background/border with `!important` | verified in WebKit against the real DB statement: `code`/`pre` computed `rgb(35,42,54)` on `rgb(230,234,240)` text (was `#f3f4f6` on white); light mode still `#f5f7fa` on `#1c2430` |
+| DOC-12 | **`ContestBootReset`** — every live contest returns to DRAFT at startup, so a restart never leaves a contest running with a clock that ticked while the server was down | verified: PAUSED + ACTIVE → DRAFT, clocks cleared, `/api/contests` returns `[]` |
+| DOC-13 | **Contest picker is live** — polls every 3 s and has a Refresh button, so a lobby opened by the instructor appears without signing out and back in; selection is held by contest id across refreshes | verified end to end: student `[]` → `LOBBY` → `ACTIVE` with no re-login |
+| DOC-14 | **Admin "Adjust time" is now one input + Add/Remove** instead of fixed ±5/15/30 buttons | verified: +7 → 127 min, −7 → 120 min |
+| DOC-4 | **Two-phase start** — new `LOBBY` state: doors open, no problems, no clock; then Start releases problems and begins the timer | verified: DRAFT→LOBBY→ACTIVE, problems hidden in lobby, submit refused with a clear reason |
+| DOC-5 | **Server no longer auto-starts a contest** — seeded as DRAFT; students see "No contest is running" until the instructor opens it | verified on a fresh database |
+| DOC-6 | **Dark-mode text areas fixed** (`-fx-control-inner-background`) and **per-verdict colours** (AC green, WA red, TLE/MLE/RE/OLE orange, CE purple) | the custom I/O boxes stayed white because a TextArea paints its own inner background |
+| DOC-1 | **Custom input / output** — run code against your own input, never judged or stored, same sandbox limits | verified: `7 35` → `42`; compile errors clean of server paths; creates no submission |
+| DOC-2 | **Editor ergonomics** — Tab = 4 spaces, auto-indent (deeper after `{`/`:`), auto-closing brackets/quotes, Ctrl +/− and Ctrl+scroll zoom, Ctrl+0 reset | compiles; needs a visual pass |
+| DOC-3 | **Ctrl+R refresh**, white caret in dark mode, verdict banner click → Submissions tab with that run selected | compiles; needs a visual pass |
+| SEC | **Sandbox hardening** — compile is now limited too, relative per-UID process cap, process-tree kill, work-dir `pkill` sweep on cleanup and at startup, output cap → new **OLE** verdict | verified live: AC / OLE / TLE correct, zero stray processes; **fork-bomb containment still UNVERIFIED — see Known issue 9** |
 | UIF-12 | **Submitted code in submission details** — lazy-loaded per row; LRR-02 enforced (another student gets 403) | verified live |
 | UIF-21 | **Live monitoring in the console** — who's online, rank/solved/penalty/submission count, full submission feed, view any code | presence tracked from STOMP subscriptions |
 | UI | **Sign out**, **switch contest**, **manual refresh** (⟳) in the client | refresh re-pulls contest state, problems, standings and history |
@@ -384,6 +433,19 @@ submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoC
    kept returning true after the server process was killed on loopback, so the drop was never detected in that
    scenario. Chunk **S3-C7** must verify this properly on a real LAN (pull the cable, not `kill`) before
    NFR-R03 / FMEA-03 can be claimed. Until then, assume a genuine disconnect may still need a client restart.
+10. **Isolation is namespace-based, NOT a container — two gaps remain.**
+   The Linux path now uses `unshare -Urnpf --mount-proc`: user + network + **PID** namespaces, so every
+   process dies with the namespace and a fork bomb cannot outlive the kill. Still missing versus a real
+   container: (a) **filesystem isolation** — the program can read the host filesystem, which NFR-S03
+   forbids; fix by adding a mount namespace with `pivot_root` into the work dir, or by switching to
+   `bubblewrap` (`bwrap`), which does filesystem + PID + network unprivileged in one command;
+   (b) a **hard RSS cap** — `prlimit --as` bounds address space, not resident memory; cgroup v2
+   `memory.max` is the real limit. Docker-per-submission (the SRS's stated alternative for FR-10) would
+   cover both but adds daemon setup and ~200 ms per run.
+9. **Fork-bomb containment is implemented but NOT verified.** The relative `ulimit -u` cap is in place, but
+   testing it on macOS filled the process table and made the machine unable to fork at all, so the test was
+   abandoned rather than repeated. Verify on Linux, where `prlimit --nproc` in `sandbox-run.sh` bounds the
+   process *tree* and a bomb cannot reach the host. Until then assume a fork bomb is contained only on Linux.
 7. **The client UI has never been visually inspected.** Everything compiles and the data layer is proven,
    but no one has *looked* at the standings table, the self-row highlight, the freeze banner, or the
    verdict banner rendering. Two acceptance criteria in §4.8 are specifically visual —
@@ -395,6 +457,13 @@ submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoC
 
 ## Fixes applied after the initial build (don't re-break these)
 
+- **Uploaded statements ship their own `<style>` block.** It lands after the client's theme CSS in the
+  document, so any theme rule it can also set must be `!important` — otherwise source order wins and dark
+  mode gets white boxes with white text on them. Backgrounds and borders both need reclaiming, not just
+  colours.
+- **Nothing may be live after a server restart** (`ContestBootReset`). Anything that looks up "the contest"
+  by `state != DRAFT` breaks on a fresh boot — `VerdictPushIntegrationTest` did exactly that and started
+  failing the moment this landed.
 - `spring.config.import: optional:classpath:languages.yml` added to `application.yml` — without it the judge
   silently returns RE for every submission.
 - `-static` removed from the C++ compile command — breaks macOS, unnecessary on Linux.
@@ -1456,6 +1525,9 @@ import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.enums.ContestState;
 
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
@@ -1468,6 +1540,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.util.Duration;
 
 /**
  * Contest picker shown after login. Several contests can run at once, so the
@@ -1480,11 +1553,25 @@ import javafx.scene.layout.VBox;
  */
 public class ContestPickerController {
 
+    /**
+     * How often the list re-reads the server. The picker is shown before any
+     * contest is joined, so there is no STOMP session to push onto yet — a
+     * short poll is the only way the screen can notice that the instructor
+     * opened a lobby. One tiny request every few seconds costs nothing on a
+     * LAN, and it removes the sign-out/sign-in dance that was previously the
+     * only way to see a new contest.
+     */
+    private static final Duration POLL_INTERVAL = Duration.seconds(3);
+
     @FXML private ListView<ContestSummaryDto> contestList;
     @FXML private Label errorLabel;
     @FXML private Button enterButton;
+    @FXML private Button refreshButton;
 
     private final AppState state = AppState.get();
+    private Timeline poller;
+    /** Guards against overlapping polls when the server is slow to answer. */
+    private volatile boolean loading;
 
     @FXML
     private void initialize() {
@@ -1498,32 +1585,80 @@ public class ContestPickerController {
                 onEnter();
             }
         });
+
+        poller = new Timeline(new KeyFrame(POLL_INTERVAL, e -> load()));
+        poller.setCycleCount(Animation.INDEFINITE);
+        poller.play();
+
+        // A controller has no "screen closed" callback, so hang the shutdown
+        // off the scene: leaving the picker detaches the node, and a timeline
+        // left running would keep polling for the rest of the session.
+        contestList.sceneProperty().addListener((obs, old, scene) -> {
+            if (scene == null) {
+                stopPolling();
+            }
+        });
+
         load();
     }
 
+    @FXML
+    private void onRefresh() {
+        load();
+    }
+
+    private void stopPolling() {
+        if (poller != null) {
+            poller.stop();
+        }
+    }
+
     private void load() {
+        if (loading) {
+            return;
+        }
+        loading = true;
+        refreshButton.setDisable(true);
         Thread worker = new Thread(() -> {
             try {
                 List<ContestSummaryDto> contests = state.api().contests();
-                Platform.runLater(() -> {
-                    if (contests.isEmpty()) {
-                        showError(SceneRouter.bundle().getString("picker.none"));
-                        return;
-                    }
-                    // Always show the list, even with one contest: it is also
-                    // the "which contest am I in?" screen, and skipping it made
-                    // switching contests feel like it had silently failed.
-                    contestList.setItems(FXCollections.observableArrayList(contests));
-                    contestList.getSelectionModel().selectFirst();
-                });
+                Platform.runLater(() -> apply(contests));
             } catch (Exception e) {
                 Platform.runLater(() -> showError(e.getMessage() == null
                         ? SceneRouter.bundle().getString("picker.error")
                         : e.getMessage()));
+            } finally {
+                loading = false;
+                Platform.runLater(() -> refreshButton.setDisable(false));
             }
         }, "picker-io");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * Replaces the list in place. The selection is re-established by contest
+     * id rather than by index, so a poll landing while the student is choosing
+     * does not move the highlight out from under them.
+     */
+    private void apply(List<ContestSummaryDto> contests) {
+        if (contests.isEmpty()) {
+            contestList.getItems().clear();
+            showError(SceneRouter.bundle().getString("picker.none"));
+            return;
+        }
+        errorLabel.setVisible(false);
+
+        ContestSummaryDto previous = selected();
+        // Always show the list, even with one contest: it is also the "which
+        // contest am I in?" screen, and skipping it made switching contests
+        // feel like it had silently failed.
+        contestList.setItems(FXCollections.observableArrayList(contests));
+        contests.stream()
+                .filter(c -> previous != null && c.id() == previous.id())
+                .findFirst()
+                .ifPresentOrElse(c -> contestList.getSelectionModel().select(c),
+                        () -> contestList.getSelectionModel().selectFirst());
     }
 
     @FXML
@@ -1536,11 +1671,13 @@ public class ContestPickerController {
 
     @FXML
     private void onLogout() {
+        stopPolling();
         state.setSession(null);
         SceneRouter.showLogin();
     }
 
     private void enter(ContestSummaryDto contest) {
+        stopPolling();
         enterButton.setDisable(true);
         Thread worker = new Thread(() -> {
             try {
@@ -1550,6 +1687,9 @@ public class ContestPickerController {
                 Platform.runLater(() -> {
                     showError(e.getMessage());
                     enterButton.setDisable(false);
+                    // The student is still on the picker, so it must keep
+                    // watching — the contest may become joinable a moment later.
+                    poller.play();
                 });
             }
         }, "picker-enter");
@@ -1601,6 +1741,7 @@ public class ContestPickerController {
 === FILE: arbitrator-client/src/main/java/com/arbitrator/client/controller/EditorController.java ===
 package com.arbitrator.client.controller;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
@@ -1618,6 +1759,10 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.VBox;
 
 /**
@@ -1649,10 +1794,26 @@ public class EditorController {
     @FXML private Button submitButton;
     @FXML private Button fullscreenButton;
     @FXML private Label countLabel;
+    @FXML private TextArea customInput;
+    @FXML private TextArea customOutput;
+    @FXML private Button runButton;
+    @FXML private Label runStatus;
+
+    /** Four spaces, never a tab: a literal tab renders 8 wide and misaligns. */
+    private static final String INDENT = "    ";
+    private static final int DEFAULT_FONT_SIZE = 13;
+    private static final int MIN_FONT_SIZE = 9;
+    private static final int MAX_FONT_SIZE = 28;
+
+    /** Characters auto-closed as a pair. */
+    private static final Map<String, String> PAIRS = Map.of(
+            "(", ")", "[", "]", "{", "}", "\"", "\"", "'", "'");
 
     private CodeArea codeArea;
+    private int fontSize = DEFAULT_FONT_SIZE;
     private BiConsumer<Language, String> submitHandler;
     private Runnable onFullscreen;
+    private BiConsumer<Language, String> runHandler;
 
     @FXML
     private void initialize() {
@@ -1672,7 +1833,87 @@ public class EditorController {
         languageBox.valueProperty().addListener((obs, old, lang) ->
                 codeArea.setStyleSpans(0, highlight(codeArea.getText())));
 
+        installEditingBehaviour();
         updateCount("");
+    }
+
+    /**
+     * Editor ergonomics people expect from any IDE: a 4-space Tab, indentation
+     * carried onto the next line (and one level deeper after an opening brace),
+     * automatic bracket/quote closing, and Ctrl +/- / Ctrl+scroll zoom.
+     *
+     * CodeArea does none of this by itself — Tab inserts a literal tab, which
+     * renders 8 wide, and Enter returns to column zero.
+     */
+    private void installEditingBehaviour() {
+        codeArea.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.TAB && !e.isControlDown()) {
+                codeArea.replaceSelection(INDENT);
+                e.consume();
+            } else if (e.getCode() == KeyCode.ENTER) {
+                autoIndentNewline();
+                e.consume();
+            } else if (e.isShortcutDown()
+                    && (e.getCode() == KeyCode.EQUALS || e.getCode() == KeyCode.PLUS)) {
+                zoom(+1);
+                e.consume();
+            } else if (e.isShortcutDown() && e.getCode() == KeyCode.MINUS) {
+                zoom(-1);
+                e.consume();
+            } else if (e.isShortcutDown() && e.getCode() == KeyCode.DIGIT0) {
+                fontSize = DEFAULT_FONT_SIZE;
+                applyFontSize();
+                e.consume();
+            }
+        });
+
+        // Auto-close brackets and quotes, leaving the caret between the pair.
+        codeArea.addEventFilter(KeyEvent.KEY_TYPED, e -> {
+            String closing = PAIRS.get(e.getCharacter());
+            if (closing != null && codeArea.getSelectedText().isEmpty()) {
+                int caret = codeArea.getCaretPosition();
+                codeArea.insertText(caret, e.getCharacter() + closing);
+                codeArea.moveTo(caret + 1);
+                e.consume();
+            }
+        });
+
+        codeArea.addEventFilter(ScrollEvent.SCROLL, e -> {
+            if (e.isShortcutDown()) {
+                zoom(e.getDeltaY() > 0 ? +1 : -1);
+                e.consume();
+            }
+        });
+
+        applyFontSize();
+    }
+
+    /** Enter keeps the current indentation, and adds one level after '{'. */
+    private void autoIndentNewline() {
+        int caret = codeArea.getCaretPosition();
+        int paragraph = codeArea.getCurrentParagraph();
+        String line = codeArea.getParagraph(paragraph).getText();
+
+        int spaces = 0;
+        while (spaces < line.length() && line.charAt(spaces) == ' ') {
+            spaces++;
+        }
+        String indent = " ".repeat(spaces);
+        String trimmed = line.strip();
+        if (trimmed.endsWith("{") || trimmed.endsWith(":")) {
+            indent += INDENT;
+        }
+        codeArea.insertText(caret, "\n" + indent);
+    }
+
+    private void zoom(int steps) {
+        // Math.clamp is Java 21+; this module targets 17.
+        fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize + steps));
+        applyFontSize();
+    }
+
+    private void applyFontSize() {
+        codeArea.setStyle("-fx-font-size: " + fontSize + "px;");
     }
 
     @FXML
@@ -1696,6 +1937,40 @@ public class EditorController {
 
     public void setFullscreenHandler(Runnable handler) {
         this.onFullscreen = handler;
+    }
+
+    /** MainController performs the call; this panel only owns the widgets. */
+    public void setRunHandler(BiConsumer<Language, String> handler) {
+        this.runHandler = handler;
+    }
+
+    @FXML
+    private void onRunCustom() {
+        if (runHandler != null) {
+            runButton.setDisable(true);
+            runStatus.setText(bundleOrDefault("editor.running", "running…"));
+            customOutput.clear();
+            runHandler.accept(languageBox.getValue(), codeArea.getText());
+        }
+    }
+
+    public String getCustomInput() {
+        return customInput.getText();
+    }
+
+    /** Shows the result of a custom run and re-enables the button. */
+    public void showRunResult(String output, String status) {
+        customOutput.setText(output);
+        runStatus.setText(status);
+        runButton.setDisable(false);
+    }
+
+    private static String bundleOrDefault(String key, String fallback) {
+        try {
+            return com.arbitrator.client.app.SceneRouter.bundle().getString(key);
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     /** Current editor contents — used to stash a per-problem draft. */
@@ -2142,6 +2417,7 @@ public class MainController {
         applyWebViewFill();
         editorPanelController.setSubmitHandler(this::submit);
         editorPanelController.setFullscreenHandler(this::toggleEditorFullscreen);
+        editorPanelController.setRunHandler(this::runCustom);
         themeButton.setText(state.darkMode() ? "☀" : "🌙");
 
         startTimer();
@@ -2163,6 +2439,8 @@ public class MainController {
                 this::onToggleProblemList);
         accelerators.put(new KeyCodeCombination(KeyCode.F11),
                 this::onToggleStatementFullscreen);
+        accelerators.put(new KeyCodeCombination(KeyCode.R, KeyCombination.CONTROL_DOWN),
+                this::onRefresh);
     }
 
     // --- layout: collapse and fullscreen -----------------------------------
@@ -2230,13 +2508,18 @@ public class MainController {
      */
     @FXML
     private void onRefresh() {
-        refreshProblems(false);
         submissionsPanelController.refresh();
         async(() -> {
             try {
                 long id = state.contest().contestId();
+                // Contest state first: it decides whether problems are released
+                // at all, so fetching problems before it can show a stale list.
                 var contestState = state.api().contest(id);
                 onContestState(contestState);
+                if (contestState.state().releasesProblems()) {
+                    List<ProblemSummaryDto> items = state.api().problems();
+                    Platform.runLater(() -> applyProblems(items, false));
+                }
                 var board = state.api().leaderboard();
                 leaderboardPanelController.update(board);
                 Platform.runLater(() -> toast(bundle("main.refreshed")));
@@ -2294,20 +2577,27 @@ public class MainController {
         async(() -> {
             try {
                 List<ProblemSummaryDto> items = state.api().problems();
-                Platform.runLater(() -> {
-                    var selected = problemList.getSelectionModel().getSelectedItem();
-                    problemList.getItems().setAll(items);
-                    if (selectFirst && !items.isEmpty()) {
-                        problemList.getSelectionModel().select(0);
-                    } else if (selected != null) {
-                        items.stream().filter(p -> p.id() == selected.id()).findFirst()
-                                .ifPresent(p -> problemList.getSelectionModel().select(p));
-                    }
-                });
+                Platform.runLater(() -> applyProblems(items, selectFirst));
             } catch (Exception e) {
                 Platform.runLater(() -> toast("Could not load problems: " + e.getMessage()));
             }
         });
+    }
+
+    /** Applies a problem list, keeping the current selection where possible. */
+    private void applyProblems(List<ProblemSummaryDto> items, boolean selectFirst) {
+        var selected = problemList.getSelectionModel().getSelectedItem();
+        problemList.getItems().setAll(items);
+        if (items.isEmpty()) {
+            return;
+        }
+        if (selectFirst || selected == null) {
+            problemList.getSelectionModel().select(0);
+            return;
+        }
+        items.stream().filter(p -> p.id() == selected.id()).findFirst()
+                .ifPresentOrElse(p -> problemList.getSelectionModel().select(p),
+                        () -> problemList.getSelectionModel().select(0));
     }
 
     private void loadProblem(long id) {
@@ -2338,26 +2628,43 @@ public class MainController {
         String link = dark ? "#7fb4ff" : "#2f6fd0";
         return """
                 <html><head><meta charset="utf-8"><style>
-                  html, body { color: %s; background: %s; }
+                  html, body { color: %s !important; background: %s !important; }
                   body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 14px;
                          margin: 18px; line-height: 1.55; }
-                  /* Uploaded statements bring their own markup and often no colours;
-                     without this they inherit the default black and vanish on dark. */
-                  /* !important because uploaded statements bring their own markup
-                     and sometimes their own colours, which would otherwise leave
-                     black text on a dark background. */
+                  /* Uploaded statements are whole HTML documents carrying their own
+                     <style> block — typically light-theme colours such as
+                     `code{background:#f3f4f6}`. That block appears *after* this one
+                     in the document, so without !important it wins on source order
+                     and leaves white boxes; combined with the forced light text
+                     below that is white-on-white and completely unreadable.
+                     Everything the uploaded sheet can set has to be reclaimed. */
                   *, h1, h2, h3, h4, h5, h6, p, li, td, th, div, span, b, i, em, strong,
                   code, pre, blockquote, sup, sub, table, caption { color: %s !important; }
-                  a { color: %s; }
+                  /* Wildcard first, then the specific rules below out-specify it
+                     (both !important, so specificity decides the winner). */
+                  * { background: transparent !important; background-color: transparent !important; }
+                  a { color: %s !important; }
                   h1 { font-size: 19px; margin: 0 0 4px; }
                   h2 { font-size: 15px; margin-top: 20px; }
-                  .limits { color: %s; font-size: 12px; margin-bottom: 14px; }
-                  pre.sample, pre, code { border: 1px solid %s; background: %s; padding: 10px;
-                                    border-radius: 6px; font-family: ui-monospace, monospace;
+                  h1, h2, h3, h4, h5, h6 { border-color: %s !important; }
+                  .limits { color: %s !important; font-size: 12px; margin-bottom: 14px; }
+                  pre.sample, pre, code, kbd, samp, tt {
+                                    border: 1px solid %s !important;
+                                    background: %s !important;
+                                    background-color: %s !important;
+                                    padding: 10px; border-radius: 6px;
+                                    font-family: ui-monospace, monospace;
                                     overflow-x: auto; }
+                  /* Inline code sits inside a sentence — full block padding there
+                     produced the tall white chips seen in the statement body. */
+                  code { padding: 1px 5px; }
+                  pre code { padding: 0; border: 0 !important; background: transparent !important; }
                   table { border-collapse: collapse; }
-                  td, th { border: 1px solid %s; padding: 4px 8px; }
-                </style></head><body>""".formatted(fg, bg, fg, link, muted, border, sampleBg, border)
+                  td, th { border: 1px solid %s !important; padding: 4px 8px; }
+                  th { background: %s !important; }
+                </style></head><body>""".formatted(
+                        fg, bg, fg, link, border, muted, border, sampleBg, sampleBg,
+                        border, sampleBg)
                 + html + "</body></html>";
     }
 
@@ -2406,13 +2713,51 @@ public class MainController {
         });
     }
 
+    /**
+     * Runs the current code against the student's own input. Never judged and
+     * never stored, so it costs no attempt and no penalty.
+     */
+    private void runCustom(Language language, String source) {
+        ProblemSummaryDto problem = problemList.getSelectionModel().getSelectedItem();
+        if (problem == null) {
+            editorPanelController.showRunResult("", "Pick a problem first");
+            return;
+        }
+        String input = editorPanelController.getCustomInput();
+        async(() -> {
+            try {
+                var r = state.api().runCustom(new com.arbitrator.common.dto.CustomRunRequest(
+                        problem.id(), language, source, input));
+                Platform.runLater(() -> {
+                    if (!r.compiled()) {
+                        editorPanelController.showRunResult(r.compilerOutput(),
+                                "compile error");
+                    } else {
+                        String body = r.stdout();
+                        if (!r.stderr().isBlank()) {
+                            body += "\n--- stderr ---\n" + r.stderr();
+                        }
+                        editorPanelController.showRunResult(body,
+                                r.timedOut() ? "timed out" : r.execTimeMs() + " ms");
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() ->
+                        editorPanelController.showRunResult("", e.getMessage()));
+            }
+        });
+    }
+
     // --- live channel --------------------------------------------------------
 
     private void connectLive() {
         async(() -> {
             try {
                 state.api().connectVerdicts(event -> Platform.runLater(() -> {
-                    VerdictBanner.show(rootStack, event);
+                    // Clicking the banner jumps to Submissions and selects that
+                    // run, so "what exactly did I send?" is one click away.
+                    VerdictBanner.show(rootStack, event,
+                            () -> showSubmission(event.submissionId()));
                     refreshProblems(false);              // badge update (§4.2)
                     submissionsPanelController.refresh(); // FR-16 history stays live
                 }));
@@ -2434,8 +2779,28 @@ public class MainController {
     /** Applies a pushed contest state: clock, pause, freeze and end (FR-06). */
     private void onContestState(com.arbitrator.common.dto.ContestStateDto contestState) {
         Platform.runLater(() -> {
+            ContestState previous = state.contest() == null ? null : state.contest().state();
             state.setContest(contestState);
             contestTitleLabel.setText(contestState.title());
+
+            boolean released = contestState.state().releasesProblems();
+            boolean transitioned = previous != contestState.state();
+
+            // Refresh on EVERY push, not only on a state change: uploading a
+            // problem does not change the state, and relying on transitions
+            // meant one missed push left the screen stale until sign-out.
+            if (released) {
+                refreshProblems(transitioned);
+            } else {
+                problemList.getItems().clear();
+                problemHeader.setText("");
+                statementView.getEngine().loadContent(waitingPage());
+            }
+            if (transitioned) {
+                toast(contestState.state() == ContestState.ACTIVE
+                        ? bundle("contest.started") : bundle("contest.changed")
+                                .replace("{s}", contestState.state().name()));
+            }
             if (contestState.state() != ContestState.ENDED) {
                 ended = false;
                 if (timer != null && timer.getStatus() != Animation.Status.RUNNING) {
@@ -2464,6 +2829,31 @@ public class MainController {
         connLabel.getStyleClass().setAll(live ? "conn-ok" : "conn-lost");
     }
 
+    /** Opens the Submissions tab and selects one run. */
+    private void showSubmission(long submissionId) {
+        tabs.getSelectionModel().select(2);
+        submissionsPanelController.selectSubmission(submissionId);
+    }
+
+    /** Shown in the statement pane while the contest sits in its lobby. */
+    private String waitingPage() {
+        boolean dark = state.darkMode();
+        return """
+                <html><head><meta charset="utf-8"><style>
+                  body { font-family: -apple-system, "Segoe UI", sans-serif;
+                         background: %s; color: %s; display: flex; height: 90vh;
+                         align-items: center; justify-content: center; text-align: center; }
+                  h2 { font-weight: 600; }
+                  p { color: %s; }
+                </style></head><body><div>
+                  <h2>Waiting for the contest to start</h2>
+                  <p>Problems appear here the moment your instructor starts it.</p>
+                </div></body></html>"""
+                .formatted(dark ? "#1c222c" : "#ffffff",
+                        dark ? "#e6eaf0" : "#1c2430",
+                        dark ? "#9aa5b4" : "#6b7684");
+    }
+
     // --- timer (FR-06, UIF-05/06/07) -----------------------------------------
 
     private void startTimer() {
@@ -2476,6 +2866,14 @@ public class MainController {
     private void tick() {
         ContestState contestState = state.contest().state();
 
+        if (contestState == ContestState.LOBBY) {
+            // Doors open, clock not started: no countdown, nothing submittable.
+            timerLabel.setText(bundle("timer.waiting"));
+            timerLabel.getStyleClass().setAll("timer", "timer-waiting");
+            stopPulse();
+            setSubmissionsAllowed(false);
+            return;
+        }
         if (contestState == ContestState.PAUSED) {
             timerLabel.setText(bundle("timer.paused"));
             timerLabel.getStyleClass().setAll("timer", "timer-paused");
@@ -2781,6 +3179,37 @@ public class SubmissionsPanelController {
     }
 
     /**
+     * Selects one submission, refreshing first if it isn't in the table yet —
+     * a verdict banner can be clicked before the history poll has caught up.
+     */
+    public void selectSubmission(long submissionId) {
+        var existing = table.getItems().stream()
+                .filter(r -> r.id() == submissionId).findFirst();
+        if (existing.isPresent()) {
+            table.getSelectionModel().select(existing.get());
+            table.scrollTo(existing.get());
+            return;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                List<SubmissionHistoryDto> rows = state.api().mySubmissions();
+                Platform.runLater(() -> {
+                    table.setItems(FXCollections.observableArrayList(rows));
+                    rows.stream().filter(r -> r.id() == submissionId).findFirst()
+                            .ifPresent(r -> {
+                                table.getSelectionModel().select(r);
+                                table.scrollTo(r);
+                            });
+                });
+            } catch (Exception ignored) {
+                // the periodic refresh will pick it up shortly
+            }
+        }, "history-select");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
      * Source is fetched lazily per row rather than carried in the history list,
      * which is polled on every verdict and would otherwise ship every blob.
      */
@@ -2868,13 +3297,19 @@ public class SubmissionsPanelController {
         @Override
         protected void updateItem(Verdict verdict, boolean empty) {
             super.updateItem(verdict, empty);
-            getStyleClass().removeAll("cell-solved", "cell-failed");
-            if (empty || verdict == null) {
-                setText(empty ? null : "judging…");
+            // Drop any previous verdict class; cells are recycled while scrolling.
+            getStyleClass().removeIf(c -> c.startsWith("v-"));
+            if (empty) {
+                setText(null);
+                return;
+            }
+            if (verdict == null) {
+                setText("judging…");
+                getStyleClass().add("v-pending");
                 return;
             }
             setText(verdict.name() + " — " + verdict.label());
-            getStyleClass().add(verdict == Verdict.AC ? "cell-solved" : "cell-failed");
+            getStyleClass().add("v-" + verdict.name());
         }
     }
 }
@@ -2907,6 +3342,11 @@ public final class VerdictBanner {
     }
 
     public static void show(StackPane overlay, VerdictEventDto event) {
+        show(overlay, event, null);
+    }
+
+    /** @param onClick opened when the banner is clicked (may be null). */
+    public static void show(StackPane overlay, VerdictEventDto event, Runnable onClick) {
         String symbol = switch (event.verdict()) {
             case AC -> "✓ ";
             case WA -> "✗ ";
@@ -2914,6 +3354,7 @@ public final class VerdictBanner {
             case MLE -> "💾 ";
             case CE -> "⚙ ";
             case RE -> "💥 ";
+            case OLE -> "📄 ";
         };
         String text = symbol + event.verdict().label()
                 + (event.execTimeMs() >= 0 ? "   " + event.execTimeMs() + " ms" : "")
@@ -2932,10 +3373,18 @@ public final class VerdictBanner {
         StackPane.setAlignment(banner, Pos.TOP_CENTER);
 
         if (event.verdict() == Verdict.CE && event.compilerOutput() != null) {
-            Label hint = new Label("  (click to view compiler log)");
+            Label hint = new Label("  (click for the compiler log)");
             hint.getStyleClass().add("banner-text");
             banner.getChildren().add(hint);
             banner.setOnMouseClicked(e -> showCompilerLog(overlay, event.compilerOutput()));
+        } else if (onClick != null) {
+            Label hint = new Label("  (click to see your submission)");
+            hint.getStyleClass().add("banner-text");
+            banner.getChildren().add(hint);
+            banner.setOnMouseClicked(e -> {
+                overlay.getChildren().remove(banner);
+                onClick.run();
+            });
         }
 
         overlay.getChildren().add(banner);
@@ -2990,6 +3439,8 @@ import java.util.function.Consumer;
 
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.LeaderboardCellDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
@@ -3117,6 +3568,12 @@ public class FakeJudgeApi implements JudgeApi {
     }
 
     @Override
+    public CustomRunResultDto runCustom(CustomRunRequest request) {
+        return new CustomRunResultDto(true, "",
+                "(mock) echoed input:\n" + request.input(), "", 12, false);
+    }
+
+    @Override
     public List<SubmissionHistoryDto> mySubmissions() {
         return List.copyOf(history);
     }
@@ -3207,6 +3664,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.arbitrator.client.app.ServerConfig;
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ContestStateDto;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LoginRequest;
@@ -3284,6 +3743,11 @@ public class HttpJudgeApi implements JudgeApi {
     @Override
     public SubmitAckDto submit(SubmitRequest request) throws ApiException {
         return post(ApiPaths.SUBMISSIONS, request, SubmitAckDto.class);
+    }
+
+    @Override
+    public CustomRunResultDto runCustom(CustomRunRequest request) throws ApiException {
+        return post(ApiPaths.RUN_CUSTOM, request, CustomRunResultDto.class);
     }
 
     @Override
@@ -3440,6 +3904,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import com.arbitrator.common.dto.ContestStateDto;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LoginResponse;
@@ -3482,6 +3948,9 @@ public interface JudgeApi extends AutoCloseable {
     ProblemDetailDto problem(long id) throws ApiException;
 
     SubmitAckDto submit(SubmitRequest request) throws ApiException;
+
+    /** Run against custom input without submitting — never judged or stored. */
+    CustomRunResultDto runCustom(CustomRunRequest request) throws ApiException;
 
     List<SubmissionHistoryDto> mySubmissions() throws ApiException;
 
@@ -3858,6 +4327,7 @@ server.port=8080
 
 .timer-critical { -fx-text-fill: -c-red; }
 .timer-paused   { -fx-text-fill: -c-amber; }
+.timer-waiting  { -fx-text-fill: -c-muted; -fx-font-size: 20px; }
 
 .conn-ok   { -fx-text-fill: -c-green; -fx-font-weight: bold; }
 .conn-lost { -fx-text-fill: -c-red;   -fx-font-weight: bold; }
@@ -3957,6 +4427,12 @@ server.port=8080
 }
 
 .code-area .text { -fx-fill: -c-text; }
+
+/* The caret defaults to black and is invisible on a dark editor background. */
+.code-area .caret { -fx-stroke: -c-text; -fx-stroke-width: 2; }
+.root.dark .code-area .caret { -fx-stroke: white; -fx-stroke-width: 2; }
+.code-area .selection { -fx-fill: derive(-c-accent, 60%); }
+.root.dark .code-area .selection { -fx-fill: derive(-c-accent, -40%); }
 .keyword { -fx-fill: -c-accent; -fx-font-weight: bold; }
 .root.dark .keyword { -fx-fill: #7fb4ff; }
 
@@ -3974,6 +4450,7 @@ server.port=8080
 .banner-MLE { -fx-background-color: -c-orange; }
 .banner-RE  { -fx-background-color: -c-orange; }
 .banner-CE  { -fx-background-color: -c-purple; }
+.banner-OLE { -fx-background-color: -c-orange; }
 
 .compiler-log {
     -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
@@ -3981,6 +4458,45 @@ server.port=8080
     -fx-control-inner-background: -c-surface;
     -fx-text-fill: -c-text;
 }
+
+/* --- text areas + titled panes -------------------------------------------- */
+/* A TextArea paints its own inner background; -fx-background-color does NOT
+   reach it, which is why the custom I/O boxes stayed white in dark mode. */
+.text-area {
+    -fx-control-inner-background: -c-surface;
+    -fx-text-fill: -c-text;
+    -fx-background-color: -c-border;
+    -fx-background-radius: 6px;
+}
+
+.text-area .content { -fx-background-color: -c-surface; -fx-background-radius: 6px; }
+.text-area .scroll-pane, .text-area .viewport { -fx-background-color: transparent; }
+.text-area:focused { -fx-background-color: -c-accent; }
+
+.titled-pane > .title {
+    -fx-background-color: -c-surface-2;
+    -fx-border-color: -c-border;
+    -fx-background-radius: 6px 6px 0 0;
+}
+
+.titled-pane > .title > .text { -fx-fill: -c-text; -fx-font-weight: bold; }
+.titled-pane > .title > .arrow-button .arrow { -fx-background-color: -c-muted; }
+.titled-pane > *.content {
+    -fx-background-color: -c-surface;
+    -fx-border-color: -c-border;
+    -fx-background-radius: 0 0 6px 6px;
+}
+
+/* --- per-verdict colours (NFR-U02: colour + full descriptive text) --------- */
+
+.v-AC  { -fx-text-fill: -c-green;  -fx-font-weight: bold; }
+.v-WA  { -fx-text-fill: -c-red;    -fx-font-weight: bold; }
+.v-TLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-MLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-RE  { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-OLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.v-CE  { -fx-text-fill: -c-purple; -fx-font-weight: bold; }
+.v-pending { -fx-text-fill: -c-muted; }
 
 /* --- standings extras --------------------------------------------------------- */
 
@@ -4015,6 +4531,9 @@ server.port=8080
 <?import javafx.scene.control.Hyperlink?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <!-- Contest picker (shown after login when more than one contest is joinable) -->
@@ -4027,6 +4546,15 @@ server.port=8080
 
     <VBox alignment="CENTER" spacing="8" maxWidth="460" maxHeight="360" styleClass="box">
         <padding><Insets top="16" right="18" bottom="16" left="18"/></padding>
+
+        <!-- The list refreshes itself every few seconds; the button is for
+             the impatient, and makes it obvious the screen is live. -->
+        <HBox alignment="CENTER_LEFT" spacing="8">
+            <Label text="%picker.available" styleClass="subtitle"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button fx:id="refreshButton" text="%picker.refresh" onAction="#onRefresh"
+                    styleClass="refresh-button"/>
+        </HBox>
 
         <ListView fx:id="contestList" prefHeight="220" VBox.vgrow="ALWAYS"/>
         <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>
@@ -4042,6 +4570,8 @@ server.port=8080
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
@@ -4065,6 +4595,22 @@ server.port=8080
 
     <!-- CodeArea is inserted here at runtime (index 1: below the toolbar,
          above the status bar) — see EditorController.initialize -->
+
+    <!-- Custom input / output: run without submitting -->
+    <TitledPane fx:id="customPane" text="%editor.custom" expanded="false" animated="false">
+        <VBox spacing="6">
+            <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
+            <HBox spacing="8" alignment="CENTER_LEFT">
+                <Button fx:id="runButton" text="%editor.run" onAction="#onRunCustom"/>
+                <Label fx:id="runStatus" styleClass="subtitle"/>
+            </HBox>
+            <Label text="%editor.customInput" styleClass="subtitle"/>
+            <TextArea fx:id="customInput" prefRowCount="3" styleClass="compiler-log"/>
+            <Label text="%editor.customOutput" styleClass="subtitle"/>
+            <TextArea fx:id="customOutput" prefRowCount="4" editable="false"
+                      styleClass="compiler-log"/>
+        </VBox>
+    </TitledPane>
 
     <HBox alignment="CENTER_RIGHT" styleClass="editor-statusbar">
         <padding><Insets top="3" right="8" bottom="3" left="8"/></padding>
@@ -4347,8 +4893,10 @@ register.error.generic=Registration failed — try a different username
 picker.subtitle=Choose a contest to enter
 picker.enter=Enter contest
 picker.logout=← Sign out
-picker.none=No contest is open right now — ask your instructor to start one
+picker.none=No contest is running — ask your instructor to open one
 picker.error=Could not load contests
+picker.available=Available contests
+picker.refresh=⟳ Refresh
 
 main.problems=Problems
 main.tab.problems=Problems
@@ -4358,6 +4906,8 @@ main.refresh=⟳ Refresh
 main.signOut=Sign out
 main.switchContest=Switch contest
 main.refreshed=Refreshed
+contest.started=The contest has started — problems are now available
+contest.changed=Contest is now {s}
 main.shortcuts=Ctrl+Enter submit  ·  Ctrl+B panel  ·  Ctrl+D theme  ·  F11 fullscreen
 
 submissions.title=My submissions
@@ -4367,6 +4917,11 @@ leaderboard.title=Standings
 leaderboard.frozen=⚠ Leaderboard Frozen — results are hidden until the contest ends
 
 editor.language=Language
+editor.custom=Custom input / output  (run without submitting)
+editor.run=▶ Run
+editor.customInput=Input
+editor.customOutput=Output
+editor.running=running…
 editor.submit=Submit  (Ctrl+Enter)
 
 submit.empty=Write some code before submitting
@@ -4374,6 +4929,7 @@ submit.queued=Submission received — queued at position {n}
 
 timer.ended=Contest Ended
 timer.paused=PAUSED
+timer.waiting=WAITING TO START
 === FILE: arbitrator-common/pom.xml ===
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -4423,6 +4979,7 @@ public final class ApiPaths {
     public static final String PROBLEM_BY_ID = "/api/problems/{id}";       // GET detail
     public static final String SUBMISSIONS = "/api/submissions";           // POST
     public static final String SUBMISSIONS_MINE = "/api/submissions/mine"; // GET history
+    public static final String RUN_CUSTOM = "/api/run";                    // POST, not judged
     public static final String SUBMISSION_SOURCE = "/api/submissions/{id}/source";
     public static final String LEADERBOARD = "/api/leaderboard";           // GET current contest
 
@@ -4430,6 +4987,7 @@ public final class ApiPaths {
     public static final String ADMIN_API_PREFIX = "/api/admin";
     public static final String ADMIN_CONTESTS = "/api/admin/contests";
     public static final String ADMIN_CONTEST_BY_ID = "/api/admin/contests/{id}"; // DELETE
+    public static final String ADMIN_CONTEST_OPEN = "/api/admin/contests/{id}/open";
     public static final String ADMIN_CONTEST_START = "/api/admin/contests/{id}/start";
     public static final String ADMIN_CONTEST_END = "/api/admin/contests/{id}/end";
     public static final String ADMIN_CONTEST_PAUSE = "/api/admin/contests/{id}/pause";
@@ -4521,6 +5079,40 @@ public record ContestSummaryDto(
         int durationMinutes,
         int problemCount,
         boolean joinable
+) {
+}
+=== FILE: arbitrator-common/src/main/java/com/arbitrator/common/dto/CustomRunRequest.java ===
+package com.arbitrator.common.dto;
+
+import com.arbitrator.common.enums.Language;
+
+/**
+ * "Run against my own input" — compiles and executes without creating a
+ * submission, so it never reaches the standings, the penalty count or the
+ * submission history. Uses the problem only for its time and memory limits.
+ */
+public record CustomRunRequest(
+        long problemId,
+        Language language,
+        String sourceCode,
+        String input
+) {
+}
+=== FILE: arbitrator-common/src/main/java/com/arbitrator/common/dto/CustomRunResultDto.java ===
+package com.arbitrator.common.dto;
+
+/**
+ * Outcome of a custom run. Deliberately not a {@link com.arbitrator.common.enums.Verdict}:
+ * there is no expected output to compare against, so "correct" is not a
+ * question this can answer — it only reports what the program did.
+ */
+public record CustomRunResultDto(
+        boolean compiled,
+        String compilerOutput,   // non-empty when compiled == false
+        String stdout,
+        String stderr,
+        long execTimeMs,
+        boolean timedOut
 ) {
 }
 === FILE: arbitrator-common/src/main/java/com/arbitrator/common/dto/LeaderboardCellDto.java ===
@@ -4752,8 +5344,15 @@ package com.arbitrator.common.enums;
 /** Contest lifecycle per FR-08 / FR-19. */
 public enum ContestState {
 
-    /** Created but not started; invisible to students. */
+    /** Created but not opened; invisible to students. */
     DRAFT,
+
+    /**
+     * Doors open, contest not begun. Students can enter and wait, but no
+     * problems are released, no clock runs and nothing can be submitted —
+     * a holding room so everyone is seated before the timer starts.
+     */
+    LOBBY,
 
     /** Running and accepting submissions. */
     ACTIVE,
@@ -4767,14 +5366,27 @@ public enum ContestState {
     /** Finished; submissions permanently refused (BR-02). */
     ENDED;
 
-    /** States a student may join and work in. */
+    /** States a student may enter — including the pre-start holding room. */
     public boolean isJoinable() {
-        return this == ACTIVE || this == PAUSED || this == FROZEN;
+        return this == LOBBY || this == ACTIVE || this == PAUSED || this == FROZEN;
     }
 
     /** Only these accept new submissions. */
     public boolean acceptsSubmissions() {
         return this == ACTIVE || this == FROZEN;
+    }
+
+    /**
+     * Whether problem statements are visible. False in LOBBY: releasing the
+     * problems early would let people read and plan before the clock starts.
+     */
+    public boolean releasesProblems() {
+        return this == ACTIVE || this == PAUSED || this == FROZEN || this == ENDED;
+    }
+
+    /** Whether a countdown should be shown/counted at all. */
+    public boolean hasStarted() {
+        return this != DRAFT && this != LOBBY;
     }
 }
 === FILE: arbitrator-common/src/main/java/com/arbitrator/common/enums/Language.java ===
@@ -4828,7 +5440,8 @@ public enum Verdict {
     TLE("Time Limit Exceeded"),
     MLE("Memory Limit Exceeded"),
     CE("Compilation Error"),
-    RE("Runtime Error");
+    RE("Runtime Error"),
+    OLE("Output Limit Exceeded");
 
     private final String label;
 
@@ -4948,6 +5561,89 @@ public class ArbitratorServerApplication {
         SpringApplication.run(ArbitratorServerApplication.class, args);
     }
 }
+=== FILE: arbitrator-server/src/main/java/com/arbitrator/server/config/ContestBootReset.java ===
+package com.arbitrator.server.config;
+
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+
+import com.arbitrator.common.enums.ContestState;
+import com.arbitrator.server.entity.Contest;
+import com.arbitrator.server.repo.ContestRepository;
+
+/**
+ * Puts every contest back to DRAFT when the server boots.
+ *
+ * The contest state lives in MySQL, so it survives a restart: a contest left
+ * ACTIVE at shutdown came back ACTIVE with its clock still ticking, and the
+ * first student to open the client walked straight into a running contest that
+ * nobody had started. For a lab session that is wrong twice over — the timer
+ * has been running against the wall clock while the server was down, and the
+ * problems are released before the instructor is ready.
+ *
+ * So a freshly booted server holds nothing live (CLAUDE.md, "Contest
+ * lifecycle"): the instructor opens the lobby and then starts, deliberately.
+ *
+ * ENDED contests are left alone — they are history, not something to reopen.
+ * Nothing is deleted: only the state and the clock fields are cleared, and the
+ * submissions of the previous run stay untouched until {@code start()} archives
+ * them (see {@code ContestResetListener}).
+ *
+ * Set {@code arbitrator.contest.reset-on-boot=false} to keep a contest running
+ * across a restart — the right choice only if the server is expected to be
+ * bounced mid-contest and resumed.
+ */
+@Configuration
+public class ContestBootReset {
+
+    private static final Logger log = LoggerFactory.getLogger(ContestBootReset.class);
+
+    /** Everything that counts as "live" and must not survive a restart. */
+    private static final List<ContestState> LIVE = List.of(
+            ContestState.LOBBY, ContestState.ACTIVE,
+            ContestState.PAUSED, ContestState.FROZEN);
+
+    /**
+     * Runs before {@code DemoDataSeeder}'s ordering is relevant but after
+     * Flyway, which Spring Boot always applies before any CommandLineRunner.
+     */
+    @Bean
+    @Order(0)
+    CommandLineRunner resetContestsOnBoot(
+            ContestRepository contests,
+            @Value("${arbitrator.contest.reset-on-boot:true}") boolean enabled) {
+        return args -> {
+            if (!enabled) {
+                log.info("Contest boot reset disabled — live contests keep running across restarts");
+                return;
+            }
+            List<Contest> live = contests.findAll().stream()
+                    .filter(c -> LIVE.contains(c.getState()))
+                    .toList();
+            if (live.isEmpty()) {
+                return;
+            }
+            for (Contest c : live) {
+                log.info("Boot reset: \"{}\" was {} — returning it to DRAFT",
+                        c.getTitle(), c.getState());
+                c.setState(ContestState.DRAFT);
+                c.setStartTime(null);
+                c.setPausedAt(null);
+                c.setPausedMillis(0);
+            }
+            contests.saveAll(live);
+            log.info("{} contest(s) reset to DRAFT on boot — open the lobby from /admin to run one",
+                    live.size());
+        };
+    }
+}
 === FILE: arbitrator-server/src/main/java/com/arbitrator/server/config/DemoDataSeeder.java ===
 package com.arbitrator.server.config;
 
@@ -5005,8 +5701,11 @@ public class DemoDataSeeder {
 
             Contest contest = new Contest();
             contest.setTitle("Lab Contest #1");
-            contest.setState(ContestState.ACTIVE);
-            contest.setStartTime(Instant.now());
+            // DRAFT, not ACTIVE: a freshly started server must not put a
+            // contest live on its own. The instructor opens the lobby and
+            // starts it explicitly.
+            contest.setState(ContestState.DRAFT);
+            contest.setStartTime(null);
             contest.setDurationMinutes(180);
             contests.save(contest);
 
@@ -5279,6 +5978,12 @@ public class AdminContestController {
         return summarise(contestService.create(title, durationMinutes));
     }
 
+    /** Doors open, clock not running — students wait in the lobby. */
+    @PostMapping(ApiPaths.ADMIN_CONTEST_OPEN)
+    public ContestStateDto open(@PathVariable long id) {
+        return applied(contestService.openLobby(id));
+    }
+
     @PostMapping(ApiPaths.ADMIN_CONTEST_START)
     public ContestStateDto start(@PathVariable long id) {
         return applied(contestService.start(id));
@@ -5527,6 +6232,7 @@ import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ProblemPackageResultDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.server.entity.Problem;
+import com.arbitrator.server.realtime.ContestStatePublisher;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
@@ -5544,17 +6250,29 @@ public class AdminProblemController {
     private final TestCaseRepository testCases;
     private final SubmissionRepository submissions;
     private final ContestService contestService;
+    private final ContestStatePublisher statePublisher;
 
     public AdminProblemController(ProblemPackageService packageService,
                                   ProblemRepository problems,
                                   TestCaseRepository testCases,
                                   SubmissionRepository submissions,
-                                  ContestService contestService) {
+                                  ContestService contestService,
+                                  ContestStatePublisher statePublisher) {
         this.packageService = packageService;
         this.problems = problems;
         this.testCases = testCases;
         this.submissions = submissions;
         this.contestService = contestService;
+        this.statePublisher = statePublisher;
+    }
+
+    /** Re-pushes contest state so clients re-fetch the problem list. */
+    private void notifyContestChanged() {
+        try {
+            statePublisher.publish(contestService.requireCurrent());
+        } catch (RuntimeException ignored) {
+            // no current contest; nothing is listening anyway
+        }
     }
 
     /**
@@ -5573,6 +6291,11 @@ public class AdminProblemController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read upload");
         }
         ProblemPackageResultDto result = packageService.importPackage(bytes);
+        if (result.accepted()) {
+            // Tell every connected client the contest changed, so a newly
+            // uploaded problem appears without anyone signing out and in.
+            notifyContestChanged();
+        }
         return ResponseEntity
                 .status(result.accepted() ? HttpStatus.CREATED : HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(result);
@@ -5606,6 +6329,7 @@ public class AdminProblemController {
         }
         testCases.findByProblemIdOrderByIdxAsc(id).forEach(testCases::delete);
         problems.delete(problem);
+        notifyContestChanged();
         return ResponseEntity.noContent().build();
     }
 }
@@ -5738,8 +6462,9 @@ public class ProblemController {
     @GetMapping(ApiPaths.PROBLEMS)
     public List<ProblemSummaryDto> list(Principal principal) {
         long userId = userService.requireByUsername(principal.getName()).getId();
-        long contestId = contestService.requireCurrent().getId();
-        return problemService.listForContest(contestId, userId);
+        var contest = contestService.requireCurrent();
+        return problemService.listForContest(contest.getId(), userId,
+                contest.getState().releasesProblems());
     }
 
     @GetMapping(ApiPaths.PROBLEM_BY_ID)
@@ -5762,10 +6487,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.arbitrator.common.api.ApiPaths;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
+import com.arbitrator.server.judge.CustomRunService;
 import com.arbitrator.server.service.SubmissionService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -5774,9 +6502,12 @@ import jakarta.servlet.http.HttpServletRequest;
 public class SubmissionController {
 
     private final SubmissionService submissionService;
+    private final CustomRunService customRunService;
 
-    public SubmissionController(SubmissionService submissionService) {
+    public SubmissionController(SubmissionService submissionService,
+                                CustomRunService customRunService) {
         this.submissionService = submissionService;
+        this.customRunService = customRunService;
     }
 
     /** FR-09 EARS: 202 Accepted + queue position. */
@@ -5787,6 +6518,16 @@ public class SubmissionController {
         SubmitAckDto ack = submissionService.submit(
                 principal.getName(), req, http.getRemoteAddr());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ack);
+    }
+
+    /**
+     * Run against custom input without submitting. Not judged, not stored, no
+     * effect on standings — so it is deliberately exempt from the BR-01
+     * submission cooldown.
+     */
+    @PostMapping(ApiPaths.RUN_CUSTOM)
+    public CustomRunResultDto runCustom(@RequestBody CustomRunRequest req) {
+        return customRunService.run(req);
     }
 
     /** UIF-12: the code behind one of my submissions. */
@@ -6389,6 +7130,145 @@ public class User {
         return createdAt;
     }
 }
+=== FILE: arbitrator-server/src/main/java/com/arbitrator/server/judge/CustomRunService.java ===
+package com.arbitrator.server.judge;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
+import com.arbitrator.server.entity.Problem;
+import com.arbitrator.server.repo.ProblemRepository;
+
+/**
+ * Runs a student's code against input they typed themselves.
+ *
+ * Nothing is persisted: no submission row, no verdict, no effect on standings
+ * or penalty. It exists so a contestant can debug without burning an attempt,
+ * which is what every real judge offers.
+ *
+ * It goes through the same {@link SandboxExecutor} as real judging, so the
+ * identical limits apply — this must never become a way to run unbounded code.
+ */
+@Service
+public class CustomRunService {
+
+    /** Typed input is small; anything larger is a misuse of the feature. */
+    private static final int MAX_INPUT_CHARS = 64 * 1024;
+
+    private final ProblemRepository problems;
+    private final SandboxExecutor sandbox;
+    private final JudgeProperties props;
+
+    public CustomRunService(ProblemRepository problems, SandboxExecutor sandbox,
+                            JudgeProperties props) {
+        this.problems = problems;
+        this.sandbox = sandbox;
+        this.props = props;
+    }
+
+    public CustomRunResultDto run(CustomRunRequest req) {
+        if (req.sourceCode() == null || req.sourceCode().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Empty source code");
+        }
+        if (req.language() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Language is required");
+        }
+        String input = req.input() == null ? "" : req.input();
+        if (input.length() > MAX_INPUT_CHARS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Custom input is limited to " + (MAX_INPUT_CHARS / 1024) + " KB");
+        }
+
+        Problem problem = problems.findById(req.problemId()).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
+
+        JudgeProperties.LanguageSpec spec =
+                props.getLanguages().get(req.language().configKey());
+        if (spec == null) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Language not configured: " + req.language());
+        }
+
+        Path workDir = null;
+        try {
+            workDir = sandbox.createWorkDir(-System.nanoTime());   // negative: not a submission
+            Path src = workDir.resolve(spec.getSourceFile());
+            Path exe = workDir.resolve("prog");
+            Files.writeString(src, req.sourceCode(), StandardCharsets.UTF_8);
+
+            if (spec.getCompile() != null && !spec.getCompile().isBlank()) {
+                ExecutionResult c = sandbox.compile(workDir,
+                        render(spec.getCompile(), src, exe, workDir));
+                if (!c.ok()) {
+                    String msg = c.stderr().isBlank() ? c.stdout() : c.stderr();
+                    return new CustomRunResultDto(false,
+                            truncate(stripPaths(msg, workDir)),
+                            "", "", -1, false);
+                }
+            }
+
+            Path inputFile = workDir.resolve("__input.txt");
+            Files.writeString(inputFile, input, StandardCharsets.UTF_8);
+
+            ExecutionResult r = sandbox.run(workDir, render(spec.getRun(), src, exe, workDir),
+                    inputFile, problem.getTimeLimitMs(), problem.getMemoryLimitKb());
+
+            return new CustomRunResultDto(true, "", truncate(r.stdout()), truncate(r.stderr()),
+                    Math.max(r.wallTimeMs(), 0), r.timedOut());
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Run interrupted");
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Could not run: " + e.getMessage());
+        } finally {
+            sandbox.cleanup(workDir);
+        }
+    }
+
+    /** Fills {src} {exe} {dir} into a whitespace-separated command template. */
+    private static List<String> render(String template, Path src, Path exe, Path dir) {
+        List<String> out = new ArrayList<>();
+        for (String token : template.trim().split("\\s+")) {
+            out.add(token
+                    .replace("{src}", src.toString())
+                    .replace("{exe}", exe.toString())
+                    .replace("{dir}", dir.toString()));
+        }
+        return out;
+    }
+
+    /**
+     * Compiler messages carry the absolute sandbox path, which is noise to a
+     * student and needlessly exposes server layout. Reduce it to the bare
+     * source file name so errors read like a local build.
+     */
+    static String stripPaths(String message, Path workDir) {
+        if (message == null) {
+            return "";
+        }
+        return message
+                .replace(workDir.toString() + "/", "")
+                .replace(workDir.toString(), "");
+    }
+
+    private static String truncate(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= 8192 ? s : s.substring(0, 8192) + "\n… truncated";
+    }
+}
 === FILE: arbitrator-server/src/main/java/com/arbitrator/server/judge/ExecutionResult.java ===
 package com.arbitrator.server.judge;
 
@@ -6724,7 +7604,10 @@ public class JudgeWorker {
         if (spec.getCompile() != null && !spec.getCompile().isBlank()) {
             ExecutionResult c = sandbox.compile(workDir, render(spec.getCompile(), src, exe, workDir));
             if (!c.ok()) {
-                String msg = truncate(c.stderr().isBlank() ? c.stdout() : c.stderr());
+                String raw = c.stderr().isBlank() ? c.stdout() : c.stderr();
+                // Students see a clean "main.cpp:4:5: error", not the sandbox path.
+                String msg = truncate(
+                        CustomRunService.stripPaths(raw, workDir));
                 return Outcome.ce(msg);
             }
         }
@@ -6751,6 +7634,10 @@ public class JudgeWorker {
                 v = Verdict.TLE;
             } else if (r.peakMemoryKb() > 0 && r.peakMemoryKb() > problem.getMemoryLimitKb()) {
                 v = Verdict.MLE;
+            } else if (r.stdout().length() >= SandboxExecutor.OUTPUT_CAP) {
+                // A program printing without bound would otherwise be judged on
+                // truncated output and look like a plain WA.
+                v = Verdict.OLE;
             } else if (r.exitCode() != 0) {
                 v = Verdict.RE;
             } else if (evaluator.matches(tc.getExpectedOutput(), r.stdout())) {
@@ -6842,46 +7729,115 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+
 /**
- * Runs untrusted code (FR-10, NFR-S03/S04, NFR-R04).
+ * Runs untrusted code (FR-10, NFR-S03/S04, NFR-R04, FMEA-02/08).
  *
- * On Linux every RUN goes through scripts/sandbox-run.sh:
- *   unshare -Urn        new user + network namespace  -> no network
- *   prlimit             CPU, address space (2x limit), nproc, fsize, nofile
- *   timeout -k          SIGKILL at 2x the time limit
- * and real peak RSS comes back through a metrics file (VmHWM / time -v),
- * which is what makes the MLE verdict genuine (TBD-02 resolved).
+ * Every externally-triggered process — the COMPILER as well as the submission —
+ * runs under hard limits. Sandboxing only the run step was a real hole: a source
+ * file of {@code #include </dev/urandom>} makes the preprocessor read an endless
+ * stream and exhaust host RAM before any program is even produced.
  *
- * On non-Linux dev machines it falls back to a plain ProcessBuilder with a
- * wall-clock timeout and no memory figure — good enough to develop against,
- * never used in the lab. COMPILES always run unsandboxed but time-boxed.
+ * Two enforcement paths:
+ *  - Linux: scripts/sandbox-run.sh — unshare -Urn (no network) + prlimit +
+ *    timeout -k, with real peak RSS from /usr/bin/time.
+ *  - Anywhere else (dev machines): {@code sh -c 'ulimit …; exec …'}, which still
+ *    caps CPU, address space, process count and file size, plus an RSS sampler
+ *    so MLE is a real verdict instead of a mislabelled RE.
+ *
+ * Whatever the path, three things always hold:
+ *  1. the whole process TREE is killed, not just the direct child — otherwise a
+ *     fork bomb's children survive and peg the CPU;
+ *  2. every live process is tracked and killed on JVM shutdown, because Java
+ *     does NOT reap child processes when it exits;
+ *  3. captured output is capped, so a program printing forever cannot exhaust
+ *     memory or disk (surfaced as OLE).
  */
 @Component
 public class SandboxExecutor {
 
+    private static final Logger log = LoggerFactory.getLogger(SandboxExecutor.class);
+
     private static final boolean IS_LINUX =
             System.getProperty("os.name").toLowerCase().contains("linux");
 
-    /** Async drain of stdout/stderr — pattern kept from the XorOJ reference. */
     private static final ExecutorService STREAM_POOL = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "sandbox-stream");
         t.setDaemon(true);
         return t;
     });
 
-    private static final int OUTPUT_CAP = 1 << 20;   // 1 MiB of captured output is plenty
+    /** Captured output cap; hitting it means OLE, not a host memory problem. */
+    public static final int OUTPUT_CAP = 1 << 20;                            // 1 MiB
+    private static final long COMPILE_ADDRESS_SPACE_KB = 2L * 1024 * 1024;   // 2 GiB
+    private static final long MAX_FILE_SIZE_BLOCKS = 65536;                  // 64 MiB (512B blocks)
+
+    /**
+     * How many processes a submission may add beyond what the account already
+     * has. Normal code needs one; the headroom covers a language runtime that
+     * spawns helpers and the other judge threads running concurrently, while
+     * still stopping a fork bomb after a few dozen instead of thousands.
+     *
+     * Too small is not "safer": the cap is per-UID, so a tight value makes
+     * legitimate submissions fail intermittently as the machine's own process
+     * count drifts.
+     */
+    private static final int MAX_EXTRA_PROCESSES = 32;
+
+    /**
+     * Every process started here and not yet reaped. The shutdown hook empties
+     * it — without that, stopping the server leaves compiled submissions
+     * ("prog") running forever at full CPU.
+     */
+    private static final Set<Process> LIVE = ConcurrentHashMap.newKeySet();
+
+    static {
+        Runtime.getRuntime().addShutdownHook(
+                new Thread(() -> LIVE.forEach(SandboxExecutor::destroyTree), "sandbox-reaper"));
+    }
 
     private final JudgeProperties props;
 
     public SandboxExecutor(JudgeProperties props) {
         this.props = props;
+    }
+
+    /**
+     * Kills any submission binary left over from a previous run and clears the
+     * work root. A server that was killed mid-judge leaves those processes
+     * alive — they are not the JVM's children any more, so nothing else will
+     * ever reap them, and they accumulate across restarts.
+     */
+    @PostConstruct
+    void sweepStaleProcesses() {
+        Path root = Path.of(props.getWorkRoot());
+        killByWorkDir(root);
+        try (var walk = Files.walk(root)) {
+            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                    // best effort
+                }
+            });
+            log.info("Cleared stale judge work root {}", root);
+        } catch (IOException ignored) {
+            // root does not exist yet on a first run — nothing to sweep
+        }
     }
 
     /** Fresh work dir per submission; caller must cleanup() it (NFR-S03). */
@@ -6891,13 +7847,18 @@ public class SandboxExecutor {
         return Files.createTempDirectory(root, "sub-" + submissionId + "-");
     }
 
-    /** Compile step: no untrusted execution, just time-boxed (CE on timeout). */
+    /**
+     * Compile step — also limited. The compiler processes attacker-supplied
+     * input and can be driven to unbounded CPU, memory and disk use.
+     */
     public ExecutionResult compile(Path workDir, List<String> command)
             throws IOException, InterruptedException {
-        return runDirect(workDir, command, null, props.getCompileTimeoutMs());
+        long timeoutMs = props.getCompileTimeoutMs();
+        return runLimited(workDir, command, null, timeoutMs,
+                timeoutMs / 1000 + 5, COMPILE_ADDRESS_SPACE_KB, false);
     }
 
-    /** Run one test case inside the sandbox. */
+    /** Run one test case under the problem's limits. */
     public ExecutionResult run(Path workDir, List<String> command, Path inputFile,
                                int timeLimitMs, int memoryLimitKb)
             throws IOException, InterruptedException {
@@ -6906,8 +7867,9 @@ public class SandboxExecutor {
         if (IS_LINUX && Files.isExecutable(script)) {
             return runSandboxed(script, workDir, command, inputFile, timeLimitMs, memoryLimitKb);
         }
-        // Dev fallback: hard timeout only. NFR-R04's 2x kill is preserved.
-        return runDirect(workDir, command, inputFile, timeLimitMs * 2L);
+        // Dev fallback: still limited, and NFR-R04's 2x kill is preserved.
+        return runLimited(workDir, command, inputFile, timeLimitMs * 2L,
+                timeLimitMs / 1000 + 1, memoryLimitKb * 2L, true);
     }
 
     // ------------------------------------------------------------------
@@ -6922,22 +7884,25 @@ public class SandboxExecutor {
 
         List<String> cmd = new ArrayList<>(List.of(
                 "bash", script.toString(),
-                String.valueOf(timeLimitMs),
-                String.valueOf(memoryLimitKb),
-                workDir.toString(),
-                inputFile.toString(),
-                outFile.toString(),
-                errFile.toString(),
-                metrics.toString(),
-                "--"));
+                String.valueOf(timeLimitMs), String.valueOf(memoryLimitKb),
+                workDir.toString(), inputFile.toString(),
+                outFile.toString(), errFile.toString(), metrics.toString(), "--"));
         cmd.addAll(command);
 
         Process p = new ProcessBuilder(cmd).directory(workDir.toFile()).start();
-        // Script enforces its own timeout; this outer bound is a safety net.
-        boolean finished = p.waitFor(timeLimitMs * 3L + 10_000, TimeUnit.MILLISECONDS);
-        if (!finished) {
-            p.destroyForcibly();
-            return new ExecutionResult(124, "", "sandbox wrapper hung", timeLimitMs * 3L, -1, true);
+        LIVE.add(p);
+        boolean timedOutWrapper = false;
+        try {
+            if (!p.waitFor(timeLimitMs * 3L + 10_000, TimeUnit.MILLISECONDS)) {
+                timedOutWrapper = true;
+            }
+        } finally {
+            destroyTree(p);
+            LIVE.remove(p);
+        }
+        if (timedOutWrapper) {
+            return new ExecutionResult(124, "", "sandbox wrapper hung",
+                    timeLimitMs * 3L, -1, true);
         }
 
         Properties m = new Properties();
@@ -6946,7 +7911,7 @@ public class SandboxExecutor {
                 m.load(in);
             }
         }
-        int exit = Integer.parseInt(m.getProperty("exit", String.valueOf(p.exitValue())));
+        int exit = Integer.parseInt(m.getProperty("exit", "1"));
         long timeMs = Long.parseLong(m.getProperty("time_ms", "-1"));
         long peakKb = Long.parseLong(m.getProperty("peak_kb", "-1"));
         boolean timedOut = "1".equals(m.getProperty("timed_out", "0")) || exit == 124;
@@ -6955,34 +7920,197 @@ public class SandboxExecutor {
                 timeMs, peakKb, timedOut);
     }
 
-    private ExecutionResult runDirect(Path workDir, List<String> command, Path inputFile,
-                                      long timeoutMs)
+    /**
+     * Non-Linux path, but still bounded. ulimit is applied in a shell wrapper so
+     * the limits are in force before the untrusted program is exec'd:
+     * -t CPU seconds, -f file size, -u processes, -v address space.
+     */
+    private ExecutionResult runLimited(Path workDir, List<String> command, Path inputFile,
+                                       long wallTimeoutMs, long cpuSeconds,
+                                       long addressSpaceKb, boolean runPhase)
             throws IOException, InterruptedException {
 
-        ProcessBuilder pb = new ProcessBuilder(command).directory(workDir.toFile());
+        // Process cap, applied to the RUN phase only.
+        //
+        // On macOS/BSD RLIMIT_NPROC counts every process owned by the user, not
+        // descendants of this shell, so an absolute value like 64 makes even the
+        // compiler die with "posix_spawn failed: Resource temporarily
+        // unavailable". The cap must therefore be RELATIVE to what the account
+        // already has: a submitted program legitimately needs one process, so
+        // current + 8 leaves normal code untouched while a fork bomb starts
+        // failing after 8 children instead of reaching thousands.
+        //
+        // This is the real containment. destroyTree() alone cannot do it —
+        // ProcessHandle.descendants() is a snapshot, and a bomb forks faster
+        // than that snapshot can be walked, so children escape and survive.
+        // The compile phase gets no -u at all: compilers spawn helper processes.
+        String nprocLimit = "";
+        if (runPhase) {
+            int base = userProcessCount();
+            if (base > 0) {
+                nprocLimit = "ulimit -u %d 2>/dev/null; ".formatted(base + MAX_EXTRA_PROCESSES);
+            }
+        }
+        // -v is unsupported on some shells, hence 2>/dev/null on each.
+        String limited = (nprocLimit + "ulimit -t %d 2>/dev/null; ulimit -f %d 2>/dev/null; "
+                + "ulimit -v %d 2>/dev/null; exec %s").formatted(
+                Math.max(1, cpuSeconds), MAX_FILE_SIZE_BLOCKS,
+                Math.max(65536, addressSpaceKb), shellQuote(command));
+
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", limited)
+                .directory(workDir.toFile());
         if (inputFile != null) {
             pb.redirectInput(inputFile.toFile());
         }
+
         long start = System.nanoTime();
         Process p = pb.start();
+        LIVE.add(p);
+
         CompletableFuture<String> out = readAsync(p.getInputStream());
         CompletableFuture<String> err = readAsync(p.getErrorStream());
+        AtomicLong peakKb = runPhase ? samplePeakRss(p) : new AtomicLong(-1);
 
-        boolean finished = p.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
-        long wallMs = (System.nanoTime() - start) / 1_000_000;
-        if (!finished) {
-            p.destroyForcibly();
-            p.waitFor(5, TimeUnit.SECONDS);
-            return new ExecutionResult(124, safeJoin(out), safeJoin(err), wallMs, -1, true);
+        try {
+            boolean finished = p.waitFor(wallTimeoutMs, TimeUnit.MILLISECONDS);
+            long wallMs = (System.nanoTime() - start) / 1_000_000;
+            if (!finished) {
+                destroyTree(p);
+                return new ExecutionResult(124, safeJoin(out), safeJoin(err),
+                        wallMs, peakKb.get(), true);
+            }
+            return new ExecutionResult(p.exitValue(), safeJoin(out), safeJoin(err),
+                    wallMs, peakKb.get(), false);
+        } finally {
+            destroyTree(p);
+            LIVE.remove(p);
         }
-        return new ExecutionResult(p.exitValue(), safeJoin(out), safeJoin(err), wallMs, -1, false);
+    }
+
+    /**
+     * Polls RSS so MLE is detectable off Linux. Without it peakMemoryKb stays
+     * -1, the MLE branch never fires, and a memory hog is reported as RE.
+     */
+    private static AtomicLong samplePeakRss(Process p) {
+        AtomicLong peak = new AtomicLong(-1);
+        Thread sampler = new Thread(() -> {
+            String pid = String.valueOf(p.pid());
+            while (p.isAlive()) {
+                try {
+                    Process ps = new ProcessBuilder("ps", "-o", "rss=", "-p", pid)
+                            .redirectErrorStream(true).start();
+                    String line = new String(ps.getInputStream().readAllBytes(),
+                            StandardCharsets.UTF_8).trim();
+                    ps.waitFor(1, TimeUnit.SECONDS);
+                    if (!line.isEmpty()) {
+                        long rss = Long.parseLong(line.split("\\s+")[0]);
+                        peak.updateAndGet(prev -> Math.max(prev, rss));
+                    }
+                    Thread.sleep(40);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (Exception ignored) {
+                    return;                 // process gone, or ps unavailable
+                }
+            }
+        }, "rss-sampler");
+        sampler.setDaemon(true);
+        sampler.start();
+        return peak;
+    }
+
+    /**
+     * Kills the process and every descendant. Killing only the direct child
+     * leaves a fork bomb's children running — exactly how orphaned "prog"
+     * processes end up pegging the CPU after the server stops.
+     */
+    private static void destroyTree(Process p) {
+        if (p == null) {
+            return;
+        }
+        try {
+            p.descendants().forEach(ProcessHandle::destroyForcibly);
+        } catch (Exception ignored) {
+            // descendants() can race with exit; the direct kill below still runs
+        }
+        p.destroyForcibly();
+        try {
+            p.waitFor(5, TimeUnit.SECONDS);      // reap; don't leave a zombie
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Kill anything still running when the Spring context closes. */
+    @PreDestroy
+    void shutdown() {
+        if (!LIVE.isEmpty()) {
+            log.warn("Killing {} judge process(es) still running at shutdown", LIVE.size());
+        }
+        LIVE.forEach(SandboxExecutor::destroyTree);
+        LIVE.clear();
+    }
+
+    /**
+     * Processes currently owned by this user. RLIMIT_NPROC is per-UID on
+     * macOS/BSD, so the run-phase cap has to be expressed relative to this.
+     * Returns -1 when it cannot be determined, in which case no cap is applied
+     * rather than risking a limit that blocks legitimate submissions.
+     */
+    private static int userProcessCount() {
+        try {
+            Process ps = new ProcessBuilder("/bin/sh", "-c", "ps -u \"$(id -u)\" | wc -l")
+                    .redirectErrorStream(true).start();
+            String out = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            if (!ps.waitFor(3, TimeUnit.SECONDS)) {
+                ps.destroyForcibly();
+                return -1;
+            }
+            return Integer.parseInt(out.split("\\s+")[0]);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
+     * Kills anything still executing out of a work directory, matched by path.
+     *
+     * destroyTree() walks a snapshot of descendants, which a rapidly forking
+     * program outruns; those survivors keep the binary's path in their command
+     * line, so a pattern kill catches exactly the strays it missed and nothing
+     * belonging to another submission.
+     */
+    private static void killByWorkDir(Path workDir) {
+        try {
+            new ProcessBuilder("pkill", "-9", "-f", workDir.toString())
+                    .redirectErrorStream(true).start()
+                    .waitFor(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+            // pkill absent (non-POSIX host); the limits above are the real guard
+        }
+    }
+
+    private static String shellQuote(List<String> command) {
+        StringBuilder sb = new StringBuilder();
+        for (String arg : command) {
+            if (!sb.isEmpty()) {
+                sb.append(' ');
+            }
+            sb.append('\'').append(arg.replace("'", "'\\''")).append('\'');
+        }
+        return sb.toString();
     }
 
     private static CompletableFuture<String> readAsync(InputStream in) {
         return CompletableFuture.supplyAsync(() -> {
             try (in) {
-                byte[] bytes = in.readNBytes(OUTPUT_CAP);
-                return new String(bytes, StandardCharsets.UTF_8);
+                return new String(in.readNBytes(OUTPUT_CAP), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 return "";
             }
@@ -7005,17 +8133,23 @@ public class SandboxExecutor {
         }
     }
 
-    /** Best-effort recursive delete of the per-submission work dir. */
+    /** Kills stragglers from this submission, then deletes its work dir. */
     public void cleanup(Path workDir) {
         if (workDir == null) {
             return;
         }
+        // Must happen BEFORE the delete: a still-running binary would otherwise
+        // keep executing from a path that no longer exists, which is exactly how
+        // orphaned "prog" processes end up pegging the CPU with nothing on disk
+        // to trace them back to.
+        killByWorkDir(workDir);
+
         try (var walk = Files.walk(workDir)) {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {
                 try {
                     Files.deleteIfExists(p);
                 } catch (IOException ignored) {
-                    // temp dir; the OS will reclaim it eventually
+                    // temp dir; the OS reclaims it eventually
                 }
             });
         } catch (IOException ignored) {
@@ -7668,6 +8802,9 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     /** Guards problem deletion — submissions are never destroyed (DBR-04). */
     long countByProblemId(Long problemId);
 
+    /** Every submission of a contest, including already-inactive ones. */
+    List<Submission> findByContestId(Long contestId);
+
     /** Everything the leaderboard needs, oldest first (FR-17, FR-18). */
     List<Submission> findByContestIdAndActiveTrueOrderByQueuedAtAsc(Long contestId);
 }
@@ -7910,10 +9047,67 @@ public class UserDetailsServiceImpl implements UserDetailsService {
                 .build();
     }
 }
+=== FILE: arbitrator-server/src/main/java/com/arbitrator/server/service/ContestResetListener.java ===
+package com.arbitrator.server.service;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.arbitrator.server.entity.Submission;
+import com.arbitrator.server.repo.SubmissionRepository;
+
+import jakarta.annotation.PostConstruct;
+
+/**
+ * Clears a contest's previous submissions when it is (re)started.
+ *
+ * Without this, restarting a contest leaves problems already showing as solved
+ * and old penalty still counted — the standings would begin mid-game. Rows are
+ * flagged inactive rather than deleted, so the record survives (DBR-04) while
+ * every "active" query ignores them.
+ */
+@Component
+public class ContestResetListener {
+
+    private static final Logger log = LoggerFactory.getLogger(ContestResetListener.class);
+
+    private final ContestService contestService;
+    private final SubmissionRepository submissions;
+
+    public ContestResetListener(ContestService contestService,
+                                SubmissionRepository submissions) {
+        this.contestService = contestService;
+        this.submissions = submissions;
+    }
+
+    @PostConstruct
+    void register() {
+        contestService.onContestStarted(this::archivePreviousRun);
+    }
+
+    @Transactional
+    void archivePreviousRun(long contestId) {
+        int archived = 0;
+        for (Submission s : submissions.findByContestId(contestId)) {
+            if (s.isActive()) {
+                s.setActive(false);
+                submissions.save(s);
+                archived++;
+            }
+        }
+        if (archived > 0) {
+            log.info("Contest {} restarted — archived {} submission(s) from the previous run",
+                    contestId, archived);
+        }
+    }
+}
 === FILE: arbitrator-server/src/main/java/com/arbitrator/server/service/ContestService.java ===
 package com.arbitrator.server.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
@@ -7984,6 +9178,10 @@ public class ContestService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest has not started yet");
         }
+        if (c.endTime() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "The contest has not started yet");
+        }
         if (!Instant.now().isBefore(c.endTime())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest has ended");
@@ -8001,6 +9199,23 @@ public class ContestService {
     }
 
     /**
+     * Opens the doors without starting the contest. Students can enter and
+     * wait; problems stay hidden and no clock runs until {@link #start(long)}.
+     */
+    public Contest openLobby(long id) {
+        Contest c = require(id);
+        if (c.getState() == ContestState.ENDED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This contest has already ended");
+        }
+        c.setState(ContestState.LOBBY);
+        c.setStartTime(null);          // no clock yet
+        c.setPausedAt(null);
+        c.setPausedMillis(0);
+        return contests.save(c);
+    }
+
+    /**
      * Starts (or restarts) a contest. Several contests may run at once — the
      * student picks which to join, and a submission's contest is derived from
      * its problem, so there is no ambiguous "current contest" to get wrong.
@@ -8011,7 +9226,22 @@ public class ContestService {
         c.setStartTime(Instant.now());
         c.setPausedAt(null);
         c.setPausedMillis(0);          // a restart resets the clock entirely
-        return contests.save(c);
+        Contest saved = contests.save(c);
+        // A restart is a fresh contest: last run's submissions must not leave
+        // problems pre-solved or carry penalty into the new standings. They are
+        // flagged inactive rather than deleted — DBR-04 keeps the record.
+        onStarted.forEach(hook -> hook.accept(saved.getId()));
+        return saved;
+    }
+
+    /**
+     * Callbacks run when a contest starts. Used to reset per-contest state that
+     * lives outside this service, without ContestService depending on it.
+     */
+    private final List<java.util.function.Consumer<Long>> onStarted = new ArrayList<>();
+
+    public void onContestStarted(java.util.function.Consumer<Long> hook) {
+        onStarted.add(hook);
     }
 
     public Contest end(long id) {
@@ -8481,6 +9711,20 @@ public class ProblemService {
         this.submissions = submissions;
     }
 
+    /**
+     * Left-panel list with per-user badge state (SRS §4.2).
+     *
+     * Returns nothing while the contest is still in its lobby: releasing
+     * statements before the clock starts would let people read and plan early.
+     */
+    public List<ProblemSummaryDto> listForContest(long contestId, long userId,
+                                                  boolean released) {
+        if (!released) {
+            return List.of();
+        }
+        return listForContest(contestId, userId);
+    }
+
     /** Left-panel list with per-user badge state (SRS §4.2). */
     public List<ProblemSummaryDto> listForContest(long contestId, long userId) {
         List<Submission> mine = submissions.findByUserIdAndActiveTrueOrderByQueuedAtDesc(userId);
@@ -8786,7 +10030,9 @@ arbitrator:
     sandbox-script: ${ARBITRATOR_SANDBOX:scripts/sandbox-run.sh}
     work-root: ${java.io.tmpdir}/arbitrator
     compile-timeout-ms: 30000
-    submit-cooldown-seconds: 30   # BR-01
+    # BR-01. SRS says 30 s; the team asked for 10 s in production and 0
+    # while developing, so it stays configurable and defaults to 0 here.
+    submit-cooldown-seconds: ${ARBITRATOR_SUBMIT_COOLDOWN:0}
 
 logging:
   level:
@@ -8936,476 +10182,497 @@ ALTER TABLE contests
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Arbitrator — Instructor Console</title>
 <style>
-  :root {
-    --bg: #eef1f5; --surface: #fff; --surface2: #f5f7fa;
-    --border: #d6dbe3; --ink: #1c2430; --muted: #6b7684;
-    --blue: #2f6fd0; --green: #21a366; --red: #d64545; --amber: #e5a50a;
-    --purple: #8257c7;
+/* ── palette ─────────────────────────────────────────────────────────────── */
+:root{
+  --bg:#eef1f5; --surface:#fff; --surface2:#f5f7fa; --surface3:#e9edf3;
+  --border:#d6dbe3; --ink:#1c2430; --muted:#6b7684;
+  --accent:#2f6fd0; --accent-ink:#fff;
+  --green:#21a366; --red:#d64545; --amber:#e5a50a; --purple:#8257c7; --grey:#8b95a3;
+  --radius:10px; --shadow:0 1px 3px rgba(16,24,40,.06),0 1px 2px rgba(16,24,40,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0f1319; --surface:#171d26; --surface2:#1e2530; --surface3:#273040;
+    --border:#2b3441; --ink:#e6eaf0; --muted:#94a0b0;
+    --accent:#5b9bf5; --accent-ink:#0e1218;
+    --green:#35c98a; --red:#ef6a6a; --amber:#f2c14e; --purple:#a883ee; --grey:#7d8796;
+    --shadow:0 1px 3px rgba(0,0,0,.4);
   }
-  /* Follows the OS setting; the client has its own toggle (Ctrl+D). */
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14181f; --surface: #1c222c; --surface2: #232a36;
-      --border: #313a49; --ink: #e6eaf0; --muted: #9aa5b4;
-      --blue: #5b9bf5; --green: #35c98a; --red: #ef6a6a; --amber: #f2c14e;
-      --purple: #a883ee;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, "Segoe UI", Inter, sans-serif; font-size: 13px;
-         background: var(--bg); color: var(--ink); margin: 0; padding: 22px; }
-  .dim { color: var(--muted); font-weight: 400; }
-  .wrap { max-width: 1000px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 -apple-system,"Segoe UI",Inter,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+button,input,select,textarea{font:inherit;color:inherit}
 
-  .box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-         margin-bottom: 16px; overflow: hidden;
-         box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-  .box > .head { background: var(--surface2); padding: 10px 14px; font-weight: 600;
-                 border-bottom: 1px solid var(--border); }
-  .box > .body { padding: 14px; }
+/* ── app shell: sidebar + content ─────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+@media (max-width:820px){ .app{grid-template-columns:1fr} .side{display:none} }
 
-  button { font: inherit; padding: 7px 14px; border: 1px solid var(--border);
-           background: var(--surface2); color: var(--ink);
-           border-radius: 7px; cursor: pointer; transition: background .12s; }
-  button:hover:not(:disabled) { background: var(--border); }
-  button:disabled { opacity: .4; cursor: not-allowed; }
-  button.primary { background: var(--blue); color: #fff; border-color: var(--blue);
-                   font-weight: 600; }
-  button.primary:hover:not(:disabled) { filter: brightness(.92); }
-  button.danger  { background: var(--red); color: #fff; border-color: var(--red);
-                   font-weight: 600; }
-  button.danger:hover:not(:disabled) { filter: brightness(.92); }
-  input, select { font: inherit; padding: 7px 10px; border: 1px solid var(--border);
-                  border-radius: 7px; background: var(--surface); color: var(--ink); }
-  input:focus { outline: none; border-color: var(--blue); }
+.side{background:var(--surface);border-right:1px solid var(--border);
+      display:flex;flex-direction:column;gap:2px;padding:16px 10px}
+.brand{font-size:17px;font-weight:700;color:var(--accent);padding:4px 10px 14px}
+.brand small{display:block;font-size:11px;font-weight:500;color:var(--muted)}
+.nav{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;
+     cursor:pointer;color:var(--muted);font-weight:500;border:none;background:none;
+     width:100%;text-align:left}
+.nav:hover{background:var(--surface2);color:var(--ink)}
+.nav.on{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.nav .ic{width:18px;text-align:center}
+.side-foot{margin-top:auto;padding:10px;color:var(--muted);font-size:11px;line-height:1.5}
 
-  /* live contest panel */
-  .clocks { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-  .clock { flex: 1 1 150px; background: var(--surface2); border: 1px solid var(--border);
-           border-radius: 9px; padding: 11px 13px; }
-  .clock .label { color: var(--muted); font-size: 11px; text-transform: uppercase;
-                  letter-spacing: .04em; }
-  .clock .value { font-family: ui-monospace, Menlo, monospace; font-size: 21px;
-                  font-weight: 600; margin-top: 2px; }
-  .value.warn { color: var(--red); }
+.main{padding:20px 24px;max-width:1080px}
+h1{font-size:19px;font-weight:650;margin-bottom:3px}
+.lede{color:var(--muted);font-size:13px;margin-bottom:18px}
 
-  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px;
-           font-size: 11px; font-weight: 700; color: #fff; vertical-align: 2px; }
-  .s-DRAFT  { background: var(--muted); }
-  .s-ACTIVE { background: var(--green); }
-  .s-PAUSED { background: var(--amber); }
-  .s-FROZEN { background: var(--purple); }
-  .s-ENDED  { background: #6b7280; }
+/* ── cards ───────────────────────────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+      box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
+.card>header{padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2);
+             font-weight:600;display:flex;align-items:center;gap:10px}
+.card>header .spacer{margin-left:auto}
+.card>.body{padding:16px}
 
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .hint { color: var(--muted); font-size: 11px; margin: 6px 0 0; }
+/* ── buttons ─────────────────────────────────────────────────────────────── */
+.btn{padding:8px 14px;border:1px solid var(--border);background:var(--surface2);
+     border-radius:8px;cursor:pointer;font-weight:500;transition:.12s}
+.btn:hover:not(:disabled){background:var(--surface3)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+.btn.primary:hover:not(:disabled),.btn.danger:hover:not(:disabled){filter:brightness(.92)}
+.btn.sm{padding:5px 10px;font-size:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
-  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
-  tr.sel td { background: color-mix(in srgb, var(--amber) 18%, transparent); }
-  th, td { border-bottom: 1px solid var(--border); }
+input[type=text],input[type=password],input[type=number]{
+  padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+input:focus{outline:none;border-color:var(--accent)}
 
-  #log { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace;
-         font-size: 11px; max-height: 140px; overflow: auto; color: var(--muted); }
-  .ok { color: var(--green); } .err { color: var(--red); }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* ── clocks ──────────────────────────────────────────────────────────────── */
+.clocks{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px}
+.clock{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 13px}
+.clock .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.clock .v{font:600 21px/1.3 ui-monospace,Menlo,monospace;margin-top:3px}
+.clock .v.warn{color:var(--red)}
+.clock .v.calm{color:var(--muted);font-size:16px}
+
+/* ── badges ──────────────────────────────────────────────────────────────── */
+.badge{display:inline-block;padding:2.5px 10px;border-radius:999px;font-size:11px;font-weight:700;color:#fff}
+.b-DRAFT{background:var(--grey)} .b-LOBBY{background:var(--accent)}
+.b-ACTIVE{background:var(--green)} .b-PAUSED{background:var(--amber);color:#3a2f00}
+.b-FROZEN{background:var(--purple)} .b-ENDED{background:#5b6673}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.on{background:var(--green)} .dot.off{background:var(--grey)}
+
+/* ── tables ──────────────────────────────────────────────────────────────── */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:8px 10px;font-size:10.5px;text-transform:uppercase;
+   letter-spacing:.05em;color:var(--muted);border-bottom:1px solid var(--border)}
+td{padding:9px 10px;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface2)}
+tr.sel{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.empty{color:var(--muted);text-align:center;padding:22px}
+
+/* ── verdict colours (mirrors the client) ────────────────────────────────── */
+.v-AC{color:var(--green);font-weight:700}
+.v-WA{color:var(--red);font-weight:700}
+.v-TLE,.v-MLE,.v-RE,.v-OLE{color:var(--amber);font-weight:700}
+.v-CE{color:var(--purple);font-weight:700}
+.v-none{color:var(--muted)}
+
+.hint{color:var(--muted);font-size:12px;line-height:1.55}
+.hint b{color:var(--ink)}
+pre.code{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:13px;
+         overflow:auto;max-height:360px;white-space:pre;tab-size:4;
+         font:12px/1.5 ui-monospace,Menlo,monospace}
+#log{font:11.5px/1.6 ui-monospace,Menlo,monospace;color:var(--muted);white-space:pre-wrap;
+     max-height:120px;overflow:auto}
+.ok{color:var(--green)} .err{color:var(--red)}
+.hide{display:none!important}
+
+/* ── login gate ──────────────────────────────────────────────────────────── */
+.gate{display:grid;place-items:center;min-height:100vh;padding:20px}
+.gate .card{width:min(400px,100%);margin:0}
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <h1>Arbitrator <span class="dim">Instructor Console</span></h1>
-  <div class="sub">Server machine only. All actions require an ADMIN login.</div>
-
-  <!-- login -->
-  <div class="box" id="loginBox">
-    <div class="head">Sign in</div>
-    <div class="body row">
-      <input id="u" placeholder="username" value="admin">
-      <input id="p" type="password" placeholder="password" onkeydown="if(event.key==='Enter')login()">
-      <button class="primary" onclick="login()">Sign in</button>
-      <span id="who" class="hint"></span>
-    </div>
-  </div>
-
-  <!-- live contest -->
-  <div class="box" id="liveBox" style="display:none">
-    <div class="head">Contest control — <span id="cTitle">—</span> <span id="cState" class="badge">—</span></div>
+<div class="gate" id="gate">
+  <div class="card">
+    <header>Arbitrator — Instructor Console</header>
     <div class="body">
-
-      <div class="clocks">
-        <div class="clock"><div class="label">Now (server)</div><div class="value" id="kNow">—</div></div>
-        <div class="clock"><div class="label">Started</div><div class="value" id="kStart">—</div></div>
-        <div class="clock"><div class="label">Elapsed</div><div class="value" id="kElapsed">—</div></div>
-        <div class="clock"><div class="label">Remaining</div><div class="value" id="kLeft">—</div></div>
-        <div class="clock"><div class="label">Ends at</div><div class="value" id="kEnd">—</div></div>
-      </div>
-
-      <div class="actions">
-        <button class="primary" id="bStart"   onclick="act('start')">▶ Start</button>
-        <button           id="bPause"   onclick="act('pause')">⏸ Pause</button>
-        <button class="primary" id="bResume"  onclick="act('resume')">▶ Resume</button>
-        <button           id="bFreeze"  onclick="act('freeze')">🔒 Freeze standings</button>
-        <button           id="bUnfreeze" onclick="act('unfreeze')">🔓 Unfreeze</button>
-        <button class="danger" id="bEnd" onclick="confirmEnd()">■ End contest</button>
-      </div>
-
-      <p class="hint">
-        <b>Start</b> begins the contest and starts the clock from zero.
-        <b>Pause</b> stops the clock and blocks submissions — the remaining time is kept, not spent.
-        <b>Freeze</b> keeps the contest running but holds the public standings so nobody sees the
-        final positions. <b>End</b> closes it permanently; submissions are refused after that.
+      <p class="hint" style="margin-bottom:14px">
+        Available on the server machine only. Requires an ADMIN account.
       </p>
-
-      <div class="row" style="margin-top:10px">
-        <b>Add time:</b>
-        <button onclick="extend(5)">+5 min</button>
-        <button onclick="extend(15)">+15 min</button>
-        <button onclick="extend(30)">+30 min</button>
-        <button onclick="extend(-5)">−5 min</button>
-        <input id="extMin" type="number" value="10" style="width:70px">
-        <button onclick="extend(parseInt(document.getElementById('extMin').value||'0',10))">Apply</button>
-        <span class="hint">Changes the deadline immediately for everyone.</span>
+      <div class="row"><input type="text" id="u" value="admin" placeholder="username" style="flex:1"></div>
+      <div class="row" style="margin-top:8px">
+        <input type="password" id="p" placeholder="password" style="flex:1"
+               onkeydown="if(event.key==='Enter')login()">
       </div>
-    </div>
-  </div>
-
-  <!-- contests -->
-  <div class="box" id="contestsBox" style="display:none">
-    <div class="head">Contests</div>
-    <div class="body">
-      <table id="cTable">
-        <thead><tr><th></th><th>Title</th><th>State</th><th>Problems</th><th>Duration</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
       <div class="row" style="margin-top:12px">
-        <input id="newTitle" placeholder="new contest title">
-        <input id="newDur" type="number" value="120" style="width:80px" title="minutes">
-        <button onclick="createContest()">Create contest</button>
-        <span class="hint">Created as a draft — press Start when you're ready.</span>
+        <button class="btn primary" onclick="login()" style="flex:1">Sign in</button>
       </div>
+      <div id="gateMsg" class="hint err" style="margin-top:10px"></div>
     </div>
   </div>
+</div>
 
-  <!-- problems -->
-  <div class="box" id="probBox" style="display:none">
-    <div class="head">Problems in the selected contest</div>
-    <div class="body">
-      <table id="pTable">
-        <thead><tr><th>Code</th><th>Title</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div class="row" style="margin-top:12px">
-        <input type="file" id="pkg" accept=".zip">
-        <button onclick="uploadPackage()">Upload package</button>
-      </div>
-      <p class="hint">
-        ZIP with <code>config.json</code>, <code>statement/statement.html</code> and
-        <code>tests/NN.in</code> + <code>tests/NN.out</code> pairs. A wrapping folder is fine.
-        A package is imported whole or rejected whole.
-      </p>
+<div class="app hide" id="app">
+  <aside class="side">
+    <div class="brand">Arbitrator<small>Instructor Console</small></div>
+    <button class="nav on" data-sec="control"  onclick="go('control')"><span class="ic">⏱</span>Contest</button>
+    <button class="nav"    data-sec="problems" onclick="go('problems')"><span class="ic">📄</span>Problems</button>
+    <button class="nav"    data-sec="people"   onclick="go('people')"><span class="ic">👥</span>Participants</button>
+    <button class="nav"    data-sec="feed"     onclick="go('feed')"><span class="ic">📊</span>Submissions</button>
+    <button class="nav"    data-sec="contests" onclick="go('contests')"><span class="ic">🗂</span>All contests</button>
+    <div class="side-foot">
+      <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
+      <div style="margin-top:6px" id="whoami"></div>
     </div>
-  </div>
+  </aside>
 
-  <!-- live monitoring -->
-  <div class="box" id="monitorBox" style="display:none">
-    <div class="head">
-      Live monitoring — <span id="onlineCount">0</span> online
-      <button style="float:right;padding:3px 10px" onclick="loadMonitor()">⟳ Refresh</button>
-    </div>
-    <div class="body">
-      <div class="row" style="margin-bottom:10px">
-        <button id="tabParticipants" class="primary" onclick="showMonitor('participants')">Participants</button>
-        <button id="tabFeed" onclick="showMonitor('feed')">All submissions</button>
-        <label class="hint"><input type="checkbox" id="autoRefresh" checked> auto-refresh every 5s</label>
+  <main class="main">
+
+    <section id="sec-control">
+      <h1>Contest control</h1>
+      <div class="lede"><span id="cTitle">—</span> · <span id="cState" class="badge">—</span></div>
+
+      <div class="card"><div class="body">
+        <div class="clocks">
+          <div class="clock"><div class="k">Server time</div><div class="v" id="kNow">—</div></div>
+          <div class="clock"><div class="k">Started</div><div class="v calm" id="kStart">—</div></div>
+          <div class="clock"><div class="k">Elapsed</div><div class="v" id="kElapsed">—</div></div>
+          <div class="clock"><div class="k">Remaining</div><div class="v" id="kLeft">—</div></div>
+          <div class="clock"><div class="k">Ends at</div><div class="v calm" id="kEnd">—</div></div>
+        </div>
+      </div></div>
+
+      <div class="card">
+        <header>Lifecycle</header>
+        <div class="body">
+          <div class="row">
+            <button class="btn"         id="bOpen"     onclick="act('open')">🚪 Open lobby</button>
+            <button class="btn primary" id="bStart"    onclick="act('start')">▶ Start contest</button>
+            <button class="btn"         id="bPause"    onclick="act('pause')">⏸ Pause</button>
+            <button class="btn primary" id="bResume"   onclick="act('resume')">▶ Resume</button>
+            <button class="btn"         id="bFreeze"   onclick="act('freeze')">🔒 Freeze standings</button>
+            <button class="btn"         id="bUnfreeze" onclick="act('unfreeze')">🔓 Unfreeze</button>
+            <button class="btn danger"  id="bEnd"      onclick="confirmEnd()">■ End contest</button>
+          </div>
+          <p class="hint" style="margin-top:12px">
+            <b>Open lobby</b> lets students enter and wait — no problems shown, no clock.
+            <b>Start contest</b> releases the problems, starts the clock, and clears the previous run's
+            submissions. <b>Pause</b> stops the clock and blocks submissions; the remaining time is kept.
+            <b>Freeze</b> keeps judging but holds the public standings. <b>End</b> closes it for good.
+          </p>
+        </div>
       </div>
 
-      <div id="participantsView">
-        <table id="partTable">
-          <thead><tr><th></th><th>Participant</th><th>Rank</th><th>Solved</th>
-                     <th>Penalty</th><th>Submissions</th><th>Last</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <div class="card">
+        <header>Adjust time</header>
+        <div class="body">
+          <div class="row">
+            <label for="extMin">Minutes</label>
+            <input type="number" id="extMin" value="5" min="1" step="1" style="width:90px">
+            <button class="btn sm" onclick="extendBy(1)">+ Add</button>
+            <button class="btn sm" onclick="extendBy(-1)">− Remove</button>
+          </div>
+          <p class="hint" style="margin-top:10px">
+            Type a number of minutes, then <b>Add</b> to extend the deadline or
+            <b>Remove</b> to shorten it. The change reaches every client immediately.
+          </p>
+        </div>
       </div>
+    </section>
 
-      <div id="feedView" style="display:none">
-        <table id="feedTable">
-          <thead><tr><th>Time</th><th>Problem · Who</th><th>Language</th>
-                     <th>Verdict</th><th>Time</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
+    <section id="sec-problems" class="hide">
+      <h1>Problems</h1>
+      <div class="lede">Problems in the selected contest. Uploads reach students immediately.</div>
+      <div class="card">
+        <header>In this contest <span class="spacer"></span>
+          <button class="btn sm" onclick="listProblems()">⟳ Refresh</button></header>
+        <div class="body" style="padding:0">
+          <table id="pTable"><thead><tr><th style="width:70px">Code</th><th>Title</th>
+            <th style="width:110px"></th></tr></thead><tbody></tbody></table>
+        </div>
       </div>
-
-      <div id="sourceBox" style="display:none;margin-top:12px">
-        <div class="row"><b id="sourceTitle">Source</b>
-          <button onclick="document.getElementById('sourceBox').style.display='none'">Close</button></div>
-        <pre id="sourceCode" style="background:var(--surface2);border:1px solid var(--border);
-             border-radius:8px;padding:12px;overflow:auto;max-height:340px;
-             font-family:ui-monospace,Menlo,monospace;font-size:12px;
-             white-space:pre;tab-size:4;line-height:1.45"></pre>
+      <div class="card">
+        <header>Upload a package</header>
+        <div class="body">
+          <div class="row"><input type="file" id="pkg" accept=".zip">
+            <button class="btn primary" onclick="uploadPackage()">Upload</button></div>
+          <p class="hint" style="margin-top:10px">
+            ZIP containing <b>config.json</b>, <b>statement/statement.html</b> and
+            <b>tests/NN.in</b> + <b>tests/NN.out</b> pairs. A single wrapping folder is fine.
+            A package is imported whole or rejected whole, and every fault is listed at once.
+          </p>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <div class="box"><div class="head">Activity</div><div class="body"><div id="log">—</div></div></div>
+    <section id="sec-people" class="hide">
+      <h1>Participants</h1>
+      <div class="lede">Who has joined, who is connected right now, and how they are doing.</div>
+      <div class="card">
+        <header>Standing <span class="spacer"></span>
+          <label class="hint"><input type="checkbox" id="autoRefresh" checked> auto-refresh</label>
+          <button class="btn sm" onclick="loadMonitor()">⟳</button></header>
+        <div class="body" style="padding:0">
+          <table id="partTable"><thead><tr><th style="width:44px"></th><th>Participant</th>
+            <th style="width:64px">Rank</th><th style="width:70px">Solved</th>
+            <th style="width:78px">Penalty</th><th style="width:64px">Subs</th>
+            <th style="width:92px">Last</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section id="sec-feed" class="hide">
+      <h1>Submissions</h1>
+      <div class="lede">Every submission in this contest, newest first.</div>
+      <div class="card">
+        <header>Feed <span class="spacer"></span><button class="btn sm" onclick="loadFeed()">⟳</button></header>
+        <div class="body" style="padding:0">
+          <table id="feedTable"><thead><tr><th style="width:92px">Time</th><th>Problem · Who</th>
+            <th style="width:110px">Language</th><th style="width:150px">Verdict</th>
+            <th style="width:88px">Time</th><th style="width:110px"></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card hide" id="sourceCard">
+        <header><span id="sourceTitle">Source</span><span class="spacer"></span>
+          <button class="btn sm" onclick="document.getElementById('sourceCard').classList.add('hide')">Close</button>
+        </header>
+        <div class="body"><pre class="code" id="sourceCode"></pre></div>
+      </div>
+    </section>
+
+    <section id="sec-contests" class="hide">
+      <h1>All contests</h1>
+      <div class="lede">Select the contest these panels act on, or create a new one.</div>
+      <div class="card">
+        <header>Contests</header>
+        <div class="body" style="padding:0">
+          <table id="cTable"><thead><tr><th style="width:44px"></th><th>Title</th>
+            <th style="width:96px">State</th><th style="width:86px">Problems</th>
+            <th style="width:92px">Duration</th><th style="width:96px"></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card">
+        <header>Create</header>
+        <div class="body row">
+          <input type="text" id="newTitle" placeholder="Contest title" style="flex:1;min-width:200px">
+          <input type="number" id="newDur" value="120" style="width:90px" title="minutes">
+          <button class="btn primary" onclick="createContest()">Create as draft</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="card"><header>Activity</header><div class="body"><div id="log">—</div></div></div>
+  </main>
 </div>
 
 <script>
-let token = null, selected = null, state = null, tick = null, monitorTick = null;
+let token=null, selected=null, state=null, tick=null, monitorTick=null;
+const $=id=>document.getElementById(id);
+const two=n=>String(n).padStart(2,'0');
+const clock=ms=>{ if(ms==null||ms<0) return '—';
+  const s=Math.floor(ms/1000);
+  return `${two(Math.floor(s/3600))}:${two(Math.floor(s/60)%60)}:${two(s%60)}`; };
+const at=ms=>ms>0?new Date(ms).toLocaleTimeString():'—';
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-const $ = id => document.getElementById(id);
-const two = n => String(n).padStart(2, '0');
-const clock = ms => {
-  if (ms == null || ms < 0) return '—';
-  const s = Math.floor(ms / 1000);
-  return `${two(Math.floor(s/3600))}:${two(Math.floor(s/60)%60)}:${two(s%60)}`;
-};
-const timeOf = ms => ms > 0 ? new Date(ms).toLocaleTimeString() : '—';
-
-function log(status, body) {
-  const el = $('log');
-  el.className = status < 300 ? 'ok' : 'err';
-  el.textContent = `HTTP ${status}  ${typeof body === 'string' ? body : JSON.stringify(body)}`;
+function log(status,body){
+  const el=$('log'); el.className=status<300?'ok':'err';
+  el.textContent=`HTTP ${status}  ${typeof body==='string'?body:JSON.stringify(body)}`;
 }
 
-async function api(method, path, params) {
-  const url = params ? path + '?' + new URLSearchParams(params) : path;
-  const res = await fetch(url, { method, headers: token ? { Authorization: 'Bearer ' + token } : {} });
-  const text = await res.text();
-  let body; try { body = JSON.parse(text); } catch { body = text; }
-  log(res.status, body);
-  return { status: res.status, body };
+async function api(method,path,params){
+  const url=params?path+'?'+new URLSearchParams(params):path;
+  const res=await fetch(url,{method,headers:token?{Authorization:'Bearer '+token}:{}});
+  const text=await res.text(); let body;
+  try{body=JSON.parse(text)}catch{body=text}
+  log(res.status,body); return {status:res.status,body};
 }
 
-async function login() {
-  const res = await fetch('/api/auth/login', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: $('u').value, password: $('p').value })
-  });
-  const body = await res.json().catch(() => ({}));
-  log(res.status, res.ok ? 'signed in as ' + body.username : body);
-  if (!res.ok) return;
-  if (body.role !== 'ADMIN') { log(403, 'That account is not an ADMIN.'); return; }
-  token = body.token;
-  $('who').textContent = '✓ ' + body.displayName;
-  ['liveBox','contestsBox','probBox','monitorBox'].forEach(i => $(i).style.display = '');
+function go(sec){
+  ['control','problems','people','feed','contests']
+    .forEach(s=>$('sec-'+s).classList.toggle('hide',s!==sec));
+  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('on',n.dataset.sec===sec));
+  if(sec==='problems') listProblems();
+  if(sec==='people')   loadMonitor();
+  if(sec==='feed')     loadFeed();
+  if(sec==='contests') loadContests();
+}
+
+async function login(){
+  const res=await fetch('/api/auth/login',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:$('u').value,password:$('p').value})});
+  const body=await res.json().catch(()=>({}));
+  if(!res.ok){ $('gateMsg').textContent=body.message||'Sign in failed'; return; }
+  if(body.role!=='ADMIN'){ $('gateMsg').textContent='That account is not an ADMIN.'; return; }
+  token=body.token; $('whoami').textContent='Signed in as '+body.displayName;
+  $('gate').classList.add('hide'); $('app').classList.remove('hide');
   await loadContests();
-  if (!tick) tick = setInterval(paintClocks, 1000);
-  if (!monitorTick) monitorTick = setInterval(() => {
-    if ($('autoRefresh').checked && selected != null) loadMonitor();
-  }, 5000);
+  if(!tick) tick=setInterval(paintClocks,1000);
+  if(!monitorTick) monitorTick=setInterval(()=>{
+    if($('autoRefresh').checked && selected!=null && !$('sec-people').classList.contains('hide')) loadMonitor();
+  },5000);
 }
 
-async function loadContests() {
-  const { body } = await api('GET', '/api/admin/contests');
-  if (!Array.isArray(body)) return;
-  const tb = $('cTable').querySelector('tbody');
-  tb.innerHTML = body.map(c => `
-    <tr class="${c.id === selected ? 'sel' : ''}">
-      <td><input type="radio" name="csel" ${c.id === selected ? 'checked' : ''}
-                 onchange="selectContest(${c.id})"></td>
-      <td>${esc(c.title)}</td>
-      <td><span class="badge s-${c.state}">${c.state}</span></td>
-      <td>${c.problemCount}</td>
-      <td>${c.durationMinutes} min</td>
-      <td>
-        ${c.id === selected ? '' : `<button onclick="selectContest(${c.id})">Select</button>`}
-        <button class="danger" onclick="deleteContest(${c.id}, '${esc(c.title)}')">Delete</button>
-      </td>
-    </tr>`).join('');
+async function loadContests(){
+  const {body}=await api('GET','/api/admin/contests');
+  if(!Array.isArray(body)) return;
+  $('cTable').querySelector('tbody').innerHTML = body.length? body.map(c=>`
+    <tr class="${c.id===selected?'sel':''}">
+      <td><input type="radio" name="csel" ${c.id===selected?'checked':''} onchange="selectContest(${c.id})"></td>
+      <td><b>${esc(c.title)}</b></td>
+      <td><span class="badge b-${c.state}">${c.state}</span></td>
+      <td>${c.problemCount}</td><td>${c.durationMinutes} min</td>
+      <td><button class="btn sm danger" onclick="deleteContest(${c.id},'${esc(c.title)}')">Delete</button></td>
+    </tr>`).join('') : '<tr><td colspan="6" class="empty">No contests yet — create one below.</td></tr>';
 
-  if (selected == null && body.length) {
-    const live = body.find(c => c.state !== 'DRAFT' && c.state !== 'ENDED') || body[0];
+  if(selected==null && body.length){
+    const live=body.find(c=>c.state!=='DRAFT'&&c.state!=='ENDED')||body[0];
     await selectContest(live.id);
-  } else if (selected != null) {
-    await refreshSelected();
-  }
+  } else if(selected!=null){ await refreshSelected(); }
 }
 
-async function deleteContest(id, title) {
-  // UIF-22: destructive, and refused server-side once anything was submitted.
-  if (!confirm(`Delete "${title}"? Its problems and tests go too. `
-             + `This is refused if anyone has already submitted.`)) return;
-  const { status } = await api('DELETE', '/api/admin/contests/' + id);
-  if (status < 300 && selected === id) { selected = null; state = null; }
+async function selectContest(id){
+  selected=id; await loadContests(); await refreshSelected();
+  if(!$('sec-problems').classList.contains('hide')) listProblems();
+}
+
+async function deleteContest(id,title){
+  if(!confirm(`Delete "${title}"? Its problems and tests go too.\nRefused if anyone has already submitted.`)) return;
+  const {status}=await api('DELETE','/api/admin/contests/'+id);
+  if(status<300&&selected===id){selected=null;state=null;}
   await loadContests();
 }
 
-async function selectContest(id) {
-  selected = id;
-  await loadContests();
-  await refreshSelected();
-  await listProblems();
-  await loadMonitor();
-}
+async function refreshSelected(){
+  if(selected==null) return;
+  const {status,body}=await api('GET','/api/contests/'+selected);
+  if(status>=300) return;
+  state=body; state.clientAt=Date.now();
+  $('cTitle').textContent=body.title;
+  $('cState').textContent=body.state; $('cState').className='badge b-'+body.state;
 
-async function refreshSelected() {
-  if (selected == null) return;
-  const { status, body } = await api('GET', '/api/contests/' + selected);
-  if (status >= 300) return;
-  state = body;
-  // Stamp the local time of this reading so paintClocks() can correct for
-  // any skew between the browser and the authoritative server clock.
-  state.clientAt = Date.now();
-  $('cTitle').textContent = body.title;
-  $('cState').textContent = body.state;
-  $('cState').className = 'badge s-' + body.state;
-
-  const s = body.state;
-  $('bStart').disabled    = !(s === 'DRAFT' || s === 'ENDED');
-  $('bPause').disabled    = !(s === 'ACTIVE' || s === 'FROZEN');
-  $('bResume').disabled   = s !== 'PAUSED';
-  $('bFreeze').disabled   = s !== 'ACTIVE';
-  $('bUnfreeze').disabled = s !== 'FROZEN';
-  $('bEnd').disabled      = s === 'DRAFT' || s === 'ENDED';
+  const s=body.state;
+  $('bOpen').disabled     = !(s==='DRAFT'||s==='ENDED');
+  $('bStart').disabled    = !(s==='DRAFT'||s==='LOBBY'||s==='ENDED');
+  $('bPause').disabled    = !(s==='ACTIVE'||s==='FROZEN');
+  $('bResume').disabled   = s!=='PAUSED';
+  $('bFreeze').disabled   = s!=='ACTIVE';
+  $('bUnfreeze').disabled = s!=='FROZEN';
+  $('bEnd').disabled      = s==='DRAFT'||s==='ENDED';
   paintClocks();
 }
 
-/** Runs once a second off the server clock offset, so it never drifts (FMEA-06). */
-function paintClocks() {
-  if (!state) return;
-  const skew = state.serverTimeMs - state.clientAt;
-  const now = Date.now() + (isNaN(skew) ? 0 : skew);
-  $('kNow').textContent   = new Date(now).toLocaleTimeString();
-  $('kStart').textContent = timeOf(state.startTimeMs);
-  $('kEnd').textContent   = timeOf(state.endTimeMs);
+/* Ticks off the server-clock offset so it never drifts (FMEA-06). */
+function paintClocks(){
+  if(!state) return;
+  const skew=state.serverTimeMs-state.clientAt;
+  const now=Date.now()+(isNaN(skew)?0:skew);
+  $('kNow').textContent=new Date(now).toLocaleTimeString();
+  $('kStart').textContent=at(state.startTimeMs);
+  $('kEnd').textContent=at(state.endTimeMs);
 
-  if (state.startTimeMs > 0) {
-    const paused = state.state === 'PAUSED';
-    $('kElapsed').textContent = clock(now - state.startTimeMs);
-    const left = state.endTimeMs - now;
-    $('kLeft').textContent = paused ? 'paused' : clock(left);
-    $('kLeft').className = 'value' + (!paused && left > 0 && left < 5 * 60000 ? ' warn' : '');
-  } else {
-    $('kElapsed').textContent = '—';
-    $('kLeft').textContent = 'not started';
-    $('kLeft').className = 'value';
-  }
+  const left=$('kLeft');
+  if(state.state==='LOBBY'||state.state==='DRAFT'){
+    $('kElapsed').textContent='—';
+    left.textContent=state.state==='LOBBY'?'in lobby':'not started';
+    left.className='v calm';
+  } else if(state.startTimeMs>0){
+    $('kElapsed').textContent=clock(now-state.startTimeMs);
+    if(state.state==='PAUSED'){ left.textContent='paused'; left.className='v calm'; }
+    else { const ms=state.endTimeMs-now; left.textContent=clock(ms);
+           left.className='v'+(ms>0&&ms<5*60000?' warn':''); }
+  } else { $('kElapsed').textContent='—'; left.textContent='not started'; left.className='v calm'; }
 }
 
-async function act(what) {
-  if (selected == null) return;
-  await api('POST', `/api/admin/contests/${selected}/${what}`);
-  await loadContests();
+async function act(what){ if(selected==null) return;
+  await api('POST',`/api/admin/contests/${selected}/${what}`); await loadContests(); }
+async function extend(min){ if(selected==null||!min) return;
+  await api('POST',`/api/admin/contests/${selected}/extend`,{minutes:min}); await refreshSelected(); }
+
+// One input, two directions: `sign` is +1 for Add and -1 for Remove, so the
+// instructor types the amount instead of hunting for a fixed-size button.
+function extendBy(sign){
+  const n=Math.abs(parseInt($('extMin').value,10));
+  if(!n){ log(400,'Enter a number of minutes first'); return; }
+  extend(sign*n);
+}
+function confirmEnd(){ if(confirm('End this contest? Submissions are refused from now on.')) act('end'); }
+
+async function createContest(){
+  const title=$('newTitle').value.trim();
+  if(!title){ log(400,'Enter a title first'); return; }
+  const {status,body}=await api('POST','/api/admin/contests',
+    {title,durationMinutes:$('newDur').value||'120'});
+  if(status<300){ $('newTitle').value=''; selected=body.id; await loadContests(); }
 }
 
-async function extend(min) {
-  if (selected == null || !min) return;
-  await api('POST', `/api/admin/contests/${selected}/extend`, { minutes: min });
-  await refreshSelected();
+async function listProblems(){
+  const {body}=await api('GET','/api/admin/problems');
+  $('pTable').querySelector('tbody').innerHTML =
+    Array.isArray(body)&&body.length ? body.map(p=>`<tr>
+        <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
+        <td><button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="3" class="empty">No problems yet — upload a package below.</td></tr>';
 }
 
-function confirmEnd() {
-  // UIF-22: destructive actions need explicit confirmation
-  if (confirm('End this contest? Submissions will be refused from now on.')) act('end');
+async function delProblem(id,code){
+  if(!confirm(`Delete problem ${code}? This cannot be undone.`)) return;
+  await api('DELETE','/api/admin/problems/'+id); await listProblems(); await loadContests();
 }
 
-async function createContest() {
-  const title = $('newTitle').value.trim();
-  if (!title) { log(400, 'Enter a title first'); return; }
-  const { status, body } = await api('POST', '/api/admin/contests',
-    { title, durationMinutes: $('newDur').value || '120' });
-  if (status < 300) { $('newTitle').value = ''; selected = body.id; await loadContests(); }
+async function uploadPackage(){
+  const input=$('pkg');
+  if(!input.files.length){ log(400,'Choose a .zip first'); return; }
+  const form=new FormData(); form.append('file',input.files[0]);
+  const res=await fetch('/api/admin/problems/upload',
+    {method:'POST',headers:token?{Authorization:'Bearer '+token}:{},body:form});
+  const body=await res.json().catch(()=>({}));
+  log(res.status,res.ok?`imported ${body.code} with ${body.testCaseCount} tests`:(body.errors||body));
+  if(res.ok){ input.value=''; await listProblems(); await loadContests(); }
 }
 
-async function listProblems() {
-  const { body } = await api('GET', '/api/admin/problems');
-  const tb = $('pTable').querySelector('tbody');
-  if (!Array.isArray(body) || !body.length) {
-    tb.innerHTML = '<tr><td colspan="3" class="hint">No problems yet — upload a package below.</td></tr>';
-    return;
-  }
-  tb.innerHTML = body.map(p => `<tr>
-      <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
-      <td><button class="danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
-    </tr>`).join('');
+async function loadMonitor(){
+  if(selected==null) return;
+  const {body}=await api('GET',`/api/admin/contests/${selected}/participants`);
+  if(!Array.isArray(body)) return;
+  $('onlineCount').textContent=body.filter(x=>x.online).length;
+  $('partTable').querySelector('tbody').innerHTML = body.length? body.map(x=>`<tr>
+      <td><span class="dot ${x.online?'on':'off'}"></span></td>
+      <td><b>${esc(x.displayName)}</b> <span class="hint">${esc(x.username)}</span></td>
+      <td>${x.rank||'—'}</td><td>${x.solved}</td><td>${x.penaltyMinutes}</td>
+      <td>${x.submissionCount}</td>
+      <td>${x.lastSubmissionMs>0?new Date(x.lastSubmissionMs).toLocaleTimeString():'—'}</td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">Nobody has joined yet.</td></tr>';
 }
 
-async function delProblem(id, code) {
-  if (!confirm(`Delete problem ${code}? This cannot be undone.`)) return;
-  await api('DELETE', '/api/admin/problems/' + id);
-  await listProblems();
+async function loadFeed(){
+  if(selected==null) return;
+  const {body}=await api('GET',`/api/admin/contests/${selected}/submissions`);
+  $('feedTable').querySelector('tbody').innerHTML =
+    Array.isArray(body)&&body.length ? body.map(s=>`<tr>
+        <td>${new Date(s.submittedAtMs).toLocaleTimeString()}</td>
+        <td>${esc(s.problemCode)}</td><td>${esc(s.language)}</td>
+        <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
+        <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
+        <td><button class="btn sm" onclick="viewSource(${s.id})">View code</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="empty">No submissions yet.</td></tr>';
 }
 
-async function uploadPackage() {
-  const input = $('pkg');
-  if (!input.files.length) { log(400, 'Choose a .zip first'); return; }
-  const form = new FormData();
-  form.append('file', input.files[0]);
-  const res = await fetch('/api/admin/problems/upload', {
-    method: 'POST', headers: token ? { Authorization: 'Bearer ' + token } : {}, body: form
-  });
-  const body = await res.json().catch(() => ({}));
-  log(res.status, res.ok ? `imported ${body.code} with ${body.testCaseCount} tests`
-                         : (body.errors || body));
-  if (res.ok) { await listProblems(); await loadContests(); }
-}
-
-function showMonitor(which) {
-  const participants = which === 'participants';
-  $('participantsView').style.display = participants ? '' : 'none';
-  $('feedView').style.display = participants ? 'none' : '';
-  $('tabParticipants').className = participants ? 'primary' : '';
-  $('tabFeed').className = participants ? '' : 'primary';
-  loadMonitor();
-}
-
-async function loadMonitor() {
-  if (selected == null) return;
-  const feed = $('feedView').style.display !== 'none';
-
-  const p = await api('GET', `/api/admin/contests/${selected}/participants`);
-  if (Array.isArray(p.body)) {
-    $('onlineCount').textContent = p.body.filter(x => x.online).length;
-    $('partTable').querySelector('tbody').innerHTML = p.body.length
-      ? p.body.map(x => `<tr>
-          <td>${x.online ? '🟢' : '⚪'}</td>
-          <td><b>${esc(x.displayName)}</b> <span class="hint">${esc(x.username)}</span></td>
-          <td>${x.rank || '—'}</td><td>${x.solved}</td><td>${x.penaltyMinutes}</td>
-          <td>${x.submissionCount}</td>
-          <td>${x.lastSubmissionMs > 0 ? new Date(x.lastSubmissionMs).toLocaleTimeString() : '—'}</td>
-        </tr>`).join('')
-      : '<tr><td colspan="7" class="hint">Nobody has joined yet.</td></tr>';
-  }
-
-  if (feed) {
-    const f = await api('GET', `/api/admin/contests/${selected}/submissions`);
-    if (Array.isArray(f.body)) {
-      $('feedTable').querySelector('tbody').innerHTML = f.body.length
-        ? f.body.map(s => `<tr>
-            <td>${new Date(s.submittedAtMs).toLocaleTimeString()}</td>
-            <td>${esc(s.problemCode)}</td><td>${esc(s.language)}</td>
-            <td>${verdictBadge(s.verdict)}</td>
-            <td>${s.execTimeMs >= 0 ? s.execTimeMs + ' ms' : '—'}</td>
-            <td><button onclick="viewSource(${s.id})">View code</button></td>
-          </tr>`).join('')
-        : '<tr><td colspan="6" class="hint">No submissions yet.</td></tr>';
-    }
-  }
-}
-
-function verdictBadge(v) {
-  if (!v) return '<span class="hint">judging…</span>';
-  const colour = v === 'AC' ? 'var(--green)' : v === 'CE' ? 'var(--purple)' : 'var(--red)';
-  return `<b style="color:${colour}">${v}</b>`;
-}
-
-async function viewSource(id) {
-  const { status, body } = await api('GET', '/api/admin/submissions/' + id + '/source');
-  if (status >= 300) return;
-  $('sourceTitle').textContent =
-    `Submission #${body.id} — ${body.problemCode} by ${body.username} (${body.verdict || 'judging'})`;
-  $('sourceCode').textContent =
-    (body.sourceCode || '') + (body.compilerOutput ? '\n\n--- compiler output ---\n' + body.compilerOutput : '');
-  $('sourceBox').style.display = '';
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+async function viewSource(id){
+  const {status,body}=await api('GET','/api/admin/submissions/'+id+'/source');
+  if(status>=300) return;
+  $('sourceTitle').textContent=
+    `#${body.id} — ${body.problemCode} by ${body.username} (${body.verdict||'judging'})`;
+  $('sourceCode').textContent=(body.sourceCode||'')+
+    (body.compilerOutput?'\n\n--- compiler output ---\n'+body.compilerOutput:'');
+  $('sourceCard').classList.remove('hide');
 }
 </script>
 </body>
@@ -10030,16 +11297,22 @@ class VerdictPushIntegrationTest {
 
     private final RestTemplate rest = new RestTemplateBuilder().build();
 
+    /** The contest {@link #ensureContestIsOpen()} put live, shared with the tests. */
+    private long openContestId;
+
     @BeforeEach
     void ensureContestIsOpen() {
-        // The seeded contest may have "ended" if the test DB is old; make the
-        // window current so the run is deterministic (BR-02 would reject late).
-        Contest contest = contests.findFirstByStateNotOrderByIdDesc(ContestState.DRAFT)
+        // The seeded contest may have "ended" if the test DB is old, and
+        // ContestBootReset returns every live contest to DRAFT at startup — so
+        // take whatever contest exists rather than filtering by state, then make
+        // the window current so the run is deterministic (BR-02 rejects late).
+        Contest contest = contests.findAll().stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("seeder did not create a contest"));
         contest.setState(ContestState.ACTIVE);
         contest.setStartTime(Instant.now().minusSeconds(60));
         contest.setDurationMinutes(180);
         contests.save(contest);
+        openContestId = contest.getId();
     }
 
     @Test
@@ -10134,9 +11407,10 @@ class VerdictPushIntegrationTest {
     }
 
     private long firstProblemId() {
-        Contest contest = contests.findFirstByStateNotOrderByIdDesc(ContestState.DRAFT)
-                .orElseThrow();
-        return problems.findByContestIdOrderByOrderingAscCodeAsc(contest.getId()).stream()
+        // Must be the very contest @BeforeEach opened, not "the newest live
+        // one" — with several contests in the DB those are different rows and
+        // the submission then lands outside the open window (403).
+        return problems.findByContestIdOrderByOrderingAscCodeAsc(openContestId).stream()
                 .map(Problem::getId)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("seeder did not create a problem"));
@@ -10787,7 +12061,8 @@ SELECT 'submissions cleared, contest window reopened' AS status;
 # Runs one untrusted program inside the Arbitrator sandbox (FR-10, NFR-S03/S04,
 # NFR-R04, FMEA-02/08). Linux only (decision D2).
 #
-#   unshare -Urn   new user + NETWORK namespace  -> no network access
+#   unshare -Urnpf new user + network + PID namespace -> no network, and every
+#                  process dies with the namespace (fork bombs cannot escape)
 #   prlimit        CPU seconds, address space (2x memory limit), process
 #                  count (fork bombs), output file size (TBD-05), open files
 #   timeout -k     SIGKILL at 2x the time limit  -> NFR-R04
@@ -10801,7 +12076,8 @@ SELECT 'submissions cleared, contest window reopened' AS status;
 #
 # Prerequisites (Ubuntu 22.04): util-linux (unshare, prlimit), coreutils
 # (timeout), time (/usr/bin/time). Verify unprivileged user namespaces are
-# enabled on the lab image: `unshare -Urn true` must succeed (risk #2 in
+# enabled on the lab image: `unshare -Urnpf --mount-proc true` must succeed
+# (risk #2 in
 # WORKFLOW_PLAN §9).
 
 set -u
@@ -10830,9 +12106,28 @@ if [ -x /usr/bin/time ]; then
 fi
 
 START=$(date +%s%3N)
+
+# unshare flags, and why each one matters:
+#   -U  user namespace      the program is never root on the host
+#   -r  map to root inside  so it can set up its own namespaces
+#   -n  network namespace   no network at all (NFR-S04)
+#   -p  PID namespace       THE containment guarantee: the submission becomes
+#                           PID 1 of its own namespace, and when PID 1 dies the
+#                           kernel destroys every other process in it. A fork
+#                           bomb therefore cannot outlive the kill or leave
+#                           orphans behind — which is exactly what happens
+#                           without -p, where children reparent to init and
+#                           survive forever (FMEA-02/08).
+#   -f  fork                required with -p: unshare itself cannot become the
+#                           new PID 1, so it forks the child into the namespace.
+#   --mount-proc            gives that namespace its own /proc, so the program
+#                           cannot see or signal host processes.
+#
+# --mount-proc implies a mount namespace, which is also the hook for real
+# filesystem isolation later (pivot_root into the work dir) — see STATUS.md.
 # shellcheck disable=SC2086
 timeout -k 1 "${HARD_S}s" \
-    unshare -Urn \
+    unshare -Urnpf --mount-proc \
     prlimit --cpu=$CPU_S $AS_OPT --nproc=64 --fsize=67108864 --nofile=64 \
     $TIME_PREFIX "$@" < "$INFILE" > "$OUTFILE" 2> "$ERRFILE"
 EXIT=$?

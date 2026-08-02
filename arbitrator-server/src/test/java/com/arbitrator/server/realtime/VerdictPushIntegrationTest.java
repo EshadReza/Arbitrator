@@ -77,16 +77,22 @@ class VerdictPushIntegrationTest {
 
     private final RestTemplate rest = new RestTemplateBuilder().build();
 
+    /** The contest {@link #ensureContestIsOpen()} put live, shared with the tests. */
+    private long openContestId;
+
     @BeforeEach
     void ensureContestIsOpen() {
-        // The seeded contest may have "ended" if the test DB is old; make the
-        // window current so the run is deterministic (BR-02 would reject late).
-        Contest contest = contests.findFirstByStateNotOrderByIdDesc(ContestState.DRAFT)
+        // The seeded contest may have "ended" if the test DB is old, and
+        // ContestBootReset returns every live contest to DRAFT at startup — so
+        // take whatever contest exists rather than filtering by state, then make
+        // the window current so the run is deterministic (BR-02 rejects late).
+        Contest contest = contests.findAll().stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("seeder did not create a contest"));
         contest.setState(ContestState.ACTIVE);
         contest.setStartTime(Instant.now().minusSeconds(60));
         contest.setDurationMinutes(180);
         contests.save(contest);
+        openContestId = contest.getId();
     }
 
     @Test
@@ -181,9 +187,10 @@ class VerdictPushIntegrationTest {
     }
 
     private long firstProblemId() {
-        Contest contest = contests.findFirstByStateNotOrderByIdDesc(ContestState.DRAFT)
-                .orElseThrow();
-        return problems.findByContestIdOrderByOrderingAscCodeAsc(contest.getId()).stream()
+        // Must be the very contest @BeforeEach opened, not "the newest live
+        // one" — with several contests in the DB those are different rows and
+        // the submission then lands outside the open window (403).
+        return problems.findByContestIdOrderByOrderingAscCodeAsc(openContestId).stream()
                 .map(Problem::getId)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("seeder did not create a problem"));

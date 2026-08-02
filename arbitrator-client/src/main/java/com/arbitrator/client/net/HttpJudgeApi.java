@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.arbitrator.client.app.ServerConfig;
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ContestStateDto;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LoginRequest;
@@ -91,6 +93,11 @@ public class HttpJudgeApi implements JudgeApi {
     @Override
     public SubmitAckDto submit(SubmitRequest request) throws ApiException {
         return post(ApiPaths.SUBMISSIONS, request, SubmitAckDto.class);
+    }
+
+    @Override
+    public CustomRunResultDto runCustom(CustomRunRequest request) throws ApiException {
+        return post(ApiPaths.RUN_CUSTOM, request, CustomRunResultDto.class);
     }
 
     @Override
