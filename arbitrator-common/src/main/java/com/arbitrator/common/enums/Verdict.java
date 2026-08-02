@@ -7,7 +7,8 @@ public enum Verdict {
     TLE("Time Limit Exceeded"),
     MLE("Memory Limit Exceeded"),
     CE("Compilation Error"),
-    RE("Runtime Error");
+    RE("Runtime Error"),
+    OLE("Output Limit Exceeded");
 
     private final String label;
 

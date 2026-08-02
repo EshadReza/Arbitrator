@@ -26,6 +26,11 @@ public final class VerdictBanner {
     }
 
     public static void show(StackPane overlay, VerdictEventDto event) {
+        show(overlay, event, null);
+    }
+
+    /** @param onClick opened when the banner is clicked (may be null). */
+    public static void show(StackPane overlay, VerdictEventDto event, Runnable onClick) {
         String symbol = switch (event.verdict()) {
             case AC -> "✓ ";
             case WA -> "✗ ";
@@ -33,6 +38,7 @@ public final class VerdictBanner {
             case MLE -> "💾 ";
             case CE -> "⚙ ";
             case RE -> "💥 ";
+            case OLE -> "📄 ";
         };
         String text = symbol + event.verdict().label()
                 + (event.execTimeMs() >= 0 ? "   " + event.execTimeMs() + " ms" : "")
@@ -51,10 +57,18 @@ public final class VerdictBanner {
         StackPane.setAlignment(banner, Pos.TOP_CENTER);
 
         if (event.verdict() == Verdict.CE && event.compilerOutput() != null) {
-            Label hint = new Label("  (click to view compiler log)");
+            Label hint = new Label("  (click for the compiler log)");
             hint.getStyleClass().add("banner-text");
             banner.getChildren().add(hint);
             banner.setOnMouseClicked(e -> showCompilerLog(overlay, event.compilerOutput()));
+        } else if (onClick != null) {
+            Label hint = new Label("  (click to see your submission)");
+            hint.getStyleClass().add("banner-text");
+            banner.getChildren().add(hint);
+            banner.setOnMouseClicked(e -> {
+                overlay.getChildren().remove(banner);
+                onClick.run();
+            });
         }
 
         overlay.getChildren().add(banner);

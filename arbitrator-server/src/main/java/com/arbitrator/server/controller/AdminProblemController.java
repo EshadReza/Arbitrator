@@ -19,6 +19,7 @@ import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ProblemPackageResultDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.server.entity.Problem;
+import com.arbitrator.server.realtime.ContestStatePublisher;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
@@ -36,17 +37,29 @@ public class AdminProblemController {
     private final TestCaseRepository testCases;
     private final SubmissionRepository submissions;
     private final ContestService contestService;
+    private final ContestStatePublisher statePublisher;
 
     public AdminProblemController(ProblemPackageService packageService,
                                   ProblemRepository problems,
                                   TestCaseRepository testCases,
                                   SubmissionRepository submissions,
-                                  ContestService contestService) {
+                                  ContestService contestService,
+                                  ContestStatePublisher statePublisher) {
         this.packageService = packageService;
         this.problems = problems;
         this.testCases = testCases;
         this.submissions = submissions;
         this.contestService = contestService;
+        this.statePublisher = statePublisher;
+    }
+
+    /** Re-pushes contest state so clients re-fetch the problem list. */
+    private void notifyContestChanged() {
+        try {
+            statePublisher.publish(contestService.requireCurrent());
+        } catch (RuntimeException ignored) {
+            // no current contest; nothing is listening anyway
+        }
     }
 
     /**
@@ -65,6 +78,11 @@ public class AdminProblemController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read upload");
         }
         ProblemPackageResultDto result = packageService.importPackage(bytes);
+        if (result.accepted()) {
+            // Tell every connected client the contest changed, so a newly
+            // uploaded problem appears without anyone signing out and in.
+            notifyContestChanged();
+        }
         return ResponseEntity
                 .status(result.accepted() ? HttpStatus.CREATED : HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(result);
@@ -98,6 +116,7 @@ public class AdminProblemController {
         }
         testCases.findByProblemIdOrderByIdxAsc(id).forEach(testCases::delete);
         problems.delete(problem);
+        notifyContestChanged();
         return ResponseEntity.noContent().build();
     }
 }

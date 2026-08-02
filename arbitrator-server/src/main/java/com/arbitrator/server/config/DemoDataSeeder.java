@@ -54,8 +54,11 @@ public class DemoDataSeeder {
 
             Contest contest = new Contest();
             contest.setTitle("Lab Contest #1");
-            contest.setState(ContestState.ACTIVE);
-            contest.setStartTime(Instant.now());
+            // DRAFT, not ACTIVE: a freshly started server must not put a
+            // contest live on its own. The instructor opens the lobby and
+            // starts it explicitly.
+            contest.setState(ContestState.DRAFT);
+            contest.setStartTime(null);
             contest.setDurationMinutes(180);
             contests.save(contest);
 

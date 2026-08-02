@@ -1,5 +1,6 @@
 package com.arbitrator.client.controller;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
@@ -17,6 +18,10 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.VBox;
 
 /**
@@ -48,10 +53,26 @@ public class EditorController {
     @FXML private Button submitButton;
     @FXML private Button fullscreenButton;
     @FXML private Label countLabel;
+    @FXML private TextArea customInput;
+    @FXML private TextArea customOutput;
+    @FXML private Button runButton;
+    @FXML private Label runStatus;
+
+    /** Four spaces, never a tab: a literal tab renders 8 wide and misaligns. */
+    private static final String INDENT = "    ";
+    private static final int DEFAULT_FONT_SIZE = 13;
+    private static final int MIN_FONT_SIZE = 9;
+    private static final int MAX_FONT_SIZE = 28;
+
+    /** Characters auto-closed as a pair. */
+    private static final Map<String, String> PAIRS = Map.of(
+            "(", ")", "[", "]", "{", "}", "\"", "\"", "'", "'");
 
     private CodeArea codeArea;
+    private int fontSize = DEFAULT_FONT_SIZE;
     private BiConsumer<Language, String> submitHandler;
     private Runnable onFullscreen;
+    private BiConsumer<Language, String> runHandler;
 
     @FXML
     private void initialize() {
@@ -71,7 +92,87 @@ public class EditorController {
         languageBox.valueProperty().addListener((obs, old, lang) ->
                 codeArea.setStyleSpans(0, highlight(codeArea.getText())));
 
+        installEditingBehaviour();
         updateCount("");
+    }
+
+    /**
+     * Editor ergonomics people expect from any IDE: a 4-space Tab, indentation
+     * carried onto the next line (and one level deeper after an opening brace),
+     * automatic bracket/quote closing, and Ctrl +/- / Ctrl+scroll zoom.
+     *
+     * CodeArea does none of this by itself — Tab inserts a literal tab, which
+     * renders 8 wide, and Enter returns to column zero.
+     */
+    private void installEditingBehaviour() {
+        codeArea.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.TAB && !e.isControlDown()) {
+                codeArea.replaceSelection(INDENT);
+                e.consume();
+            } else if (e.getCode() == KeyCode.ENTER) {
+                autoIndentNewline();
+                e.consume();
+            } else if (e.isShortcutDown()
+                    && (e.getCode() == KeyCode.EQUALS || e.getCode() == KeyCode.PLUS)) {
+                zoom(+1);
+                e.consume();
+            } else if (e.isShortcutDown() && e.getCode() == KeyCode.MINUS) {
+                zoom(-1);
+                e.consume();
+            } else if (e.isShortcutDown() && e.getCode() == KeyCode.DIGIT0) {
+                fontSize = DEFAULT_FONT_SIZE;
+                applyFontSize();
+                e.consume();
+            }
+        });
+
+        // Auto-close brackets and quotes, leaving the caret between the pair.
+        codeArea.addEventFilter(KeyEvent.KEY_TYPED, e -> {
+            String closing = PAIRS.get(e.getCharacter());
+            if (closing != null && codeArea.getSelectedText().isEmpty()) {
+                int caret = codeArea.getCaretPosition();
+                codeArea.insertText(caret, e.getCharacter() + closing);
+                codeArea.moveTo(caret + 1);
+                e.consume();
+            }
+        });
+
+        codeArea.addEventFilter(ScrollEvent.SCROLL, e -> {
+            if (e.isShortcutDown()) {
+                zoom(e.getDeltaY() > 0 ? +1 : -1);
+                e.consume();
+            }
+        });
+
+        applyFontSize();
+    }
+
+    /** Enter keeps the current indentation, and adds one level after '{'. */
+    private void autoIndentNewline() {
+        int caret = codeArea.getCaretPosition();
+        int paragraph = codeArea.getCurrentParagraph();
+        String line = codeArea.getParagraph(paragraph).getText();
+
+        int spaces = 0;
+        while (spaces < line.length() && line.charAt(spaces) == ' ') {
+            spaces++;
+        }
+        String indent = " ".repeat(spaces);
+        String trimmed = line.strip();
+        if (trimmed.endsWith("{") || trimmed.endsWith(":")) {
+            indent += INDENT;
+        }
+        codeArea.insertText(caret, "\n" + indent);
+    }
+
+    private void zoom(int steps) {
+        // Math.clamp is Java 21+; this module targets 17.
+        fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize + steps));
+        applyFontSize();
+    }
+
+    private void applyFontSize() {
+        codeArea.setStyle("-fx-font-size: " + fontSize + "px;");
     }
 
     @FXML
@@ -95,6 +196,40 @@ public class EditorController {
 
     public void setFullscreenHandler(Runnable handler) {
         this.onFullscreen = handler;
+    }
+
+    /** MainController performs the call; this panel only owns the widgets. */
+    public void setRunHandler(BiConsumer<Language, String> handler) {
+        this.runHandler = handler;
+    }
+
+    @FXML
+    private void onRunCustom() {
+        if (runHandler != null) {
+            runButton.setDisable(true);
+            runStatus.setText(bundleOrDefault("editor.running", "running…"));
+            customOutput.clear();
+            runHandler.accept(languageBox.getValue(), codeArea.getText());
+        }
+    }
+
+    public String getCustomInput() {
+        return customInput.getText();
+    }
+
+    /** Shows the result of a custom run and re-enables the button. */
+    public void showRunResult(String output, String status) {
+        customOutput.setText(output);
+        runStatus.setText(status);
+        runButton.setDisable(false);
+    }
+
+    private static String bundleOrDefault(String key, String fallback) {
+        try {
+            return com.arbitrator.client.app.SceneRouter.bundle().getString(key);
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     /** Current editor contents — used to stash a per-problem draft. */

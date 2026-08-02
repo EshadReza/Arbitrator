@@ -4,7 +4,8 @@
 # Runs one untrusted program inside the Arbitrator sandbox (FR-10, NFR-S03/S04,
 # NFR-R04, FMEA-02/08). Linux only (decision D2).
 #
-#   unshare -Urn   new user + NETWORK namespace  -> no network access
+#   unshare -Urnpf new user + network + PID namespace -> no network, and every
+#                  process dies with the namespace (fork bombs cannot escape)
 #   prlimit        CPU seconds, address space (2x memory limit), process
 #                  count (fork bombs), output file size (TBD-05), open files
 #   timeout -k     SIGKILL at 2x the time limit  -> NFR-R04
@@ -18,7 +19,8 @@
 #
 # Prerequisites (Ubuntu 22.04): util-linux (unshare, prlimit), coreutils
 # (timeout), time (/usr/bin/time). Verify unprivileged user namespaces are
-# enabled on the lab image: `unshare -Urn true` must succeed (risk #2 in
+# enabled on the lab image: `unshare -Urnpf --mount-proc true` must succeed
+# (risk #2 in
 # WORKFLOW_PLAN §9).
 
 set -u
@@ -47,9 +49,28 @@ if [ -x /usr/bin/time ]; then
 fi
 
 START=$(date +%s%3N)
+
+# unshare flags, and why each one matters:
+#   -U  user namespace      the program is never root on the host
+#   -r  map to root inside  so it can set up its own namespaces
+#   -n  network namespace   no network at all (NFR-S04)
+#   -p  PID namespace       THE containment guarantee: the submission becomes
+#                           PID 1 of its own namespace, and when PID 1 dies the
+#                           kernel destroys every other process in it. A fork
+#                           bomb therefore cannot outlive the kill or leave
+#                           orphans behind — which is exactly what happens
+#                           without -p, where children reparent to init and
+#                           survive forever (FMEA-02/08).
+#   -f  fork                required with -p: unshare itself cannot become the
+#                           new PID 1, so it forks the child into the namespace.
+#   --mount-proc            gives that namespace its own /proc, so the program
+#                           cannot see or signal host processes.
+#
+# --mount-proc implies a mount namespace, which is also the hook for real
+# filesystem isolation later (pivot_root into the work dir) — see STATUS.md.
 # shellcheck disable=SC2086
 timeout -k 1 "${HARD_S}s" \
-    unshare -Urn \
+    unshare -Urnpf --mount-proc \
     prlimit --cpu=$CPU_S $AS_OPT --nproc=64 --fsize=67108864 --nofile=64 \
     $TIME_PREFIX "$@" < "$INFILE" > "$OUTFILE" 2> "$ERRFILE"
 EXIT=$?

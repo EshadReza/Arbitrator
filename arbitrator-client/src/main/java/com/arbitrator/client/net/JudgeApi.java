@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import com.arbitrator.common.dto.ContestStateDto;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LoginResponse;
@@ -46,6 +48,9 @@ public interface JudgeApi extends AutoCloseable {
     ProblemDetailDto problem(long id) throws ApiException;
 
     SubmitAckDto submit(SubmitRequest request) throws ApiException;
+
+    /** Run against custom input without submitting — never judged or stored. */
+    CustomRunResultDto runCustom(CustomRunRequest request) throws ApiException;
 
     List<SubmissionHistoryDto> mySubmissions() throws ApiException;
 

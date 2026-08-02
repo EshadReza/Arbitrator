@@ -12,10 +12,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.arbitrator.common.api.ApiPaths;
+import com.arbitrator.common.dto.CustomRunRequest;
+import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
+import com.arbitrator.server.judge.CustomRunService;
 import com.arbitrator.server.service.SubmissionService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,9 +27,12 @@ import jakarta.servlet.http.HttpServletRequest;
 public class SubmissionController {
 
     private final SubmissionService submissionService;
+    private final CustomRunService customRunService;
 
-    public SubmissionController(SubmissionService submissionService) {
+    public SubmissionController(SubmissionService submissionService,
+                                CustomRunService customRunService) {
         this.submissionService = submissionService;
+        this.customRunService = customRunService;
     }
 
     /** FR-09 EARS: 202 Accepted + queue position. */
@@ -37,6 +43,16 @@ public class SubmissionController {
         SubmitAckDto ack = submissionService.submit(
                 principal.getName(), req, http.getRemoteAddr());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ack);
+    }
+
+    /**
+     * Run against custom input without submitting. Not judged, not stored, no
+     * effect on standings — so it is deliberately exempt from the BR-01
+     * submission cooldown.
+     */
+    @PostMapping(ApiPaths.RUN_CUSTOM)
+    public CustomRunResultDto runCustom(@RequestBody CustomRunRequest req) {
+        return customRunService.run(req);
     }
 
     /** UIF-12: the code behind one of my submissions. */

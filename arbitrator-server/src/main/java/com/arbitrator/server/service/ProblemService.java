@@ -25,6 +25,20 @@ public class ProblemService {
         this.submissions = submissions;
     }
 
+    /**
+     * Left-panel list with per-user badge state (SRS §4.2).
+     *
+     * Returns nothing while the contest is still in its lobby: releasing
+     * statements before the clock starts would let people read and plan early.
+     */
+    public List<ProblemSummaryDto> listForContest(long contestId, long userId,
+                                                  boolean released) {
+        if (!released) {
+            return List.of();
+        }
+        return listForContest(contestId, userId);
+    }
+
     /** Left-panel list with per-user badge state (SRS §4.2). */
     public List<ProblemSummaryDto> listForContest(long contestId, long userId) {
         List<Submission> mine = submissions.findByUserIdAndActiveTrueOrderByQueuedAtDesc(userId);

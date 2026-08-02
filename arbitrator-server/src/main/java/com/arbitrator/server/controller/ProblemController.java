@@ -32,8 +32,9 @@ public class ProblemController {
     @GetMapping(ApiPaths.PROBLEMS)
     public List<ProblemSummaryDto> list(Principal principal) {
         long userId = userService.requireByUsername(principal.getName()).getId();
-        long contestId = contestService.requireCurrent().getId();
-        return problemService.listForContest(contestId, userId);
+        var contest = contestService.requireCurrent();
+        return problemService.listForContest(contest.getId(), userId,
+                contest.getState().releasesProblems());
     }
 
     @GetMapping(ApiPaths.PROBLEM_BY_ID)

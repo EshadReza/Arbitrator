@@ -16,6 +16,9 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     /** Guards problem deletion — submissions are never destroyed (DBR-04). */
     long countByProblemId(Long problemId);
 
+    /** Every submission of a contest, including already-inactive ones. */
+    List<Submission> findByContestId(Long contestId);
+
     /** Everything the leaderboard needs, oldest first (FR-17, FR-18). */
     List<Submission> findByContestIdAndActiveTrueOrderByQueuedAtAsc(Long contestId);
 }

@@ -118,6 +118,7 @@ public class MainController {
         applyWebViewFill();
         editorPanelController.setSubmitHandler(this::submit);
         editorPanelController.setFullscreenHandler(this::toggleEditorFullscreen);
+        editorPanelController.setRunHandler(this::runCustom);
         themeButton.setText(state.darkMode() ? "☀" : "🌙");
 
         startTimer();
@@ -139,6 +140,8 @@ public class MainController {
                 this::onToggleProblemList);
         accelerators.put(new KeyCodeCombination(KeyCode.F11),
                 this::onToggleStatementFullscreen);
+        accelerators.put(new KeyCodeCombination(KeyCode.R, KeyCombination.CONTROL_DOWN),
+                this::onRefresh);
     }
 
     // --- layout: collapse and fullscreen -----------------------------------
@@ -206,13 +209,18 @@ public class MainController {
      */
     @FXML
     private void onRefresh() {
-        refreshProblems(false);
         submissionsPanelController.refresh();
         async(() -> {
             try {
                 long id = state.contest().contestId();
+                // Contest state first: it decides whether problems are released
+                // at all, so fetching problems before it can show a stale list.
                 var contestState = state.api().contest(id);
                 onContestState(contestState);
+                if (contestState.state().releasesProblems()) {
+                    List<ProblemSummaryDto> items = state.api().problems();
+                    Platform.runLater(() -> applyProblems(items, false));
+                }
                 var board = state.api().leaderboard();
                 leaderboardPanelController.update(board);
                 Platform.runLater(() -> toast(bundle("main.refreshed")));
@@ -270,20 +278,27 @@ public class MainController {
         async(() -> {
             try {
                 List<ProblemSummaryDto> items = state.api().problems();
-                Platform.runLater(() -> {
-                    var selected = problemList.getSelectionModel().getSelectedItem();
-                    problemList.getItems().setAll(items);
-                    if (selectFirst && !items.isEmpty()) {
-                        problemList.getSelectionModel().select(0);
-                    } else if (selected != null) {
-                        items.stream().filter(p -> p.id() == selected.id()).findFirst()
-                                .ifPresent(p -> problemList.getSelectionModel().select(p));
-                    }
-                });
+                Platform.runLater(() -> applyProblems(items, selectFirst));
             } catch (Exception e) {
                 Platform.runLater(() -> toast("Could not load problems: " + e.getMessage()));
             }
         });
+    }
+
+    /** Applies a problem list, keeping the current selection where possible. */
+    private void applyProblems(List<ProblemSummaryDto> items, boolean selectFirst) {
+        var selected = problemList.getSelectionModel().getSelectedItem();
+        problemList.getItems().setAll(items);
+        if (items.isEmpty()) {
+            return;
+        }
+        if (selectFirst || selected == null) {
+            problemList.getSelectionModel().select(0);
+            return;
+        }
+        items.stream().filter(p -> p.id() == selected.id()).findFirst()
+                .ifPresentOrElse(p -> problemList.getSelectionModel().select(p),
+                        () -> problemList.getSelectionModel().select(0));
     }
 
     private void loadProblem(long id) {
@@ -314,26 +329,43 @@ public class MainController {
         String link = dark ? "#7fb4ff" : "#2f6fd0";
         return """
                 <html><head><meta charset="utf-8"><style>
-                  html, body { color: %s; background: %s; }
+                  html, body { color: %s !important; background: %s !important; }
                   body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 14px;
                          margin: 18px; line-height: 1.55; }
-                  /* Uploaded statements bring their own markup and often no colours;
-                     without this they inherit the default black and vanish on dark. */
-                  /* !important because uploaded statements bring their own markup
-                     and sometimes their own colours, which would otherwise leave
-                     black text on a dark background. */
+                  /* Uploaded statements are whole HTML documents carrying their own
+                     <style> block — typically light-theme colours such as
+                     `code{background:#f3f4f6}`. That block appears *after* this one
+                     in the document, so without !important it wins on source order
+                     and leaves white boxes; combined with the forced light text
+                     below that is white-on-white and completely unreadable.
+                     Everything the uploaded sheet can set has to be reclaimed. */
                   *, h1, h2, h3, h4, h5, h6, p, li, td, th, div, span, b, i, em, strong,
                   code, pre, blockquote, sup, sub, table, caption { color: %s !important; }
-                  a { color: %s; }
+                  /* Wildcard first, then the specific rules below out-specify it
+                     (both !important, so specificity decides the winner). */
+                  * { background: transparent !important; background-color: transparent !important; }
+                  a { color: %s !important; }
                   h1 { font-size: 19px; margin: 0 0 4px; }
                   h2 { font-size: 15px; margin-top: 20px; }
-                  .limits { color: %s; font-size: 12px; margin-bottom: 14px; }
-                  pre.sample, pre, code { border: 1px solid %s; background: %s; padding: 10px;
-                                    border-radius: 6px; font-family: ui-monospace, monospace;
+                  h1, h2, h3, h4, h5, h6 { border-color: %s !important; }
+                  .limits { color: %s !important; font-size: 12px; margin-bottom: 14px; }
+                  pre.sample, pre, code, kbd, samp, tt {
+                                    border: 1px solid %s !important;
+                                    background: %s !important;
+                                    background-color: %s !important;
+                                    padding: 10px; border-radius: 6px;
+                                    font-family: ui-monospace, monospace;
                                     overflow-x: auto; }
+                  /* Inline code sits inside a sentence — full block padding there
+                     produced the tall white chips seen in the statement body. */
+                  code { padding: 1px 5px; }
+                  pre code { padding: 0; border: 0 !important; background: transparent !important; }
                   table { border-collapse: collapse; }
-                  td, th { border: 1px solid %s; padding: 4px 8px; }
-                </style></head><body>""".formatted(fg, bg, fg, link, muted, border, sampleBg, border)
+                  td, th { border: 1px solid %s !important; padding: 4px 8px; }
+                  th { background: %s !important; }
+                </style></head><body>""".formatted(
+                        fg, bg, fg, link, border, muted, border, sampleBg, sampleBg,
+                        border, sampleBg)
                 + html + "</body></html>";
     }
 
@@ -382,13 +414,51 @@ public class MainController {
         });
     }
 
+    /**
+     * Runs the current code against the student's own input. Never judged and
+     * never stored, so it costs no attempt and no penalty.
+     */
+    private void runCustom(Language language, String source) {
+        ProblemSummaryDto problem = problemList.getSelectionModel().getSelectedItem();
+        if (problem == null) {
+            editorPanelController.showRunResult("", "Pick a problem first");
+            return;
+        }
+        String input = editorPanelController.getCustomInput();
+        async(() -> {
+            try {
+                var r = state.api().runCustom(new com.arbitrator.common.dto.CustomRunRequest(
+                        problem.id(), language, source, input));
+                Platform.runLater(() -> {
+                    if (!r.compiled()) {
+                        editorPanelController.showRunResult(r.compilerOutput(),
+                                "compile error");
+                    } else {
+                        String body = r.stdout();
+                        if (!r.stderr().isBlank()) {
+                            body += "\n--- stderr ---\n" + r.stderr();
+                        }
+                        editorPanelController.showRunResult(body,
+                                r.timedOut() ? "timed out" : r.execTimeMs() + " ms");
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() ->
+                        editorPanelController.showRunResult("", e.getMessage()));
+            }
+        });
+    }
+
     // --- live channel --------------------------------------------------------
 
     private void connectLive() {
         async(() -> {
             try {
                 state.api().connectVerdicts(event -> Platform.runLater(() -> {
-                    VerdictBanner.show(rootStack, event);
+                    // Clicking the banner jumps to Submissions and selects that
+                    // run, so "what exactly did I send?" is one click away.
+                    VerdictBanner.show(rootStack, event,
+                            () -> showSubmission(event.submissionId()));
                     refreshProblems(false);              // badge update (§4.2)
                     submissionsPanelController.refresh(); // FR-16 history stays live
                 }));
@@ -410,8 +480,28 @@ public class MainController {
     /** Applies a pushed contest state: clock, pause, freeze and end (FR-06). */
     private void onContestState(com.arbitrator.common.dto.ContestStateDto contestState) {
         Platform.runLater(() -> {
+            ContestState previous = state.contest() == null ? null : state.contest().state();
             state.setContest(contestState);
             contestTitleLabel.setText(contestState.title());
+
+            boolean released = contestState.state().releasesProblems();
+            boolean transitioned = previous != contestState.state();
+
+            // Refresh on EVERY push, not only on a state change: uploading a
+            // problem does not change the state, and relying on transitions
+            // meant one missed push left the screen stale until sign-out.
+            if (released) {
+                refreshProblems(transitioned);
+            } else {
+                problemList.getItems().clear();
+                problemHeader.setText("");
+                statementView.getEngine().loadContent(waitingPage());
+            }
+            if (transitioned) {
+                toast(contestState.state() == ContestState.ACTIVE
+                        ? bundle("contest.started") : bundle("contest.changed")
+                                .replace("{s}", contestState.state().name()));
+            }
             if (contestState.state() != ContestState.ENDED) {
                 ended = false;
                 if (timer != null && timer.getStatus() != Animation.Status.RUNNING) {
@@ -440,6 +530,31 @@ public class MainController {
         connLabel.getStyleClass().setAll(live ? "conn-ok" : "conn-lost");
     }
 
+    /** Opens the Submissions tab and selects one run. */
+    private void showSubmission(long submissionId) {
+        tabs.getSelectionModel().select(2);
+        submissionsPanelController.selectSubmission(submissionId);
+    }
+
+    /** Shown in the statement pane while the contest sits in its lobby. */
+    private String waitingPage() {
+        boolean dark = state.darkMode();
+        return """
+                <html><head><meta charset="utf-8"><style>
+                  body { font-family: -apple-system, "Segoe UI", sans-serif;
+                         background: %s; color: %s; display: flex; height: 90vh;
+                         align-items: center; justify-content: center; text-align: center; }
+                  h2 { font-weight: 600; }
+                  p { color: %s; }
+                </style></head><body><div>
+                  <h2>Waiting for the contest to start</h2>
+                  <p>Problems appear here the moment your instructor starts it.</p>
+                </div></body></html>"""
+                .formatted(dark ? "#1c222c" : "#ffffff",
+                        dark ? "#e6eaf0" : "#1c2430",
+                        dark ? "#9aa5b4" : "#6b7684");
+    }
+
     // --- timer (FR-06, UIF-05/06/07) -----------------------------------------
 
     private void startTimer() {
@@ -452,6 +567,14 @@ public class MainController {
     private void tick() {
         ContestState contestState = state.contest().state();
 
+        if (contestState == ContestState.LOBBY) {
+            // Doors open, clock not started: no countdown, nothing submittable.
+            timerLabel.setText(bundle("timer.waiting"));
+            timerLabel.getStyleClass().setAll("timer", "timer-waiting");
+            stopPulse();
+            setSubmissionsAllowed(false);
+            return;
+        }
         if (contestState == ContestState.PAUSED) {
             timerLabel.setText(bundle("timer.paused"));
             timerLabel.getStyleClass().setAll("timer", "timer-paused");

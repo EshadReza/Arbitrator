@@ -22,6 +22,7 @@ public final class ApiPaths {
     public static final String PROBLEM_BY_ID = "/api/problems/{id}";       // GET detail
     public static final String SUBMISSIONS = "/api/submissions";           // POST
     public static final String SUBMISSIONS_MINE = "/api/submissions/mine"; // GET history
+    public static final String RUN_CUSTOM = "/api/run";                    // POST, not judged
     public static final String SUBMISSION_SOURCE = "/api/submissions/{id}/source";
     public static final String LEADERBOARD = "/api/leaderboard";           // GET current contest
 
@@ -29,6 +30,7 @@ public final class ApiPaths {
     public static final String ADMIN_API_PREFIX = "/api/admin";
     public static final String ADMIN_CONTESTS = "/api/admin/contests";
     public static final String ADMIN_CONTEST_BY_ID = "/api/admin/contests/{id}"; // DELETE
+    public static final String ADMIN_CONTEST_OPEN = "/api/admin/contests/{id}/open";
     public static final String ADMIN_CONTEST_START = "/api/admin/contests/{id}/start";
     public static final String ADMIN_CONTEST_END = "/api/admin/contests/{id}/end";
     public static final String ADMIN_CONTEST_PAUSE = "/api/admin/contests/{id}/pause";
