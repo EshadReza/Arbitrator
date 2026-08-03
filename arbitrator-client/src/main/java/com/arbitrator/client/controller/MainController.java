@@ -386,10 +386,10 @@ public class MainController {
 
     private void restoreDraft(long problemId) {
         Draft draft = drafts.get(problemId);
-        editorPanelController.setCode(draft == null ? "" : draft.code());
         if (draft != null) {
             editorPanelController.setLanguage(draft.language());
         }
+        editorPanelController.setCode(draft == null ? "" : draft.code());
     }
 
     // --- submit (FR-09, UIF-08/09) -------------------------------------------

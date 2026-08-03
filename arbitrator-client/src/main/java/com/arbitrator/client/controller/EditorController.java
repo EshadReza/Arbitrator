@@ -47,7 +47,32 @@ public class EditorController {
             "def", "return", "if", "elif", "else", "for", "while", "break",
             "continue", "import", "from", "as", "class", "print", "input",
             "in", "not", "and", "or", "True", "False", "None", "lambda", "range"));
+    private static final Map<Language, String> TEMPLATES = Map.of(
+            Language.CPP17, """
+                    #include <iostream>
+                    using namespace std;
 
+                    int main() {
+
+                        return 0;
+                    }
+                    """,
+            Language.JAVA17, """
+                    public class Main {
+                        public static void main(String[] args) {
+
+                        }
+                    }
+                    """,
+            Language.PYTHON310, """
+                    def main():
+                        pass
+
+
+                    if __name__ == "__main__":
+                        main()
+                    """
+    );
     @FXML private VBox editorBox;
     @FXML private ComboBox<Language> languageBox;
     @FXML private Button submitButton;
@@ -84,13 +109,23 @@ public class EditorController {
 
         languageBox.setItems(FXCollections.observableArrayList(Language.values()));
         languageBox.getSelectionModel().select(Language.CPP17);
+        codeArea.replaceText(TEMPLATES.getOrDefault(Language.CPP17, ""));   // <-- new
+
 
         codeArea.textProperty().addListener((obs, old, text) -> {
             updateCount(text);
             codeArea.setStyleSpans(0, highlight(text));
         });
-        languageBox.valueProperty().addListener((obs, old, lang) ->
-                codeArea.setStyleSpans(0, highlight(codeArea.getText())));
+        languageBox.valueProperty().addListener((obs, old, lang) -> {
+            // Switching language always loads that language's boilerplate,
+            // regardless of what was typed — the previous language's code
+            // wouldn't compile under the new one anyway.
+            if (lang != null) {
+                codeArea.replaceText(TEMPLATES.getOrDefault(lang, ""));
+                codeArea.moveTo(0);
+            }
+            codeArea.setStyleSpans(0, highlight(codeArea.getText()));
+        });
 
         installEditingBehaviour();
         updateCount("");
@@ -238,8 +273,14 @@ public class EditorController {
     }
 
     /** Restores a draft. Caret goes to the end so typing continues naturally. */
+    /** Restores a draft. Caret goes to the end so typing continues naturally. */
     public void setCode(String code) {
-        codeArea.replaceText(code == null ? "" : code);
+        if (code == null || code.isBlank()) {
+            // No draft yet for this problem — start from boilerplate instead
+            // of a blank buffer, same as picking the language fresh.
+            code = TEMPLATES.getOrDefault(getLanguage(), "");
+        }
+        codeArea.replaceText(code);
         codeArea.moveTo(codeArea.getLength());
     }
 
