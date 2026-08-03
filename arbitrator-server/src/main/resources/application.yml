@@ -15,7 +15,7 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/arbitrator?serverTimezone=UTC&createDatabaseIfNotExist=true
     username: ${DB_USER:arbitrator}
-    password: ${DB_PASS:changeme}
+    password: ${DB_PASS:Changeme123!}
     hikari:
       minimum-idle: 5          # DBR-06
       maximum-pool-size: 20    # DBR-06

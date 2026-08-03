@@ -87,6 +87,7 @@ public class MainController {
      * not discard work — losing code mid-contest is unforgivable.
      */
     private final Map<Long, Draft> drafts = new HashMap<>();
+    private long currentProblemId = -1;
 
     private record Draft(String code, Language language) { }
 
@@ -104,13 +105,20 @@ public class MainController {
         problemList.setCellFactory(v -> new ProblemCell());
         problemList.getSelectionModel().selectedItemProperty().addListener(
                 (obs, old, sel) -> {
-                    if (old != null) {
-                        stashDraft(old.id());
+                    // A background refresh (every ~10s heartbeat or after a verdict)
+                    // replaces the ListView's items, which briefly clears and then
+                    // re-establishes the selection even when it's the same problem.
+                    // Without this guard that spurious reselect calls restoreDraft()
+                    // -> setCode() -> moveTo(end), yanking the caret every refresh.
+                    if (sel == null || sel.id() == currentProblemId) {
+                        return;
                     }
-                    if (sel != null) {
-                        restoreDraft(sel.id());
-                        loadProblem(sel.id());
+                    if (currentProblemId != -1) {
+                        stashDraft(currentProblemId);
                     }
+                    currentProblemId = sel.id();
+                    restoreDraft(sel.id());
+                    loadProblem(sel.id());
                 });
 
         // A WebView paints its own opaque white backdrop behind the page, so a

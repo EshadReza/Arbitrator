@@ -24,6 +24,7 @@ public class LoginController {
     @FXML private Label errorLabel;
     @FXML private Label statusLabel;
     @FXML private Circle statusDot;
+    @FXML private Button themeButton;
     @FXML private Button loginButton;
 
     private final AppState state = AppState.get();
@@ -33,6 +34,7 @@ public class LoginController {
         errorLabel.setVisible(false);
         statusDot.setFill(Color.GRAY);
         statusLabel.setText(state.serverConfig().hostPort());
+        themeButton.setText(state.darkMode() ? "☀" : "🌙");
         pingAsync();
     }
 
@@ -73,6 +75,14 @@ public class LoginController {
         SceneRouter.showRegister();
     }
 
+    
+    @FXML
+    private void onToggleTheme() {
+        boolean dark = !state.darkMode();
+        state.setDarkMode(dark);
+        SceneRouter.applyTheme(usernameField.getScene());
+        themeButton.setText(dark ? "☀" : "🌙");
+    }
     private void showError(String message) {
         errorLabel.setText(message);
         errorLabel.setVisible(true);
