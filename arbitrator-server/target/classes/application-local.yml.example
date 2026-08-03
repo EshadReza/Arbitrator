@@ -1,6 +1,0 @@
-# Copy to application-local.yml (git-ignored) and fill in YOUR local values.
-# Each developer runs their own MySQL 8 instance (rules.md Rule 6).
-spring:
-  datasource:
-    username: labjudge
-    password: your-local-password-here

@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.arbitrator.server.realtime.VerdictPushIntegrationTest
--------------------------------------------------------------------------------
-Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.331 s -- in com.arbitrator.server.realtime.VerdictPushIntegrationTest
