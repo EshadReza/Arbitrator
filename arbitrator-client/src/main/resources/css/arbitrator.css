@@ -69,7 +69,7 @@
 .login-root { -fx-background-color: -c-bg; }
 
 .logo {
-    -fx-font-size: 36px;
+    -fx-font-size: 40px;
     -fx-font-weight: bold;
     -fx-text-fill: -c-accent;
 }
@@ -80,8 +80,26 @@
     -fx-text-fill: -c-accent;
 }
 
-.subtitle { -fx-text-fill: -c-muted; -fx-font-size: 11px; }
+.subtitle { -fx-text-fill: -c-muted; -fx-font-size: 13px; }
 .error    { -fx-text-fill: -c-red; }
+
+.login-box {
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.08), 12, 0, 0, 4);
+}
+
+.root.dark .login-box {
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.35), 16, 0, 0, 6);
+}
+
+.login-input {
+    -fx-font-size: 14px;
+    -fx-padding: 9 12 9 12;
+}
+
+.login-button {
+    -fx-font-size: 14px;
+    -fx-padding: 9 16 9 16;
+}
 
 .text-field, .password-field {
     -fx-background-color: -c-surface;

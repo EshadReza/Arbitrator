@@ -6,30 +6,37 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.PasswordField?>
 <?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
 <!-- FR-01 registration. Same visual grammar as the login screen. -->
 <VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.arbitrator.client.controller.RegisterController"
-      alignment="CENTER" spacing="10" styleClass="login-root">
+      alignment="TOP_CENTER" styleClass="login-root">
 
-    <Label text="%app.title" styleClass="logo"/>
-    <Label text="%register.subtitle" styleClass="subtitle"/>
+    <HBox alignment="CENTER_RIGHT" maxWidth="Infinity">
+        <padding><Insets top="12" right="16" bottom="0" left="16"/></padding>
+    </HBox>
 
-    <VBox alignment="CENTER" spacing="8" maxWidth="340" styleClass="box">
-        <padding><Insets top="20" right="24" bottom="20" left="24"/></padding>
+    <VBox alignment="CENTER" spacing="12" VBox.vgrow="ALWAYS">
+        <Label text="%app.title" styleClass="logo"/>
+        <Label text="%register.subtitle" styleClass="subtitle"/>
 
-        <TextField fx:id="usernameField" promptText="%register.username"/>
-        <TextField fx:id="displayNameField" promptText="%register.displayName"/>
-        <PasswordField fx:id="passwordField" promptText="%register.password"/>
-        <!-- Enter in the last field submits, matching the login screen (UIF-02) -->
-        <PasswordField fx:id="confirmField" promptText="%register.confirm"
-                       onAction="#onRegister"/>
+        <VBox alignment="CENTER" spacing="12" prefWidth="440" maxWidth="440" styleClass="box, login-box">
+            <padding><Insets top="28" right="32" bottom="28" left="32"/></padding>
 
-        <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>
+            <TextField fx:id="usernameField" promptText="%register.username" styleClass="login-input"/>
+            <TextField fx:id="displayNameField" promptText="%register.displayName" styleClass="login-input"/>
+            <PasswordField fx:id="passwordField" promptText="%register.password" styleClass="login-input"/>
+            <!-- Enter in the last field submits, matching the login screen (UIF-02) -->
+            <PasswordField fx:id="confirmField" promptText="%register.confirm" styleClass="login-input"
+                           onAction="#onRegister"/>
 
-        <Button fx:id="registerButton" text="%register.button" onAction="#onRegister"
-                defaultButton="true" maxWidth="Infinity"/>
-        <Hyperlink text="%register.backToLogin" onAction="#onBackToLogin"/>
+            <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>
+
+            <Button fx:id="registerButton" text="%register.button" onAction="#onRegister"
+                    defaultButton="true" maxWidth="Infinity" styleClass="login-button"/>
+            <Hyperlink text="%register.backToLogin" onAction="#onBackToLogin"/>
+        </VBox>
     </VBox>
 </VBox>
