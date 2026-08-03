@@ -220,9 +220,8 @@
 .table-row-cell:self { -fx-background-color: derive(-c-amber, 70%); }
 .root.dark .table-row-cell:self { -fx-background-color: derive(-c-amber, -60%); }
 
-.cell-solved { -fx-text-fill: -c-green; -fx-font-weight: bold; }
-.cell-failed { -fx-text-fill: -c-red; }
-
+.table-view .table-cell.cell-solved { -fx-text-fill: -c-green; -fx-font-weight: bold; }
+.table-view .table-cell.cell-failed { -fx-text-fill: -c-red; }
 /* --- problem list badges (§4.2) --------------------------------------------- */
 
 .badge-solved {
@@ -329,15 +328,14 @@
 
 /* --- per-verdict colours (NFR-U02: colour + full descriptive text) --------- */
 
-.v-AC  { -fx-text-fill: -c-green;  -fx-font-weight: bold; }
-.v-WA  { -fx-text-fill: -c-red;    -fx-font-weight: bold; }
-.v-TLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
-.v-MLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
-.v-RE  { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
-.v-OLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
-.v-CE  { -fx-text-fill: -c-purple; -fx-font-weight: bold; }
-.v-pending { -fx-text-fill: -c-muted; }
-
+.table-view .table-cell.v-AC  { -fx-text-fill: -c-green;  -fx-font-weight: bold; }
+.table-view .table-cell.v-WA  { -fx-text-fill: -c-red;    -fx-font-weight: bold; }
+.table-view .table-cell.v-TLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.table-view .table-cell.v-MLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.table-view .table-cell.v-RE  { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.table-view .table-cell.v-OLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
+.table-view .table-cell.v-CE  { -fx-text-fill: -c-purple; -fx-font-weight: bold; }
+.table-view .table-cell.v-pending { -fx-text-fill: -c-muted; }
 /* --- standings extras --------------------------------------------------------- */
 
 .freeze-banner {
