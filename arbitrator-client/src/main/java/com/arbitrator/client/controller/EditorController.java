@@ -1,5 +1,12 @@
 package com.arbitrator.client.controller;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -15,6 +22,8 @@ import com.arbitrator.common.enums.Language;
 
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -23,6 +32,8 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
+import javafx.stage.Window;
 
 /**
  * Right panel (SRS §4.2): RichTextFX CodeArea with line numbers,
@@ -75,6 +86,7 @@ public class EditorController {
     );
     @FXML private VBox editorBox;
     @FXML private ComboBox<Language> languageBox;
+    @FXML private Button uploadButton;
     @FXML private Button submitButton;
     @FXML private Button fullscreenButton;
     @FXML private Label countLabel;
@@ -316,6 +328,136 @@ public class EditorController {
     }
 
     // ------------------------------------------------------------------
+
+    /** Maximum allowed file size for solution uploads (1 MB). */
+    private static final long MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024;
+
+    public static List<String> getAllowedExtensions(Language language) {
+        if (language == null) {
+            return List.of();
+        }
+        return switch (language) {
+            case CPP17 -> List.of(".cpp", ".cc", ".cxx", ".c++", ".hpp", ".h");
+            case JAVA17 -> List.of(".java");
+            case PYTHON310 -> List.of(".py");
+        };
+    }
+
+    @FXML
+    private void onUploadFile() {
+        Language lang = languageBox.getValue();
+        if (lang == null) {
+            showErrorAlert(
+                    bundleOrDefault("editor.uploadErrorTitle", "Upload Error"),
+                    bundleOrDefault("editor.selectLanguageFirst", "Please select a programming language first."));
+            return;
+        }
+
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(bundleOrDefault("editor.uploadTitle", "Upload Solution File"));
+
+        List<String> allowedExts = getAllowedExtensions(lang);
+        List<String> globPatterns = allowedExts.stream().map(ext -> "*" + ext).toList();
+        String description = lang.display() + " Files (" + String.join(", ", globPatterns) + ")";
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(description, globPatterns));
+
+        Window window = editorBox != null && editorBox.getScene() != null ? editorBox.getScene().getWindow() : null;
+        File file = chooser.showOpenDialog(window);
+
+        if (file == null) {
+            return;
+        }
+
+        validateAndLoadFile(file, lang);
+    }
+
+    public void validateAndLoadFile(File file, Language lang) {
+        try {
+            // Safety rule 1: File existence and non-directory check
+            if (file == null || !file.exists() || !file.isFile() || !file.canRead()) {
+                showErrorAlert(
+                        bundleOrDefault("editor.uploadErrorTitle", "Upload Error"),
+                        "The selected file does not exist, is a directory, or cannot be read.");
+                return;
+            }
+
+            // Safety rule 2: Strict extension validation according to selected language
+            String fileName = file.getName().toLowerCase(Locale.ROOT);
+            List<String> allowedExts = getAllowedExtensions(lang);
+            boolean validExt = allowedExts.stream().anyMatch(fileName::endsWith);
+
+            if (!validExt) {
+                showErrorAlert(
+                        bundleOrDefault("editor.invalidExtensionTitle", "Invalid File Type"),
+                        "The file '" + file.getName() + "' is not a valid file type for " + lang.display() + ".\n"
+                                + "Allowed extensions: " + String.join(", ", allowedExts));
+                return;
+            }
+
+            // Safety rule 3: File size cap to prevent OOM/UI freezes
+            if (file.length() > MAX_FILE_SIZE_BYTES) {
+                showErrorAlert(
+                        bundleOrDefault("editor.fileTooLargeTitle", "File Too Large"),
+                        "The selected file (" + (file.length() / 1024) + " KB) exceeds the maximum allowed limit of 1 MB.");
+                return;
+            }
+
+            // Safety rule 4: Binary file / null-byte safety check
+            byte[] bytes = Files.readAllBytes(file.toPath());
+            for (byte b : bytes) {
+                if (b == 0) {
+                    showErrorAlert(
+                            bundleOrDefault("editor.binaryFileTitle", "Invalid File Content"),
+                            "The file contains binary data (null bytes). Only plain text source code files are permitted.");
+                    return;
+                }
+            }
+
+            // Safety rule 5: UTF-8 character decoding validation
+            String content;
+            try {
+                var decoder = StandardCharsets.UTF_8.newDecoder();
+                decoder.onMalformedInput(java.nio.charset.CodingErrorAction.REPORT);
+                decoder.onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT);
+                content = decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+            } catch (CharacterCodingException e) {
+                showErrorAlert(
+                        bundleOrDefault("editor.encodingErrorTitle", "Encoding Error"),
+                        "The file is not valid UTF-8 text. Please upload plain text solution files encoded in UTF-8.");
+                return;
+            }
+
+            // Normalize line endings
+            content = content.replace("\r\n", "\n").replace("\r", "\n");
+
+            // Apply to editor safely
+            codeArea.replaceText(content);
+            codeArea.moveTo(0);
+            updateCount(content);
+            codeArea.setStyleSpans(0, highlight(content));
+
+        } catch (SecurityException e) {
+            showErrorAlert(
+                    bundleOrDefault("editor.uploadErrorTitle", "Upload Error"),
+                    "Security restriction prevented reading the file: " + e.getMessage());
+        } catch (IOException e) {
+            showErrorAlert(
+                    bundleOrDefault("editor.uploadErrorTitle", "Upload Error"),
+                    "Failed to read file: " + e.getMessage());
+        } catch (Exception e) {
+            showErrorAlert(
+                    bundleOrDefault("editor.uploadErrorTitle", "Upload Error"),
+                    "An unexpected error occurred: " + e.getMessage());
+        }
+    }
+
+    private void showErrorAlert(String title, String message) {
+        Alert alert = new Alert(AlertType.ERROR);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
 
     private void updateCount(String text) {
         int lines = text.isEmpty() ? 0 : text.split("\n", -1).length;

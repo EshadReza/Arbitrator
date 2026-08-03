@@ -20,6 +20,8 @@
         <padding><Insets top="6" right="8" bottom="6" left="8"/></padding>
         <Label text="%editor.language"/>
         <ComboBox fx:id="languageBox" prefWidth="140"/>
+        <Button fx:id="uploadButton" text="%editor.upload" onAction="#onUploadFile"
+                styleClass="button"/>
         <Region HBox.hgrow="ALWAYS"/>
         <Button fx:id="submitButton" text="%editor.submit" onAction="#onSubmit"
                 styleClass="submit-button"/>

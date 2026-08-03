@@ -1,6 +1,7 @@
 package com.arbitrator.client.app;
 
 import javafx.application.Application;
+
 import javafx.stage.Stage;
 
 /**
