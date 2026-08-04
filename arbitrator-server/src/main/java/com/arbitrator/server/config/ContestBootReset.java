@@ -1,5 +1,6 @@
 package com.arbitrator.server.config;
 
+import java.time.Instant;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -32,9 +33,8 @@ import com.arbitrator.server.repo.ContestRepository;
  * submissions of the previous run stay untouched until {@code start()} archives
  * them (see {@code ContestResetListener}).
  *
- * Set {@code arbitrator.contest.reset-on-boot=false} to keep a contest running
- * across a restart — the right choice only if the server is expected to be
- * bounced mid-contest and resumed.
+ * Set {@code arbitrator.contest.reset-on-boot=true} to reset a contest to DRAFT
+ * on restart, ensuring no contest resumes unexpectedly.
  */
 @Configuration
 public class ContestBootReset {
@@ -54,18 +54,28 @@ public class ContestBootReset {
     @Order(0)
     CommandLineRunner resetContestsOnBoot(
             ContestRepository contests,
-            @Value("${arbitrator.contest.reset-on-boot:true}") boolean enabled) {
+            @Value("${arbitrator.contest.reset-on-boot:false}") boolean enabled) {
         return args -> {
-            if (!enabled) {
-                log.info("Contest boot reset disabled — live contests keep running across restarts");
-                return;
-            }
             List<Contest> live = contests.findAll().stream()
                     .filter(c -> LIVE.contains(c.getState()))
                     .toList();
             if (live.isEmpty()) {
                 return;
             }
+
+            if (!enabled) {
+                for (Contest c : live) {
+                    if (c.endTime() != null && !Instant.now().isBefore(c.endTime())) {
+                        log.info("Contest \"{}\" end time passed while server was offline — marking ENDED", c.getTitle());
+                        c.setState(ContestState.ENDED);
+                        contests.save(c);
+                    } else {
+                        log.info("Contest \"{}\" remains {} across server restart", c.getTitle(), c.getState());
+                    }
+                }
+                return;
+            }
+
             for (Contest c : live) {
                 log.info("Boot reset: \"{}\" was {} — returning it to DRAFT",
                         c.getTitle(), c.getState());

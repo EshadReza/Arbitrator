@@ -54,6 +54,9 @@ arbitrator:
     # while developing, so it stays configurable and defaults to 0 here.
     submit-cooldown-seconds: ${ARBITRATOR_SUBMIT_COOLDOWN:0}
 
+  contest:
+    reset-on-boot: ${ARBITRATOR_RESET_ON_BOOT:false}
+
 logging:
   level:
     com.arbitrator: INFO

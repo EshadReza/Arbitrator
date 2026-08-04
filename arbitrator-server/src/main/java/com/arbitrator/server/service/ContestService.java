@@ -32,7 +32,19 @@ public class ContestService {
      * {@link #start(long)} keeps at most one contest live, so this is
      * unambiguous in practice.
      */
+    public void checkExpiredContests() {
+        List<Contest> live = contests.findAll().stream()
+                .filter(c -> c.getState() == ContestState.ACTIVE || c.getState() == ContestState.FROZEN)
+                .filter(c -> c.endTime() != null && !Instant.now().isBefore(c.endTime()))
+                .toList();
+        for (Contest c : live) {
+            c.setState(ContestState.ENDED);
+            contests.save(c);
+        }
+    }
+
     public Contest requireCurrent() {
+        checkExpiredContests();
         return contests.findFirstByStateInOrderByIdDesc(
                         List.of(ContestState.ACTIVE, ContestState.FROZEN))
                 .or(() -> contests.findFirstByStateNotOrderByIdDesc(ContestState.DRAFT))
@@ -238,12 +250,18 @@ public class ContestService {
 
     /** Contests a student may enter — everything except DRAFT and ENDED. */
     public List<Contest> joinable() {
+        checkExpiredContests();
         return contests.findAll().stream()
                 .filter(c -> c.getState().isJoinable())
                 .toList();
     }
 
     public ContestStateDto stateOf(Contest c) {
+        if ((c.getState() == ContestState.ACTIVE || c.getState() == ContestState.FROZEN)
+                && c.endTime() != null && !Instant.now().isBefore(c.endTime())) {
+            c.setState(ContestState.ENDED);
+            c = contests.save(c);
+        }
         Instant start = c.getStartTime();
         Instant end = c.endTime();
         return new ContestStateDto(
