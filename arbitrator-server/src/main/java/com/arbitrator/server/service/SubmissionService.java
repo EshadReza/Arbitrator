@@ -23,6 +23,7 @@ import com.arbitrator.server.judge.JudgeProperties;
 import com.arbitrator.server.judge.JudgeQueue;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
+import com.arbitrator.server.repo.TestCaseRepository;
 import com.arbitrator.server.repo.UserRepository;
 
 /**
@@ -39,6 +40,7 @@ public class SubmissionService {
     private final UserService userService;
     private final JudgeQueue queue;
     private final UserRepository users;
+    private final TestCaseRepository testCases;
     private final Duration cooldown;
 
     /** userId -> last accepted submission instant (BR-01). */
@@ -50,6 +52,7 @@ public class SubmissionService {
                              UserService userService,
                              JudgeQueue queue,
                              UserRepository users,
+                             TestCaseRepository testCases,
                              JudgeProperties props) {
         this.submissions = submissions;
         this.problems = problems;
@@ -57,6 +60,7 @@ public class SubmissionService {
         this.userService = userService;
         this.queue = queue;
         this.users = users;
+        this.testCases = testCases;
         this.cooldown = Duration.ofSeconds(props.getSubmitCooldownSeconds());
     }
 
@@ -131,17 +135,27 @@ public class SubmissionService {
     /** FR-16: personal history, newest first. */
     public List<SubmissionHistoryDto> history(String username) {
         User user = userService.requireByUsername(username);
-        Map<Long, String> codes = problems.findAll().stream()
-                .collect(Collectors.toMap(Problem::getId, Problem::getCode));
+        Map<Long, Problem> problemMap = problems.findAll().stream()
+                .collect(Collectors.toMap(Problem::getId, p -> p));
+        Map<Long, Integer> totalTestMap = new ConcurrentHashMap<>();
+
         return submissions.findByUserIdAndActiveTrueOrderByQueuedAtDesc(user.getId()).stream()
-                .map(s -> new SubmissionHistoryDto(
-                        s.getId(),
-                        codes.getOrDefault(s.getProblemId(), "?"),
-                        s.getLanguage(),
-                        s.getVerdict(),
-                        s.getExecTimeMs(),
-                        s.getPeakMemoryKb(),
-                        s.getQueuedAt().toEpochMilli()))
+                .map(s -> {
+                    Problem p = problemMap.get(s.getProblemId());
+                    int total = totalTestMap.computeIfAbsent(s.getProblemId(),
+                            id -> testCases.findByProblemIdOrderByIdxAsc(id).size());
+                    int passed = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? total : Math.max(0, s.getFailedTestIndex());
+                    return new SubmissionHistoryDto(
+                            s.getId(),
+                            p != null ? p.getCode() : "?",
+                            s.getLanguage(),
+                            s.getVerdict(),
+                            s.getExecTimeMs(),
+                            s.getPeakMemoryKb(),
+                            s.getQueuedAt().toEpochMilli(),
+                            passed,
+                            total);
+                })
                 .toList();
     }
 }

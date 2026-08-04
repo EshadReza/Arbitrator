@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import com.arbitrator.common.api.StompDestinations;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.server.entity.Contest;
+import com.arbitrator.server.realtime.ContestStatePublisher;
 import com.arbitrator.server.service.ContestService;
 
 /**
@@ -27,13 +28,28 @@ public class LeaderboardBroadcaster {
     private final LeaderboardService leaderboard;
     private final ContestService contestService;
     private final SimpMessagingTemplate template;
+    private final ContestStatePublisher statePublisher;
 
     public LeaderboardBroadcaster(LeaderboardService leaderboard,
                                   ContestService contestService,
-                                  SimpMessagingTemplate template) {
+                                  SimpMessagingTemplate template,
+                                  ContestStatePublisher statePublisher) {
         this.leaderboard = leaderboard;
         this.contestService = contestService;
         this.template = template;
+        this.statePublisher = statePublisher;
+    }
+
+    @Scheduled(fixedDelay = 1000)
+    public void checkScheduledLobbies() {
+        for (Contest contest : contestService.all()) {
+            if (contest.getState() == com.arbitrator.common.enums.ContestState.LOBBY
+                    && contest.getScheduledStartAt() != null
+                    && !java.time.Instant.now().isBefore(contest.getScheduledStartAt())) {
+                Contest started = contestService.start(contest.getId());
+                statePublisher.publish(started);
+            }
+        }
     }
 
     /** FR-17: the periodic heartbeat, so late joiners and idle clients stay current. */

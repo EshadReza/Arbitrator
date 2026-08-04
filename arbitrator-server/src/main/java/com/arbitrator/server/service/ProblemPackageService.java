@@ -68,6 +68,11 @@ public class ProblemPackageService {
 
     @Transactional
     public ProblemPackageResultDto importPackage(byte[] zipBytes) {
+        return importPackageForContest(zipBytes, null);
+    }
+
+    @Transactional
+    public ProblemPackageResultDto importPackageForContest(byte[] zipBytes, Long targetContestId) {
         List<String> errors = new ArrayList<>();
 
         Map<String, byte[]> files;
@@ -152,7 +157,7 @@ public class ProblemPackageService {
         }
 
         // --- uniqueness within the contest ---
-        long contestId = contestService.requireCurrent().getId();
+        long contestId = (targetContestId != null) ? targetContestId : contestService.requireCurrent().getId();
         if (code != null && !code.isBlank()
                 && problems.findByContestIdOrderByOrderingAscCodeAsc(contestId).stream()
                         .anyMatch(p -> p.getCode().equalsIgnoreCase(code.trim()))) {

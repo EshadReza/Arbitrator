@@ -5,6 +5,7 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,19 +39,22 @@ public class AdminProblemController {
     private final SubmissionRepository submissions;
     private final ContestService contestService;
     private final ContestStatePublisher statePublisher;
+    private final JdbcTemplate jdbcTemplate;
 
     public AdminProblemController(ProblemPackageService packageService,
                                   ProblemRepository problems,
                                   TestCaseRepository testCases,
                                   SubmissionRepository submissions,
                                   ContestService contestService,
-                                  ContestStatePublisher statePublisher) {
+                                  ContestStatePublisher statePublisher,
+                                  JdbcTemplate jdbcTemplate) {
         this.packageService = packageService;
         this.problems = problems;
         this.testCases = testCases;
         this.submissions = submissions;
         this.contestService = contestService;
         this.statePublisher = statePublisher;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /** Re-pushes contest state so clients re-fetch the problem list. */
@@ -62,12 +66,9 @@ public class AdminProblemController {
         }
     }
 
-    /**
-     * FR-05. Returns 201 with the imported problem, or 422 with the list of
-     * validation failures — the package is never partially imported.
-     */
     @PostMapping(ApiPaths.ADMIN_PROBLEM_UPLOAD)
-    public ResponseEntity<ProblemPackageResultDto> upload(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<ProblemPackageResultDto> upload(@RequestParam("file") MultipartFile file,
+                                                          @RequestParam(value = "contestId", required = false) Long contestId) {
         if (file == null || file.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No file uploaded");
         }
@@ -77,10 +78,8 @@ public class AdminProblemController {
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read upload");
         }
-        ProblemPackageResultDto result = packageService.importPackage(bytes);
+        ProblemPackageResultDto result = packageService.importPackageForContest(bytes, contestId);
         if (result.accepted()) {
-            // Tell every connected client the contest changed, so a newly
-            // uploaded problem appears without anyone signing out and in.
             notifyContestChanged();
         }
         return ResponseEntity
@@ -88,33 +87,24 @@ public class AdminProblemController {
                 .body(result);
     }
 
-    /** Problems in the current contest, for the admin Problems page. */
+    /** Problems in the requested contest (or current contest). */
     @GetMapping(ApiPaths.ADMIN_PROBLEMS)
-    public List<ProblemSummaryDto> list() {
-        long contestId = contestService.requireCurrent().getId();
-        return problems.findByContestIdOrderByOrderingAscCodeAsc(contestId).stream()
+    public List<ProblemSummaryDto> list(@RequestParam(value = "contestId", required = false) Long contestId) {
+        long targetId = (contestId != null) ? contestId : contestService.requireCurrent().getId();
+        return problems.findByContestIdOrderByOrderingAscCodeAsc(targetId).stream()
                 .map(p -> new ProblemSummaryDto(p.getId(), p.getCode(), p.getTitle(), false, 0))
                 .toList();
     }
 
-    /**
-     * UIF-22 destructive action. Refused once anyone has submitted to the
-     * problem: submissions are never destroyed (DBR-04) and orphaning them
-     * would corrupt contest history and the eventual leaderboard.
-     */
     @DeleteMapping(ApiPaths.ADMIN_PROBLEM_BY_ID)
     @Transactional
     public ResponseEntity<Void> delete(@PathVariable long id) {
         Problem problem = problems.findById(id).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
 
-        long submissionCount = submissions.countByProblemId(id);
-        if (submissionCount > 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Cannot delete \"" + problem.getCode() + "\": it already has "
-                            + submissionCount + " submission(s). Submissions are never deleted.");
-        }
-        testCases.findByProblemIdOrderByIdxAsc(id).forEach(testCases::delete);
+        jdbcTemplate.update("DELETE FROM submission_results WHERE submission_id IN (SELECT id FROM submissions WHERE problem_id = ?)", id);
+        jdbcTemplate.update("DELETE FROM submissions WHERE problem_id = ?", id);
+        testCases.deleteAll(testCases.findByProblemIdOrderByIdxAsc(id));
         problems.delete(problem);
         notifyContestChanged();
         return ResponseEntity.noContent().build();

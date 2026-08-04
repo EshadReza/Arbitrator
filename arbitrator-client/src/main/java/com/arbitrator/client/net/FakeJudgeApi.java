@@ -120,7 +120,7 @@ public class FakeJudgeApi implements JudgeApi {
         Verdict verdict = src.contains("a+b") ? Verdict.AC : cycle[cycleAt++ % cycle.length];
 
         history.add(0, new SubmissionHistoryDto(id, "A", request.language(), null,
-                -1, -1, System.currentTimeMillis()));
+                -1, -1, System.currentTimeMillis(), 0, 10));
 
         timer.schedule(() -> {
             Consumer<VerdictEventDto> c = onVerdict;

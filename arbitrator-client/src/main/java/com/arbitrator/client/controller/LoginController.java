@@ -21,6 +21,7 @@ public class LoginController {
 
     @FXML private TextField usernameField;
     @FXML private PasswordField passwordField;
+    @FXML private TextField serverAddressField;
     @FXML private Label errorLabel;
     @FXML private Label statusLabel;
     @FXML private Circle statusDot;
@@ -33,7 +34,15 @@ public class LoginController {
     private void initialize() {
         errorLabel.setVisible(false);
         statusDot.setFill(Color.GRAY);
-        statusLabel.setText(state.serverConfig().hostPort());
+        if (serverAddressField != null) {
+            serverAddressField.setText(state.serverConfig().hostPort());
+            serverAddressField.focusedProperty().addListener((obs, oldV, newV) -> {
+                if (!newV) {
+                    state.serverConfig().updateHostPort(serverAddressField.getText());
+                    pingAsync();
+                }
+            });
+        }
         themeButton.setText(state.darkMode() ? "☀" : "🌙");
         pingAsync();
     }
@@ -41,6 +50,9 @@ public class LoginController {
     /** Wired to both the button and the password field's onAction (UIF-02). */
     @FXML
     private void onLogin() {
+        if (serverAddressField != null) {
+            state.serverConfig().updateHostPort(serverAddressField.getText().trim());
+        }
         String username = usernameField.getText().trim();
         String password = passwordField.getText();
         if (username.isEmpty() || password.isEmpty()) {

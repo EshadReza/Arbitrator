@@ -1,6 +1,7 @@
 package com.arbitrator.server.controller;
 
 import java.security.Principal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -9,21 +10,28 @@ import java.util.Set;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.arbitrator.common.api.ApiPaths;
+import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
 import com.arbitrator.common.dto.ParticipantDto;
+import com.arbitrator.common.dto.ParticipantSubmissionsDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
 import com.arbitrator.server.entity.Contest;
+import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.Submission;
 import com.arbitrator.server.entity.User;
 import com.arbitrator.server.leaderboard.LeaderboardService;
+import com.arbitrator.server.realtime.ContestStatePublisher;
 import com.arbitrator.server.realtime.PresenceTracker;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
+import com.arbitrator.server.repo.TestCaseRepository;
 import com.arbitrator.server.repo.UserRepository;
 import com.arbitrator.server.service.ContestService;
 import com.arbitrator.server.service.SubmissionService;
@@ -40,23 +48,29 @@ public class AdminMonitorController {
     private final PresenceTracker presence;
     private final SubmissionRepository submissions;
     private final ProblemRepository problems;
+    private final TestCaseRepository testCases;
     private final UserRepository users;
     private final SubmissionService submissionService;
+    private final ContestStatePublisher statePublisher;
 
     public AdminMonitorController(ContestService contestService,
                                   LeaderboardService leaderboard,
                                   PresenceTracker presence,
                                   SubmissionRepository submissions,
                                   ProblemRepository problems,
+                                  TestCaseRepository testCases,
                                   UserRepository users,
-                                  SubmissionService submissionService) {
+                                  SubmissionService submissionService,
+                                  ContestStatePublisher statePublisher) {
         this.contestService = contestService;
         this.leaderboard = leaderboard;
         this.presence = presence;
         this.submissions = submissions;
         this.problems = problems;
+        this.testCases = testCases;
         this.users = users;
         this.submissionService = submissionService;
+        this.statePublisher = statePublisher;
     }
 
     /**
@@ -121,8 +135,8 @@ public class AdminMonitorController {
     /** Every submission in the contest, newest first — the instructor's feed. */
     @GetMapping(ApiPaths.ADMIN_CONTEST_SUBMISSIONS)
     public List<SubmissionHistoryDto> contestSubmissions(@PathVariable long id) {
-        Map<Long, String> codes = new HashMap<>();
-        problems.findAll().forEach(p -> codes.put(p.getId(), p.getCode()));
+        Map<Long, Problem> problemMap = new java.util.HashMap<>();
+        problems.findAll().forEach(p -> problemMap.put(p.getId(), p));
         Map<Long, String> userNames = new HashMap<>();
         users.findAll().forEach(u -> userNames.put(u.getId(), u.getUsername()));
 
@@ -130,18 +144,35 @@ public class AdminMonitorController {
                 new ArrayList<>(submissions.findByContestIdAndActiveTrueOrderByQueuedAtAsc(id));
         java.util.Collections.reverse(all);
 
+        Map<Long, Integer> testCountMap = new HashMap<>();
+
         return all.stream()
-                .map(s -> new SubmissionHistoryDto(
-                        s.getId(),
-                        // problem code carries the author so one table shows both
-                        codes.getOrDefault(s.getProblemId(), "?") + " · "
-                                + userNames.getOrDefault(s.getUserId(), "?"),
-                        s.getLanguage(),
-                        s.getVerdict(),
-                        s.getExecTimeMs(),
-                        s.getPeakMemoryKb(),
-                        s.getQueuedAt().toEpochMilli()))
+                .map(s -> {
+                    Problem p = problemMap.get(s.getProblemId());
+                    int total = testCountMap.computeIfAbsent(s.getProblemId(),
+                            pid -> testCases.findByProblemIdOrderByIdxAsc(pid).size());
+                    int passed = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? total : Math.max(0, s.getFailedTestIndex());
+                    String codeStr = (p != null ? p.getCode() : "?") + " · " + userNames.getOrDefault(s.getUserId(), "?");
+                    return new SubmissionHistoryDto(
+                            s.getId(),
+                            codeStr,
+                            s.getLanguage(),
+                            s.getVerdict(),
+                            s.getExecTimeMs(),
+                            s.getPeakMemoryKb(),
+                            s.getQueuedAt().toEpochMilli(),
+                            passed,
+                            total);
+                })
                 .toList();
+    }
+
+    @PostMapping(ApiPaths.ADMIN_CONTEST_SCHEDULE)
+    public ContestStateDto scheduleContest(@PathVariable long id, @RequestParam int minutes) {
+        Instant startAt = Instant.now().plusSeconds(minutes * 60L);
+        Contest c = contestService.scheduleLobby(id, startAt);
+        statePublisher.publish(c);
+        return contestService.stateOf(c);
     }
 
     /** Admins may read any submission's code (post-contest review, FR-22). */
@@ -155,5 +186,85 @@ public class AdminMonitorController {
     public Map<String, Integer> online(@PathVariable long id) {
         return Map.of("online", presence.onlineCount(id),
                 "totalConnected", presence.totalConnected());
+    }
+
+    @GetMapping(ApiPaths.ADMIN_GROUPED_SUBMISSIONS)
+    public List<ParticipantSubmissionsDto> groupedSubmissions(@PathVariable long id) {
+        List<Submission> all = submissions.findByContestIdAndActiveTrueOrderByQueuedAtAsc(id);
+        
+        Map<Long, User> userMap = new java.util.HashMap<>();
+        users.findAll().forEach(u -> userMap.put(u.getId(), u));
+        
+        Map<Long, Problem> problemMap = new java.util.HashMap<>();
+        problems.findAll().forEach(p -> problemMap.put(p.getId(), p));
+        Map<Long, Integer> testCountMap = new HashMap<>();
+        
+        Map<Long, List<Submission>> byUser = new java.util.HashMap<>();
+        for (Submission s : all) {
+            byUser.computeIfAbsent(s.getUserId(), k -> new ArrayList<>()).add(s);
+        }
+        
+        List<ParticipantSubmissionsDto> result = new ArrayList<>();
+        
+        for (Map.Entry<Long, List<Submission>> entry : byUser.entrySet()) {
+            Long userId = entry.getKey();
+            List<Submission> userSubs = entry.getValue();
+            
+            User user = userMap.get(userId);
+            if (user == null) continue;
+            
+            int total = userSubs.size();
+            int acCount = 0;
+            String bestVerdict = null;
+            
+            for (Submission s : userSubs) {
+                if (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) {
+                    acCount++;
+                }
+            }
+            if (acCount > 0) {
+                bestVerdict = com.arbitrator.common.enums.Verdict.AC.name();
+            } else {
+                for (int i = userSubs.size() - 1; i >= 0; i--) {
+                    if (userSubs.get(i).getVerdict() != null) {
+                        bestVerdict = userSubs.get(i).getVerdict().name();
+                        break;
+                    }
+                }
+            }
+            
+            List<SubmissionHistoryDto> history = new ArrayList<>();
+            for (int i = userSubs.size() - 1; i >= 0; i--) {
+                Submission s = userSubs.get(i);
+                Problem p = problemMap.get(s.getProblemId());
+                int totalTests = testCountMap.computeIfAbsent(s.getProblemId(),
+                        pid -> testCases.findByProblemIdOrderByIdxAsc(pid).size());
+                int passedTests = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? totalTests : Math.max(0, s.getFailedTestIndex());
+                String codeStr = p != null ? "Problem " + p.getCode() + " — " + p.getTitle() : "?";
+                history.add(new SubmissionHistoryDto(
+                        s.getId(),
+                        codeStr,
+                        s.getLanguage(),
+                        s.getVerdict(),
+                        s.getExecTimeMs(),
+                        s.getPeakMemoryKb(),
+                        s.getQueuedAt().toEpochMilli(),
+                        passedTests,
+                        totalTests
+                ));
+            }
+            
+            result.add(new ParticipantSubmissionsDto(
+                    user.getUsername(),
+                    user.getDisplayName(),
+                    total,
+                    acCount,
+                    bestVerdict,
+                    history
+            ));
+        }
+        
+        result.sort(java.util.Comparator.comparing(ParticipantSubmissionsDto::username));
+        return result;
     }
 }

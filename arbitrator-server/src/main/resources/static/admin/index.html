@@ -115,6 +115,15 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
 /* ── login gate ──────────────────────────────────────────────────────────── */
 .gate{display:grid;place-items:center;min-height:100vh;padding:20px}
 .gate .card{width:min(400px,100%);margin:0}
+
+/* ── grouped submissions ─────────────────────────────────────────────── */
+tr.group-head{cursor:pointer;font-weight:500}
+tr.group-head:hover{background:var(--surface2)}
+tr.group-head td:first-child{font-size:12px;color:var(--muted);text-align:center;transition:.15s}
+tr.group-head.open td:first-child{transform:rotate(90deg)}
+tr.sub-row{background:var(--surface2)}
+tr.sub-row td{padding:6px 10px 6px 40px;font-size:13px;border-bottom:1px solid var(--border)}
+tr.sub-row.collapsed{display:none}
 </style>
 </head>
 <body>
@@ -146,6 +155,7 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
     <button class="nav"    data-sec="problems" onclick="go('problems')"><span class="ic">📄</span>Problems</button>
     <button class="nav"    data-sec="people"   onclick="go('people')"><span class="ic">👥</span>Participants</button>
     <button class="nav"    data-sec="feed"     onclick="go('feed')"><span class="ic">📊</span>Submissions</button>
+    <button class="nav" data-sec="standings" onclick="go('standings')"><span class="ic">📝</span>Standings & Marks</button>
     <button class="nav"    data-sec="contests" onclick="go('contests')"><span class="ic">🗂</span>All contests</button>
     <div class="side-foot">
       <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
@@ -191,6 +201,20 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
       </div>
 
       <div class="card">
+        <header>Lobby Start Countdown</header>
+        <div class="body">
+          <div class="row">
+            <label for="lobbyMins">Start in (Minutes)</label>
+            <input type="number" id="lobbyMins" value="5" min="1" step="1" style="width:90px">
+            <button class="btn primary sm" onclick="scheduleLobby()">Set Countdown</button>
+          </div>
+          <p class="hint" style="margin-top:10px">
+            Set the countdown timer displayed to waiting participants in the lobby.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
         <header>Adjust time</header>
         <div class="body">
           <div class="row">
@@ -221,8 +245,12 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
       <div class="card">
         <header>Upload a package</header>
         <div class="body">
-          <div class="row"><input type="file" id="pkg" accept=".zip">
+          <div class="row"><input type="file" id="pkg" accept=".zip" multiple>
             <button class="btn primary" onclick="uploadPackage()">Upload</button></div>
+          <div id="uploadResults" class="hide" style="margin-top:14px">
+            <div style="font-weight:600;margin-bottom:8px">Upload Results</div>
+            <div id="uploadResultsList"></div>
+          </div>
           <p class="hint" style="margin-top:10px">
             ZIP containing <b>config.json</b>, <b>statement/statement.html</b> and
             <b>tests/NN.in</b> + <b>tests/NN.out</b> pairs. A single wrapping folder is fine.
@@ -250,20 +278,55 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
 
     <section id="sec-feed" class="hide">
       <h1>Submissions</h1>
-      <div class="lede">Every submission in this contest, newest first.</div>
+      <div class="lede">Grouped by participant. Click a row to expand.</div>
       <div class="card">
         <header>Feed <span class="spacer"></span><button class="btn sm" onclick="loadFeed()">⟳</button></header>
         <div class="body" style="padding:0">
-          <table id="feedTable"><thead><tr><th style="width:92px">Time</th><th>Problem · Who</th>
-            <th style="width:110px">Language</th><th style="width:150px">Verdict</th>
-            <th style="width:88px">Time</th><th style="width:110px"></th></tr></thead><tbody></tbody></table>
+          <table id="feedTable"><thead><tr>
+            <th style="width:36px"></th><th>Participant</th>
+            <th style="width:100px">Submissions</th><th style="width:80px">Accepted</th>
+            <th style="width:140px">Best Verdict</th>
+          </tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="card hide" id="sourceCard">
-        <header><span id="sourceTitle">Source</span><span class="spacer"></span>
+        <header>
+          <span id="sourceTitle">Source</span>
+          <span class="spacer"></span>
+          <select id="sourceOverrideSelect" onchange="overrideCurrentSourceVerdict(this.value)" style="font-size:12px;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2)">
+            <option value="" disabled selected>Override verdict...</option>
+            <option value="AC">Set AC (Accepted)</option>
+            <option value="WA">Set WA (Wrong Answer)</option>
+            <option value="TLE">Set TLE (Time Limit Exceeded)</option>
+            <option value="MLE">Set MLE (Memory Limit Exceeded)</option>
+            <option value="RE">Set RE (Runtime Error)</option>
+            <option value="CE">Set CE (Compile Error)</option>
+          </select>
           <button class="btn sm" onclick="document.getElementById('sourceCard').classList.add('hide')">Close</button>
         </header>
         <div class="body"><pre class="code" id="sourceCode"></pre></div>
+      </div>
+    </section>
+
+    <section id="sec-standings" class="hide">
+      <h1>Standings & Marks</h1>
+      <div class="lede">Assign marks based on standings. Sorted by username. <button class="btn sm" onclick="exportCSV()" style="margin-left:8px">📋 Export CSV</button></div>
+      <div class="card">
+        <header>Standings <span class="spacer"></span>
+          <button class="btn sm" onclick="loadStandings()">⟳ Refresh</button></header>
+        <div class="body" style="padding:0;overflow-x:auto">
+          <table id="standingsTable"><thead><tr>
+            <th style="width:44px">#</th><th>Username</th><th>Display Name</th>
+            <th style="width:60px">Solved</th><th style="width:150px">Penalty</th>
+            <th style="width:90px">Best Time</th><th style="width:90px">Language</th>
+            <th style="width:100px">Marks</th><th style="width:90px"></th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card hide" id="bestSourceCard">
+        <header><span id="bestSourceTitle">Best Submissions</span><span class="spacer"></span>
+          <button class="btn sm" onclick="document.getElementById('bestSourceCard').classList.add('hide')">Close</button></header>
+        <div class="body" id="bestSourceContainer"></div>
       </div>
     </section>
 
@@ -316,12 +379,13 @@ async function api(method,path,params){
 }
 
 function go(sec){
-  ['control','problems','people','feed','contests']
+  ['control','problems','people','feed','standings','contests']
     .forEach(s=>$('sec-'+s).classList.toggle('hide',s!==sec));
   document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('on',n.dataset.sec===sec));
   if(sec==='problems') listProblems();
   if(sec==='people')   loadMonitor();
   if(sec==='feed')     loadFeed();
+  if(sec==='standings') loadStandings();
   if(sec==='contests') loadContests();
 }
 
@@ -350,7 +414,7 @@ async function loadContests(){
       <td><b>${esc(c.title)}</b></td>
       <td><span class="badge b-${c.state}">${c.state}</span></td>
       <td>${c.problemCount}</td><td>${c.durationMinutes} min</td>
-      <td><button class="btn sm danger" onclick="deleteContest(${c.id},'${esc(c.title)}')">Delete</button></td>
+      <td><button class="btn sm danger" onclick="event.stopPropagation();deleteContest(${c.id},'${esc(c.title)}')">Delete</button></td>
     </tr>`).join('') : '<tr><td colspan="6" class="empty">No contests yet — create one below.</td></tr>';
 
   if(selected==null && body.length){
@@ -365,10 +429,13 @@ async function selectContest(id){
 }
 
 async function deleteContest(id,title){
-  if(!confirm(`Delete "${title}"? Its problems and tests go too.\nRefused if anyone has already submitted.`)) return;
+  if(!confirm(`Permanently delete contest "${title}" along with all its problems, test cases, and submissions?`)) return;
   const {status}=await api('DELETE','/api/admin/contests/'+id);
-  if(status<300&&selected===id){selected=null;state=null;}
-  await loadContests();
+  if(status<300){
+    log(200,`Deleted contest "${title}"`);
+    if(selected===id){ selected=null; state=null; }
+    await loadContests();
+  }
 }
 
 async function refreshSelected(){
@@ -435,7 +502,8 @@ async function createContest(){
 }
 
 async function listProblems(){
-  const {body}=await api('GET','/api/admin/problems');
+  const path = selected != null ? `/api/admin/problems?contestId=${selected}` : '/api/admin/problems';
+  const {body}=await api('GET',path);
   $('pTable').querySelector('tbody').innerHTML =
     Array.isArray(body)&&body.length ? body.map(p=>`<tr>
         <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
@@ -451,13 +519,30 @@ async function delProblem(id,code){
 
 async function uploadPackage(){
   const input=$('pkg');
-  if(!input.files.length){ log(400,'Choose a .zip first'); return; }
-  const form=new FormData(); form.append('file',input.files[0]);
-  const res=await fetch('/api/admin/problems/upload',
-    {method:'POST',headers:token?{Authorization:'Bearer '+token}:{},body:form});
-  const body=await res.json().catch(()=>({}));
-  log(res.status,res.ok?`imported ${body.code} with ${body.testCaseCount} tests`:(body.errors||body));
-  if(res.ok){ input.value=''; await listProblems(); await loadContests(); }
+  if(!input.files.length){ log(400,'Choose one or more .zip files first'); return; }
+  const btn=event.target; btn.disabled=true; btn.textContent='Uploading…';
+  const results=$('uploadResults'); results.classList.remove('hide');
+  const list=$('uploadResultsList'); list.innerHTML='';
+  let ok=0, fail=0;
+  const path = selected != null ? `/api/admin/problems/upload?contestId=${selected}` : '/api/admin/problems/upload';
+  for(const file of input.files){
+    const form=new FormData(); form.append('file',file);
+    const res=await fetch(path,
+      {method:'POST',headers:token?{Authorization:'Bearer '+token}:{},body:form});
+    const body=await res.json().catch(()=>({}));
+    if(res.ok){
+      ok++;
+      list.innerHTML+=`<div style="margin:4px 0;color:var(--green)">✓ <b>${esc(body.code)}</b> — ${esc(body.title)} (${body.testCaseCount} tests)</div>`;
+    } else {
+      fail++;
+      const errs=body.errors?body.errors.join('; '):(body.message||'Upload failed');
+      list.innerHTML+=`<div style="margin:4px 0;color:var(--red)">✗ <b>${esc(file.name)}</b> — ${esc(errs)}</div>`;
+    }
+  }
+  log(fail?422:201, `${ok} imported, ${fail} failed`);
+  btn.disabled=false; btn.textContent='Upload';
+  input.value='';
+  await listProblems(); await loadContests();
 }
 
 async function loadMonitor(){
@@ -474,18 +559,159 @@ async function loadMonitor(){
     </tr>`).join('') : '<tr><td colspan="7" class="empty">Nobody has joined yet.</td></tr>';
 }
 
+let feedGroups={};
+
 async function loadFeed(){
   if(selected==null) return;
-  const {body}=await api('GET',`/api/admin/contests/${selected}/submissions`);
-  $('feedTable').querySelector('tbody').innerHTML =
-    Array.isArray(body)&&body.length ? body.map(s=>`<tr>
-        <td>${new Date(s.submittedAtMs).toLocaleTimeString()}</td>
-        <td>${esc(s.problemCode)}</td><td>${esc(s.language)}</td>
+  const {body}=await api('GET',`/api/admin/contests/${selected}/submissions/grouped`);
+  if(!Array.isArray(body)) return;
+  feedGroups={};
+  const tb=$('feedTable').querySelector('tbody');
+  if(!body.length){ tb.innerHTML='<tr><td colspan="5" class="empty">No submissions yet.</td></tr>'; return; }
+  let html='';
+  body.forEach((g,gi)=>{
+    feedGroups[gi]=false;
+    const vClass=g.bestVerdict?'v-'+g.bestVerdict:'v-none';
+    html+=`<tr class="group-head" onclick="toggleGroup(${gi})">
+      <td>▶</td>
+      <td><b>${esc(g.username)}</b> <span class="hint">${esc(g.displayName)}</span></td>
+      <td>${g.totalSubmissions}</td>
+      <td>${g.acceptedCount}</td>
+      <td class="${vClass}">${g.bestVerdict||'—'}</td>
+    </tr>`;
+    if(g.submissions) g.submissions.forEach(s=>{
+      const testStr = s.totalTestCases > 0 ? ` · ${s.passedTestCount}/${s.totalTestCases} passed` : '';
+      html+=`<tr class="sub-row collapsed" data-group="${gi}">
+        <td style="text-align:center;color:var(--muted)">↳</td>
+        <td><b>${esc(s.problemCode)}</b> <span class="hint" style="margin-left:6px">${esc(s.language||'—')}${testStr} · ${new Date(s.submittedAtMs).toLocaleTimeString()}</span></td>
         <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
         <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
-        <td><button class="btn sm" onclick="viewSource(${s.id})">View code</button></td>
-      </tr>`).join('')
-    : '<tr><td colspan="6" class="empty">No submissions yet.</td></tr>';
+        <td><button class="btn sm" onclick="event.stopPropagation();viewSource(${s.id})">View code</button></td>
+      </tr>`;
+    });
+  });
+  tb.innerHTML=html;
+}
+
+function toggleGroup(gi){
+  feedGroups[gi]=!feedGroups[gi];
+  const heads=document.querySelectorAll('#feedTable .group-head');
+  if(heads[gi]) heads[gi].classList.toggle('open',feedGroups[gi]);
+  document.querySelectorAll(`#feedTable tr.sub-row[data-group="${gi}"]`)
+    .forEach(r=>r.classList.toggle('collapsed',!feedGroups[gi]));
+}
+
+async function scheduleLobby(){
+  if(selected==null) return;
+  const m=parseInt($('lobbyMins').value,10);
+  if(isNaN(m)||m<=0){ log(400,'Enter valid minutes > 0'); return; }
+  const {status}=await api('POST',`/api/admin/contests/${selected}/schedule?minutes=${m}`);
+  if(status<300){ log(200,`Scheduled lobby countdown for ${m} min`); }
+}
+
+let standingsData=[];
+
+async function loadStandings(){
+  if(selected==null) return;
+  const {body}=await api('GET',`/api/admin/contests/${selected}/standings`);
+  if(!Array.isArray(body)) return;
+  standingsData=body;
+  $('standingsTable').querySelector('tbody').innerHTML = body.length? body.map((s,i)=>`<tr>
+      <td>${i+1}</td>
+      <td><b>${esc(s.username)}</b></td>
+      <td>${esc(s.displayName)}</td>
+      <td>${s.solved}</td>
+      <td style="white-space:nowrap"><b>${s.penaltyMinutes}m</b> <button class="btn sm" style="padding:2px 6px;margin-left:6px;font-size:11px" onclick="adjustPenaltyPrompt('${esc(s.username)}')">± Penalty</button></td>
+      <td>${s.bestExecTimeMs>=0?s.bestExecTimeMs+' ms':'—'}</td>
+      <td>${s.bestLanguage||'—'}</td>
+      <td><input type="number" min="0" max="100" value="${s.marks!=null?s.marks:''}" 
+           style="width:70px" placeholder="—"
+           onchange="setParticipantMarks('${esc(s.username)}',this.value)"
+           onkeydown="if(event.key==='Enter'){setParticipantMarks('${esc(s.username)}',this.value);this.blur()}"
+           ${s.bestSubmissionId!=null?'':'disabled title="No submissions yet"'}></td>
+      <td>${s.bestSubmissionId!=null?`<button class="btn sm" onclick="viewParticipantCodes('${esc(s.username)}','${esc(s.displayName)}')">View code</button>`:''}</td>
+    </tr>`).join('') : '<tr><td colspan="9" class="empty">No submissions yet.</td></tr>';
+}
+
+async function setParticipantMarks(username,val){
+  const v=parseInt(val,10);
+  if(isNaN(v)||v<0||v>100){ log(400,'Marks must be 0–100'); return; }
+  const {status}=await api('POST',`/api/admin/contests/${selected}/participants/${encodeURIComponent(username)}/marks?value=${v}`);
+  if(status<300){ log(200,`Saved marks ${v} for ${username}`); }
+}
+
+async function adjustPenaltyPrompt(username){
+  const input=prompt(`Adjust penalty minutes for ${username} (e.g. +10 or -5):`,"0");
+  if(input===null) return;
+  const delta=parseInt(input,10);
+  if(isNaN(delta)||delta===0) return;
+  const {status}=await api('POST',`/api/admin/contests/${selected}/participants/${encodeURIComponent(username)}/penalty?delta=${delta}`);
+  if(status<300){
+    log(200,`Adjusted penalty for ${username} by ${delta>0?'+'+delta:delta}m`);
+    await loadStandings();
+  }
+}
+
+async function overrideVerdict(subId, newVerdict){
+  if(!newVerdict) return;
+  const {status}=await api('POST',`/api/admin/submissions/${subId}/verdict?verdict=${newVerdict}`);
+  if(status<300){
+    log(200,`Submission #${subId} verdict updated to ${newVerdict}`);
+    await loadStandings();
+    if(typeof loadFeed === 'function') loadFeed();
+  }
+}
+
+async function viewParticipantCodes(username, displayName){
+  const {status,body}=await api('GET',`/api/admin/contests/${selected}/participants/${encodeURIComponent(username)}/codes`);
+  if(status>=300||!Array.isArray(body)) return;
+  $('bestSourceTitle').textContent=`Submissions for ${username} (${displayName})`;
+  const container=$('bestSourceContainer');
+  if(!body.length){
+    container.innerHTML='<div class="empty">No submissions for this participant.</div>';
+  } else {
+    container.innerHTML = body.map(p => `
+      <div style="margin-bottom:20px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--surface)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <h3 style="margin:0;font-size:15px;color:var(--fg)">📌 Problem ${esc(p.problemCode)}: ${esc(p.problemTitle)}
+            <span class="${p.verdict?'v-'+p.verdict:'v-none'}" style="margin-left:8px;font-size:13px">[${p.verdict||'judging'}]</span>
+            <small class="hint" style="margin-left:8px">(${p.execTimeMs>=0?p.execTimeMs+' ms':'—'} · ${esc(p.language||'—')})</small>
+          </h3>
+          <div>
+            <select onchange="overrideVerdict(${p.submissionId}, this.value)" style="font-size:12px;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2)">
+              <option value="" disabled selected>Override verdict...</option>
+              <option value="AC">Set AC (Accepted)</option>
+              <option value="WA">Set WA (Wrong Answer)</option>
+              <option value="TLE">Set TLE (Time Limit Exceeded)</option>
+              <option value="MLE">Set MLE (Memory Limit Exceeded)</option>
+              <option value="RE">Set RE (Runtime Error)</option>
+              <option value="CE">Set CE (Compile Error)</option>
+            </select>
+          </div>
+        </div>
+        <pre class="code" style="margin:0">${esc(p.sourceCode||'')}${p.compilerOutput?'\n\n--- compiler output ---\n'+esc(p.compilerOutput):''}</pre>
+      </div>
+    `).join('');
+  }
+  $('bestSourceCard').classList.remove('hide');
+}
+
+function exportCSV(){
+  if(!standingsData.length){ log(400,'Load standings first'); return; }
+  let csv='\uFEFFUsername,Display Name,Solved,Penalty,Best Time (ms),Language,Marks\n';
+  standingsData.forEach(s=>{
+    csv+=`"${(s.username||'').replace(/"/g,'""')}","${(s.displayName||'').replace(/"/g,'""')}",${s.solved},${s.penaltyMinutes},${s.bestExecTimeMs>=0?s.bestExecTimeMs:''},${s.bestLanguage||''},${s.marks!=null?s.marks:''}\n`;
+  });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `standings_contest_${selected||'all'}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  log(200,'Downloaded Excel CSV file');
 }
 
 async function viewSource(id){

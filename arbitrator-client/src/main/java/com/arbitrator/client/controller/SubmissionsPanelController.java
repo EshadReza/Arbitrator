@@ -184,7 +184,12 @@ public class SubmissionsPanelController {
         TableColumn<SubmissionHistoryDto, Verdict> verdict = new TableColumn<>("Verdict");
         verdict.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(c.getValue().verdict()));
         verdict.setCellFactory(c -> new VerdictCell());
-        verdict.setPrefWidth(180);
+        verdict.setPrefWidth(160);
+
+        TableColumn<SubmissionHistoryDto, String> tests = new TableColumn<>("Tests Passed");
+        tests.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(
+                c.getValue().totalTestCases() > 0 ? c.getValue().passedTestCount() + "/" + c.getValue().totalTestCases() + " passed" : "—"));
+        tests.setPrefWidth(100);
 
         TableColumn<SubmissionHistoryDto, String> time = new TableColumn<>("Time used");
         time.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(
@@ -196,7 +201,7 @@ public class SubmissionsPanelController {
                 c.getValue().peakMemoryKb() > 0 ? c.getValue().peakMemoryKb() + " KB" : "—"));
         mem.setPrefWidth(95);
 
-        table.getColumns().setAll(List.of(when, problem, lang, verdict, time, mem));
+        table.getColumns().setAll(List.of(when, problem, lang, verdict, tests, time, mem));
     }
 
     /** Same colour language as the verdict banner (UIF-10/NFR-U02). */

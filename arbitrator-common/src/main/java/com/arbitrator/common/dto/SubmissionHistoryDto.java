@@ -11,6 +11,8 @@ public record SubmissionHistoryDto(
         Verdict verdict,        // null while still queued/judging
         long execTimeMs,
         long peakMemoryKb,
-        long submittedAtMs      // epoch millis, server clock
+        long submittedAtMs,     // epoch millis, server clock
+        int passedTestCount,
+        int totalTestCases
 ) {
 }

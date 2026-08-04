@@ -16,6 +16,7 @@
 
     <HBox alignment="CENTER_RIGHT" maxWidth="Infinity">
         <padding><Insets top="12" right="16" bottom="0" left="16"/></padding>
+        <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button" text="🌙" />
     </HBox>
 
     <VBox alignment="CENTER" spacing="12" VBox.vgrow="ALWAYS">

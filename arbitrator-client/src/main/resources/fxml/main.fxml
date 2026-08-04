@@ -37,8 +37,7 @@
                 </left>
 
                 <center>
-                    <Label fx:id="timerLabel" styleClass="timer" alignment="CENTER"
-                           maxWidth="Infinity"/>
+                    <Label fx:id="timerLabel" styleClass="timer" alignment="CENTER"/>
                 </center>
 
                 <right>

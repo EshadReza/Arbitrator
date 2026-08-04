@@ -158,12 +158,17 @@
 .contest-title { -fx-font-weight: bold; }
 
 .timer {
-    -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
-    -fx-font-size: 26px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-text;
+    -fx-font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
+    -fx-font-size: 24px;
+    -fx-font-weight: 900;
+    -fx-text-fill: -c-accent;
     -fx-alignment: CENTER;
     -fx-text-alignment: CENTER;
+    -fx-padding: 3 14 3 14;
+    -fx-background-color: derive(-c-surface, 5%);
+    -fx-background-radius: 6px;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 6px;
 }
 
 /* PAUSED / Contest Ended read as words, not a clock — same size, letter-spaced */

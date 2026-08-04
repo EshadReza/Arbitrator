@@ -44,6 +44,14 @@ public final class ApiPaths {
     public static final String ADMIN_PARTICIPANTS = "/api/admin/contests/{id}/participants";
     public static final String ADMIN_CONTEST_SUBMISSIONS = "/api/admin/contests/{id}/submissions";
     public static final String ADMIN_SUBMISSION_SOURCE = "/api/admin/submissions/{id}/source";
+    public static final String ADMIN_STANDINGS = "/api/admin/contests/{id}/standings";
+    public static final String ADMIN_SET_MARKS = "/api/admin/submissions/{id}/marks";
+    public static final String ADMIN_PARTICIPANT_MARKS = "/api/admin/contests/{id}/participants/{username}/marks";
+    public static final String ADMIN_PARTICIPANT_CODES = "/api/admin/contests/{id}/participants/{username}/codes";
+    public static final String ADMIN_GROUPED_SUBMISSIONS = "/api/admin/contests/{id}/submissions/grouped";
+    public static final String ADMIN_OVERRIDE_VERDICT = "/api/admin/submissions/{id}/verdict";
+    public static final String ADMIN_ADJUST_PENALTY = "/api/admin/contests/{id}/participants/{username}/penalty";
+    public static final String ADMIN_CONTEST_SCHEDULE = "/api/admin/contests/{id}/schedule";
 
     // --- static admin panel, loopback only ---
     public static final String ADMIN_PANEL_PREFIX = "/admin";

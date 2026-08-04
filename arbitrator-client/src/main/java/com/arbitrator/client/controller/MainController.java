@@ -137,8 +137,28 @@ public class MainController {
         Platform.runLater(this::installShortcuts);
     }
 
+    private double currentZoomScale = 1.0;
+
+    private void changeZoom(double delta) {
+        currentZoomScale = Math.max(0.75, Math.min(1.75, currentZoomScale + delta));
+        applyZoom();
+    }
+
+    private void resetZoom() {
+        currentZoomScale = 1.0;
+        applyZoom();
+    }
+
+    private void applyZoom() {
+        if (rootStack != null) {
+            rootStack.setScaleX(currentZoomScale);
+            rootStack.setScaleY(currentZoomScale);
+        }
+    }
+
     private void installShortcuts() {
-        var accelerators = rootStack.getScene().getAccelerators();
+        var scene = rootStack.getScene();
+        var accelerators = scene.getAccelerators();
         // NFR-U04: everything reachable without a mouse.
         accelerators.put(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.CONTROL_DOWN),
                 editorPanelController::fireSubmit);
@@ -150,6 +170,22 @@ public class MainController {
                 this::onToggleStatementFullscreen);
         accelerators.put(new KeyCodeCombination(KeyCode.R, KeyCombination.CONTROL_DOWN),
                 this::onRefresh);
+        accelerators.put(new KeyCodeCombination(KeyCode.EQUALS, KeyCombination.CONTROL_DOWN), () -> changeZoom(0.1));
+        accelerators.put(new KeyCodeCombination(KeyCode.ADD, KeyCombination.CONTROL_DOWN), () -> changeZoom(0.1));
+        accelerators.put(new KeyCodeCombination(KeyCode.MINUS, KeyCombination.CONTROL_DOWN), () -> changeZoom(-0.1));
+        accelerators.put(new KeyCodeCombination(KeyCode.SUBTRACT, KeyCombination.CONTROL_DOWN), () -> changeZoom(-0.1));
+        accelerators.put(new KeyCodeCombination(KeyCode.DIGIT0, KeyCombination.CONTROL_DOWN), this::resetZoom);
+
+        scene.setOnScroll(event -> {
+            if (event.isControlDown()) {
+                if (event.getDeltaY() > 0) {
+                    changeZoom(0.05);
+                } else if (event.getDeltaY() < 0) {
+                    changeZoom(-0.05);
+                }
+                event.consume();
+            }
+        });
     }
 
     // --- layout: collapse and fullscreen -----------------------------------
@@ -576,8 +612,18 @@ public class MainController {
         ContestState contestState = state.contest().state();
 
         if (contestState == ContestState.LOBBY) {
-            // Doors open, clock not started: no countdown, nothing submittable.
-            timerLabel.setText(bundle("timer.waiting"));
+            long startRemaining = state.contest().startTimeMs() - state.serverNowMs();
+            if (startRemaining > 0) {
+                long h = startRemaining / 3_600_000;
+                long m = (startRemaining / 60_000) % 60;
+                long s = (startRemaining / 1000) % 60;
+                timerLabel.setText(String.format("Starts in %02d:%02d:%02d", h, m, s));
+            } else {
+                timerLabel.setText(bundle("timer.waiting"));
+                if (state.contest().startTimeMs() > 0 && !reconnecting) {
+                    onRefresh();
+                }
+            }
             timerLabel.getStyleClass().setAll("timer", "timer-waiting");
             stopPulse();
             setSubmissionsAllowed(false);

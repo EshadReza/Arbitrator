@@ -29,12 +29,26 @@ public class RegisterController {
     @FXML private PasswordField confirmField;
     @FXML private Label errorLabel;
     @FXML private Button registerButton;
+    @FXML private Button themeButton;
 
     private final AppState state = AppState.get();
 
     @FXML
     private void initialize() {
         errorLabel.setVisible(false);
+        if (themeButton != null) {
+            themeButton.setText(state.darkMode() ? "☀" : "🌙");
+        }
+    }
+
+    @FXML
+    private void onToggleTheme() {
+        boolean dark = !state.darkMode();
+        state.setDarkMode(dark);
+        SceneRouter.applyTheme(usernameField.getScene());
+        if (themeButton != null) {
+            themeButton.setText(dark ? "☀" : "🌙");
+        }
     }
 
     @FXML

@@ -113,6 +113,28 @@ public class Contest {
         this.startTime = startTime;
     }
 
+    @Column(name = "frozen_at")
+    private Instant frozenAt;
+
+    @Column(name = "scheduled_start_at")
+    private Instant scheduledStartAt;
+
+    public Instant getFrozenAt() {
+        return frozenAt;
+    }
+
+    public void setFrozenAt(Instant frozenAt) {
+        this.frozenAt = frozenAt;
+    }
+
+    public Instant getScheduledStartAt() {
+        return scheduledStartAt;
+    }
+
+    public void setScheduledStartAt(Instant scheduledStartAt) {
+        this.scheduledStartAt = scheduledStartAt;
+    }
+
     public int getDurationMinutes() {
         return durationMinutes;
     }

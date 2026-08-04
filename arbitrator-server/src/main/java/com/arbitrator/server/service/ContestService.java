@@ -46,8 +46,8 @@ public class ContestService {
     public Contest requireCurrent() {
         checkExpiredContests();
         return contests.findFirstByStateInOrderByIdDesc(
-                        List.of(ContestState.ACTIVE, ContestState.FROZEN))
-                .or(() -> contests.findFirstByStateNotOrderByIdDesc(ContestState.DRAFT))
+                        List.of(ContestState.ACTIVE, ContestState.FROZEN, ContestState.LOBBY, ContestState.PAUSED))
+                .or(() -> contests.findAll().stream().max(java.util.Comparator.comparingLong(Contest::getId)))
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "No contest is configured"));
     }
@@ -55,12 +55,24 @@ public class ContestService {
     /** Server clock is authoritative (FR-06, FMEA-06). */
     public ContestStateDto currentState() {
         Contest c = requireCurrent();
+        return stateOf(c);
+    }
+
+    public ContestStateDto stateOf(Contest c) {
+        if (c.getState() == ContestState.LOBBY && c.getScheduledStartAt() != null && !Instant.now().isBefore(c.getScheduledStartAt())) {
+            c = start(c.getId());
+        } else if ((c.getState() == ContestState.ACTIVE || c.getState() == ContestState.FROZEN)
+                && c.endTime() != null && !Instant.now().isBefore(c.endTime())) {
+            c.setState(ContestState.ENDED);
+            c = contests.save(c);
+        }
         Instant start = c.getStartTime();
+        if (start == null && c.getState() == ContestState.LOBBY && c.getScheduledStartAt() != null) {
+            start = c.getScheduledStartAt();
+        }
         Instant end = c.endTime();
         return new ContestStateDto(
-                c.getId(),
-                c.getTitle(),
-                c.getState(),
+                c.getId(), c.getTitle(), c.getState(),
                 System.currentTimeMillis(),
                 start == null ? -1 : start.toEpochMilli(),
                 end == null ? -1 : end.toEpochMilli());
@@ -210,6 +222,9 @@ public class ContestService {
                     "Only an active contest can be frozen (this one is " + c.getState() + ")");
         }
         c.setState(ContestState.FROZEN);
+        if (c.getFrozenAt() == null) {
+            c.setFrozenAt(Instant.now());
+        }
         return contests.save(c);
     }
 
@@ -220,22 +235,22 @@ public class ContestService {
                     "Contest is not frozen (this one is " + c.getState() + ")");
         }
         c.setState(ContestState.ACTIVE);
+        c.setFrozenAt(null);
+        return contests.save(c);
+    }
+
+    public Contest scheduleLobby(long id, Instant scheduledStartAt) {
+        Contest c = require(id);
+        c.setScheduledStartAt(scheduledStartAt);
         return contests.save(c);
     }
 
     /**
-     * Removes a contest and its problems. Refused once anything has been
-     * submitted: submissions are never destroyed (DBR-04) and orphaning them
-     * would corrupt the contest record and the eventual report (FR-22).
+     * Removes a contest and all associated problems and submissions.
      */
-    public void delete(long id, long submissionCount, Runnable deleteProblems) {
+    public void delete(long id, Runnable deleteAssociatedResources) {
         Contest c = require(id);
-        if (submissionCount > 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Cannot delete \"" + c.getTitle() + "\": it has "
-                            + submissionCount + " submission(s). End it instead.");
-        }
-        deleteProblems.run();
+        deleteAssociatedResources.run();
         contests.delete(c);
     }
 
@@ -254,20 +269,5 @@ public class ContestService {
         return contests.findAll().stream()
                 .filter(c -> c.getState().isJoinable())
                 .toList();
-    }
-
-    public ContestStateDto stateOf(Contest c) {
-        if ((c.getState() == ContestState.ACTIVE || c.getState() == ContestState.FROZEN)
-                && c.endTime() != null && !Instant.now().isBefore(c.endTime())) {
-            c.setState(ContestState.ENDED);
-            c = contests.save(c);
-        }
-        Instant start = c.getStartTime();
-        Instant end = c.endTime();
-        return new ContestStateDto(
-                c.getId(), c.getTitle(), c.getState(),
-                System.currentTimeMillis(),
-                start == null ? -1 : start.toEpochMilli(),
-                end == null ? -1 : end.toEpochMilli());
     }
 }

@@ -80,6 +80,9 @@ public class LeaderboardService {
 
         Instant start = contest.getStartTime() == null ? Instant.EPOCH : contest.getStartTime();
 
+        boolean isFrozen = contest.getState() == ContestState.FROZEN;
+        Instant freezeTime = contest.getFrozenAt();
+
         // userId -> problemId -> running tally
         Map<Long, Map<Long, Tally>> byUser = new LinkedHashMap<>();
         for (Submission s : all) {
@@ -88,6 +91,9 @@ public class LeaderboardService {
             }
             if (!problemCode.containsKey(s.getProblemId())) {
                 continue;                       // problem removed from the contest
+            }
+            if (isFrozen && freezeTime != null && s.getQueuedAt() != null && s.getQueuedAt().isAfter(freezeTime)) {
+                continue;                       // FR-19: hold public standings at the moment of freeze
             }
             Tally tally = byUser
                     .computeIfAbsent(s.getUserId(), k -> new LinkedHashMap<>())
@@ -112,6 +118,7 @@ public class LeaderboardService {
                     cells.add(new LeaderboardCellDto(p.getValue(), false, 0, -1));
                     continue;
                 }
+                penalty += t.manualDelta;
                 if (t.solved) {
                     solved++;
                     penalty += t.solvedAtMinutes + (long) PENALTY_PER_REJECT * t.rejectsBeforeAc;
@@ -121,6 +128,7 @@ public class LeaderboardService {
                         t.solved ? t.rejectsBeforeAc : t.rejects,
                         t.solved ? t.solvedAtMinutes : -1));
             }
+            penalty = Math.max(0, penalty);
             rows.add(new LeaderboardRowDto(0, user.getUsername(), user.getDisplayName(),
                     solved, penalty, cells));
         }
@@ -165,8 +173,10 @@ public class LeaderboardService {
         long solvedAtMinutes = -1;
         int rejects;            // all rejected attempts (for the unsolved display)
         int rejectsBeforeAc;    // only those before the first AC — what FR-18 charges
+        int manualDelta;
 
         void accept(Submission s, Instant contestStart) {
+            manualDelta += s.getManualPenaltyDelta();
             if (solved) {
                 // BR-03: later submissions never alter a solved problem, even another AC.
                 return;

@@ -49,6 +49,7 @@ public class ContestPickerController {
     @FXML private Label errorLabel;
     @FXML private Button enterButton;
     @FXML private Button refreshButton;
+    @FXML private Button themeButton;
 
     private final AppState state = AppState.get();
     private Timeline poller;
@@ -59,6 +60,9 @@ public class ContestPickerController {
     private void initialize() {
         errorLabel.setVisible(false);
         enterButton.setDisable(true);
+        if (themeButton != null) {
+            themeButton.setText(state.darkMode() ? "☀" : "🌙");
+        }
         contestList.setCellFactory(v -> new ContestCell());
         contestList.getSelectionModel().selectedItemProperty().addListener(
                 (obs, old, sel) -> enterButton.setDisable(sel == null));
@@ -87,6 +91,16 @@ public class ContestPickerController {
     @FXML
     private void onRefresh() {
         load();
+    }
+
+    @FXML
+    private void onToggleTheme() {
+        boolean dark = !state.darkMode();
+        state.setDarkMode(dark);
+        SceneRouter.applyTheme(contestList.getScene());
+        if (themeButton != null) {
+            themeButton.setText(dark ? "☀" : "🌙");
+        }
     }
 
     private void stopPolling() {

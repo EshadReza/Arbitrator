@@ -3,6 +3,7 @@ package com.arbitrator.server.controller;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +17,6 @@ import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.realtime.ContestStatePublisher;
-import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
@@ -34,17 +34,20 @@ public class AdminContestController {
     private final ContestStatePublisher statePublisher;
     private final SubmissionRepository submissions;
     private final TestCaseRepository testCases;
+    private final JdbcTemplate jdbcTemplate;
 
     public AdminContestController(ContestService contestService,
                                   ProblemRepository problems,
                                   ContestStatePublisher statePublisher,
                                   SubmissionRepository submissions,
-                                  TestCaseRepository testCases) {
+                                  TestCaseRepository testCases,
+                                  JdbcTemplate jdbcTemplate) {
         this.contestService = contestService;
         this.problems = problems;
         this.statePublisher = statePublisher;
         this.submissions = submissions;
         this.testCases = testCases;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /** Every lifecycle action pushes the new state so clients react at once. */
@@ -110,18 +113,15 @@ public class AdminContestController {
         return applied(contestService.end(id));
     }
 
-    /** UIF-22 destructive action; refused once anything has been submitted. */
+    /** Destructive action: deletes contest and all associated submissions, submission_results, problems, and testcases. */
     @DeleteMapping(ApiPaths.ADMIN_CONTEST_BY_ID)
     @Transactional
     public ResponseEntity<Void> delete(@PathVariable long id) {
-        long submissionCount =
-                submissions.findByContestIdAndActiveTrueOrderByQueuedAtAsc(id).size();
-        contestService.delete(id, submissionCount, () -> {
-            for (Problem p : problems.findByContestIdOrderByOrderingAscCodeAsc(id)) {
-                testCases.findByProblemIdOrderByIdxAsc(p.getId()).forEach(testCases::delete);
-                problems.delete(p);
-            }
-        });
+        jdbcTemplate.update("DELETE FROM submission_results WHERE submission_id IN (SELECT id FROM submissions WHERE contest_id = ?)", id);
+        jdbcTemplate.update("DELETE FROM submissions WHERE contest_id = ?", id);
+        jdbcTemplate.update("DELETE FROM test_cases WHERE problem_id IN (SELECT id FROM problems WHERE contest_id = ?)", id);
+        jdbcTemplate.update("DELETE FROM problems WHERE contest_id = ?", id);
+        jdbcTemplate.update("DELETE FROM contests WHERE id = ?", id);
         return ResponseEntity.noContent().build();
     }
 

@@ -73,6 +73,20 @@ public class Submission {
     @Column(name = "failed_test_index", nullable = false)
     private int failedTestIndex = -1;
 
+    @Column(name = "marks")
+    private Integer marks;
+
+    @Column(name = "manual_penalty_delta", nullable = false)
+    private int manualPenaltyDelta = 0;
+
+    public int getManualPenaltyDelta() {
+        return manualPenaltyDelta;
+    }
+
+    public void setManualPenaltyDelta(int manualPenaltyDelta) {
+        this.manualPenaltyDelta = manualPenaltyDelta;
+    }
+
     /** Originating workstation, for the academic-integrity log (NFR-C02). */
     @Column(name = "workstation_ip", length = 45)
     private String workstationIp;
@@ -177,6 +191,14 @@ public class Submission {
 
     public void setFailedTestIndex(int failedTestIndex) {
         this.failedTestIndex = failedTestIndex;
+    }
+
+    public Integer getMarks() {
+        return marks;
+    }
+
+    public void setMarks(Integer marks) {
+        this.marks = marks;
     }
 
     public String getWorkstationIp() {

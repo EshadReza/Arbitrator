@@ -15,6 +15,11 @@
       fx:controller="com.arbitrator.client.controller.ContestPickerController"
       alignment="CENTER" spacing="10" styleClass="login-root">
 
+    <HBox alignment="CENTER_RIGHT" maxWidth="Infinity">
+        <padding><Insets top="12" right="16" bottom="0" left="16"/></padding>
+        <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button" text="🌙" />
+    </HBox>
+
     <Label text="%app.title" styleClass="logo"/>
     <Label text="%picker.subtitle" styleClass="subtitle"/>
 
