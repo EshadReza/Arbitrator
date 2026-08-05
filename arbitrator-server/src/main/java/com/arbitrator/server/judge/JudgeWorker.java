@@ -136,7 +136,9 @@ public class JudgeWorker {
         long maxTime = 0;
         long maxMem = -1;
 
+        int testIndex = 0;
         for (TestCase tc : tests) {
+            testIndex++;
             Path input = workDir.resolve("__input.txt");
             Files.writeString(input, tc.getInputData(), StandardCharsets.UTF_8);
 
@@ -172,7 +174,7 @@ public class JudgeWorker {
             saveTestResult(sub.getId(), tc.getIdx(), v, r);
 
             if (v != Verdict.AC) {
-                return new Outcome(v, maxTime, maxMem, null, tc.getIdx());   // fail-fast BR-05
+                return new Outcome(v, maxTime, maxMem, null, testIndex);   // fail-fast BR-05
             }
         }
         return new Outcome(Verdict.AC, maxTime, maxMem, null, -1);

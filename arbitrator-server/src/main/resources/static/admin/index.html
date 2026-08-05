@@ -53,6 +53,8 @@ h1{font-size:19px;font-weight:650;margin-bottom:3px}
              font-weight:600;display:flex;align-items:center;gap:10px}
 .card>header .spacer{margin-left:auto}
 .card>.body{padding:16px}
+.card.disabled{opacity:.45;pointer-events:none;filter:grayscale(1)}
+input:disabled{opacity:.45;cursor:not-allowed;background:var(--surface2)}
 
 /* ── buttons ─────────────────────────────────────────────────────────────── */
 .btn{padding:8px 14px;border:1px solid var(--border);background:var(--surface2);
@@ -200,13 +202,13 @@ tr.sub-row.collapsed{display:none}
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="cardLobbyCountdown">
         <header>Lobby Start Countdown</header>
         <div class="body">
           <div class="row">
             <label for="lobbyMins">Start in (Minutes)</label>
             <input type="number" id="lobbyMins" value="5" min="1" step="1" style="width:90px">
-            <button class="btn primary sm" onclick="scheduleLobby()">Set Countdown</button>
+            <button class="btn primary sm" id="bScheduleLobby" onclick="scheduleLobby()">Set Countdown</button>
           </div>
           <p class="hint" style="margin-top:10px">
             Set the countdown timer displayed to waiting participants in the lobby.
@@ -454,6 +456,11 @@ async function refreshSelected(){
   $('bFreeze').disabled   = s!=='ACTIVE';
   $('bUnfreeze').disabled = s!=='FROZEN';
   $('bEnd').disabled      = s==='DRAFT'||s==='ENDED';
+  const started           = s==='ACTIVE'||s==='PAUSED'||s==='FROZEN'||s==='ENDED';
+  $('lobbyMins').disabled = started;
+  $('bScheduleLobby').disabled = started;
+  const cardLobby = $('cardLobbyCountdown');
+  if (cardLobby) cardLobby.classList.toggle('disabled', started);
   paintClocks();
 }
 
@@ -602,7 +609,7 @@ function toggleGroup(gi){
 }
 
 async function scheduleLobby(){
-  if(selected==null) return;
+  if(selected==null || (state && (state.state==='ACTIVE'||state.state==='PAUSED'||state.state==='FROZEN'||state.state==='ENDED'))) return;
   const m=parseInt($('lobbyMins').value,10);
   if(isNaN(m)||m<=0){ log(400,'Enter valid minutes > 0'); return; }
   const {status}=await api('POST',`/api/admin/contests/${selected}/schedule?minutes=${m}`);

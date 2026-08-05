@@ -144,7 +144,7 @@ public class SubmissionService {
                     Problem p = problemMap.get(s.getProblemId());
                     int total = totalTestMap.computeIfAbsent(s.getProblemId(),
                             id -> testCases.findByProblemIdOrderByIdxAsc(id).size());
-                    int passed = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? total : Math.max(0, s.getFailedTestIndex());
+                    int passed = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? total : Math.max(0, s.getFailedTestIndex() - 1);
                     return new SubmissionHistoryDto(
                             s.getId(),
                             p != null ? p.getCode() : "?",

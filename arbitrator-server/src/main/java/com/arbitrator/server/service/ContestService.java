@@ -241,6 +241,10 @@ public class ContestService {
 
     public Contest scheduleLobby(long id, Instant scheduledStartAt) {
         Contest c = require(id);
+        if (c.getState().hasStarted()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Cannot set lobby countdown for a contest that has already started (" + c.getState() + ")");
+        }
         c.setScheduledStartAt(scheduledStartAt);
         return contests.save(c);
     }

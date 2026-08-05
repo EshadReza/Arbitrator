@@ -151,7 +151,7 @@ public class AdminMonitorController {
                     Problem p = problemMap.get(s.getProblemId());
                     int total = testCountMap.computeIfAbsent(s.getProblemId(),
                             pid -> testCases.findByProblemIdOrderByIdxAsc(pid).size());
-                    int passed = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? total : Math.max(0, s.getFailedTestIndex());
+                    int passed = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? total : Math.max(0, s.getFailedTestIndex() - 1);
                     String codeStr = (p != null ? p.getCode() : "?") + " · " + userNames.getOrDefault(s.getUserId(), "?");
                     return new SubmissionHistoryDto(
                             s.getId(),
@@ -239,7 +239,7 @@ public class AdminMonitorController {
                 Problem p = problemMap.get(s.getProblemId());
                 int totalTests = testCountMap.computeIfAbsent(s.getProblemId(),
                         pid -> testCases.findByProblemIdOrderByIdxAsc(pid).size());
-                int passedTests = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? totalTests : Math.max(0, s.getFailedTestIndex());
+                int passedTests = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? totalTests : Math.max(0, s.getFailedTestIndex() - 1);
                 String codeStr = p != null ? "Problem " + p.getCode() + " — " + p.getTitle() : "?";
                 history.add(new SubmissionHistoryDto(
                         s.getId(),

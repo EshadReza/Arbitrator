@@ -62,7 +62,7 @@ public class SandboxExecutor {
     });
 
     /** Captured output cap; hitting it means OLE, not a host memory problem. */
-    public static final int OUTPUT_CAP = 1 << 20;                            // 1 MiB
+    public static final int OUTPUT_CAP = 10 * 1024 * 1024;                   // 10 MiB
     private static final long COMPILE_ADDRESS_SPACE_KB = 2L * 1024 * 1024;   // 2 GiB
     private static final long MAX_FILE_SIZE_BLOCKS = 65536;                  // 64 MiB (512B blocks)
 
