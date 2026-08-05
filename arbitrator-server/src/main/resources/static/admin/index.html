@@ -118,14 +118,30 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
 .gate{display:grid;place-items:center;min-height:100vh;padding:20px}
 .gate .card{width:min(400px,100%);margin:0}
 
-/* ── grouped submissions ─────────────────────────────────────────────── */
-tr.group-head{cursor:pointer;font-weight:500}
-tr.group-head:hover{background:var(--surface2)}
-tr.group-head td:first-child{font-size:12px;color:var(--muted);text-align:center;transition:.15s}
-tr.group-head.open td:first-child{transform:rotate(90deg)}
-tr.sub-row{background:var(--surface2)}
-tr.sub-row td{padding:6px 10px 6px 40px;font-size:13px;border-bottom:1px solid var(--border)}
-tr.sub-row.collapsed{display:none}
+/* ── modal ───────────────────────────────────────────────────────────────── */
+.modal{position:fixed;inset:0;background:rgba(10,14,20,.55);display:grid;place-items:center;
+       padding:20px;z-index:50}
+.modal>.card{width:min(560px,100%);margin:0;max-height:88vh;overflow:auto}
+.opt{display:flex;align-items:flex-start;gap:9px;padding:6px 0;cursor:pointer}
+.opt input{margin-top:4px;flex:none}
+.opt .d{display:block;color:var(--muted);font-size:12px;font-weight:400}
+.opt-group{font-weight:600;margin:14px 0 4px}
+.opt-group:first-child{margin-top:0}
+
+/* ── the address students type into their client ─────────────────────────── */
+.addr{font:700 23px/1.3 ui-monospace,Menlo,monospace;color:var(--accent);
+      user-select:all;word-break:break-all}
+
+/* ── grouped submissions: participant → problem → attempts ───────────── */
+tr.group-head,tr.problem-head{cursor:pointer;font-weight:500}
+tr.group-head:hover,tr.problem-head:hover{background:var(--surface2)}
+tr.group-head td:first-child,tr.problem-head td:first-child{
+  font-size:12px;color:var(--muted);text-align:center;transition:.15s}
+tr.group-head.open td:first-child,tr.problem-head.open td:first-child{transform:rotate(90deg)}
+tr.problem-head{background:var(--surface2)}
+tr.problem-head td{padding:7px 10px;font-size:13px}
+tr.sub-row{background:var(--surface3)}
+tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--border)}
 </style>
 </head>
 <body>
@@ -162,6 +178,7 @@ tr.sub-row.collapsed{display:none}
     <div class="side-foot">
       <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
       <div style="margin-top:6px" id="whoami"></div>
+      <div style="margin-top:6px" id="sideAddress"></div>
     </div>
   </aside>
 
@@ -170,6 +187,22 @@ tr.sub-row.collapsed{display:none}
     <section id="sec-control">
       <h1>Contest control</h1>
       <div class="lede"><span id="cTitle">—</span> · <span id="cState" class="badge">—</span></div>
+
+      <div class="card">
+        <header>Students connect to <span class="spacer"></span>
+          <button class="btn sm" onclick="copyAddress()">⧉ Copy</button>
+          <button class="btn sm" onclick="loadServerInfo()">⟳</button></header>
+        <div class="body">
+          <div class="row" style="align-items:baseline;gap:14px">
+            <div class="addr" id="lanAddress">—</div>
+            <span class="hint" id="lanHost"></span>
+          </div>
+          <p class="hint" style="margin-top:9px">
+            Type this into the client's <b>server address</b> box on the login screen.
+          </p>
+          <p class="hint" id="lanOther" style="margin-top:6px"></p>
+        </div>
+      </div>
 
       <div class="card"><div class="body">
         <div class="clocks">
@@ -198,6 +231,31 @@ tr.sub-row.collapsed{display:none}
             <b>Start contest</b> releases the problems, starts the clock, and clears the previous run's
             submissions. <b>Pause</b> stops the clock and blocks submissions; the remaining time is kept.
             <b>Freeze</b> keeps judging but holds the public standings. <b>End</b> closes it for good.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <header>Test case visibility <span class="spacer"></span>
+          <span class="badge" id="tvBadge">—</span></header>
+        <div class="body">
+          <label class="opt" style="padding:0">
+            <input type="checkbox" id="tvCheck" onchange="setTestVisibility(this.checked)">
+            <span><b>Let participants see their own test cases</b>
+              <span class="d">Applies to the selected contest, immediately.</span></span>
+          </label>
+          <p class="hint" style="margin-top:10px">
+            When ticked, a contestant opening one of their own submissions sees the tests it
+            reached — every test it <b>passed</b>, plus the single one that <b>failed</b> it.
+            Judging stops at the first failure, so nothing beyond that point exists to leak and
+            the rest of the hidden set stays hidden.
+          </p>
+          <p class="hint err hide" id="tvNote" style="margin-top:10px"></p>
+          <p class="hint" style="margin-top:8px">
+            Results are <b>always recorded</b>, ticked or not — this only controls who may look.
+            Switching it on reveals every submission already judged as well as future ones, and
+            switching it off hides them again without losing anything.
+            <b>You can always see them</b>, whatever this is set to.
           </p>
         </div>
       </div>
@@ -280,7 +338,7 @@ tr.sub-row.collapsed{display:none}
 
     <section id="sec-feed" class="hide">
       <h1>Submissions</h1>
-      <div class="lede">Grouped by participant. Click a row to expand.</div>
+      <div class="lede">Participant → problem → attempts. Click a row to expand.</div>
       <div class="card">
         <header>Feed <span class="spacer"></span><button class="btn sm" onclick="loadFeed()">⟳</button></header>
         <div class="body" style="padding:0">
@@ -306,13 +364,16 @@ tr.sub-row.collapsed{display:none}
           </select>
           <button class="btn sm" onclick="document.getElementById('sourceCard').classList.add('hide')">Close</button>
         </header>
-        <div class="body"><pre class="code" id="sourceCode"></pre></div>
+        <div class="body">
+          <pre class="code" id="sourceCode"></pre>
+          <div id="sourceTests" style="margin-top:14px"></div>
+        </div>
       </div>
     </section>
 
     <section id="sec-standings" class="hide">
       <h1>Standings & Marks</h1>
-      <div class="lede">Assign marks based on standings. Sorted by username. <button class="btn sm" onclick="exportCSV()" style="margin-left:8px">📋 Export CSV</button></div>
+      <div class="lede">Assign marks based on standings. Sorted by username. <button class="btn sm" onclick="openExport()" style="margin-left:8px">⭳ Export…</button></div>
       <div class="card">
         <header>Standings <span class="spacer"></span>
           <button class="btn sm" onclick="loadStandings()">⟳ Refresh</button></header>
@@ -357,8 +418,51 @@ tr.sub-row.collapsed{display:none}
   </main>
 </div>
 
+<div class="modal hide" id="exportModal">
+  <div class="card">
+    <header>Export contest data <span class="spacer"></span>
+      <button class="btn sm" onclick="closeExport()">Close</button></header>
+    <div class="body">
+
+      <div class="opt-group">Include</div>
+      <label class="opt"><input type="checkbox" id="exSummary" checked>
+        <span>Standings summary
+          <span class="d">Solved count, penalty minutes and assigned marks.</span></span></label>
+      <label class="opt"><input type="checkbox" id="exProblems" checked>
+        <span>Per-problem results
+          <span class="d">One column per problem: solved at which minute, or attempts made.</span></span></label>
+      <label class="opt"><input type="checkbox" id="exBest">
+        <span>Best-submission details
+          <span class="d">Verdict, run time, language and submission id.</span></span></label>
+      <label class="opt"><input type="checkbox" id="exSource">
+        <span>Submitted source code
+          <span class="d">The code itself, with compiler output — for reading the work back later.</span></span></label>
+
+      <div class="opt-group">Format</div>
+      <label class="opt"><input type="radio" name="exFmt" value="csv" checked>
+        <span>CSV spreadsheet
+          <span class="d">Opens in Excel. One row per participant; code goes in a column per problem.</span></span></label>
+      <label class="opt"><input type="radio" name="exFmt" value="html">
+        <span>HTML report
+          <span class="d">One printable page. Code stays readable — a spreadsheet cell does not.</span></span></label>
+
+      <p class="hint" style="margin-top:14px">
+        Code is the <b>best</b> submission per problem — accepted and fastest, or the most recent
+        if nothing was accepted — not every attempt. Including it costs one request per participant,
+        so a large contest takes a moment.
+      </p>
+
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="exRun" onclick="runExport()">Export</button>
+        <span class="hint" id="exStatus"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
-let token=null, selected=null, state=null, tick=null, monitorTick=null;
+let token=null, selected=null, state=null, tick=null, monitorTick=null, serverInfo=null;
+let currentSourceId=null, testVisibility=false;
 const $=id=>document.getElementById(id);
 const two=n=>String(n).padStart(2,'0');
 const clock=ms=>{ if(ms==null||ms<0) return '—';
@@ -372,12 +476,15 @@ function log(status,body){
   el.textContent=`HTTP ${status}  ${typeof body==='string'?body:JSON.stringify(body)}`;
 }
 
-async function api(method,path,params){
+async function api(method,path,params,quiet){
   const url=params?path+'?'+new URLSearchParams(params):path;
   const res=await fetch(url,{method,headers:token?{Authorization:'Bearer '+token}:{}});
   const text=await res.text(); let body;
   try{body=JSON.parse(text)}catch{body=text}
-  log(res.status,body); return {status:res.status,body};
+  // An export fetches once per participant. Logging each one would bury
+  // whatever the instructor was actually watching in the activity panel.
+  if(!quiet) log(res.status,body);
+  return {status:res.status,body};
 }
 
 function go(sec){
@@ -400,6 +507,7 @@ async function login(){
   if(body.role!=='ADMIN'){ $('gateMsg').textContent='That account is not an ADMIN.'; return; }
   token=body.token; $('whoami').textContent='Signed in as '+body.displayName;
   $('gate').classList.add('hide'); $('app').classList.remove('hide');
+  await loadServerInfo();
   await loadContests();
   if(!tick) tick=setInterval(paintClocks,1000);
   if(!monitorTick) monitorTick=setInterval(()=>{
@@ -461,6 +569,7 @@ async function refreshSelected(){
   $('bScheduleLobby').disabled = started;
   const cardLobby = $('cardLobbyCountdown');
   if (cardLobby) cardLobby.classList.toggle('disabled', started);
+  loadTestVisibility();
   paintClocks();
 }
 
@@ -477,6 +586,15 @@ function paintClocks(){
   if(state.state==='LOBBY'||state.state==='DRAFT'){
     $('kElapsed').textContent='—';
     left.textContent=state.state==='LOBBY'?'in lobby':'not started';
+    left.className='v calm';
+  } else if(state.state==='ENDED'){
+    // An ended contest has no remaining time. Falling through to the branch
+    // below counted down to the *scheduled* deadline, so a contest ended early
+    // went on showing minutes left. endTimeMs is now the real end instant, so
+    // elapsed is the true run length too.
+    $('kElapsed').textContent=state.startTimeMs>0
+      ? clock(state.endTimeMs-state.startTimeMs) : '—';
+    left.textContent='ended';
     left.className='v calm';
   } else if(state.startTimeMs>0){
     $('kElapsed').textContent=clock(now-state.startTimeMs);
@@ -566,46 +684,89 @@ async function loadMonitor(){
     </tr>`).join('') : '<tr><td colspan="7" class="empty">Nobody has joined yet.</td></tr>';
 }
 
-let feedGroups={};
+/* Three levels: participant → problem → that problem's attempts.
+   One flat time-ordered list per participant meant hunting for "how did they do
+   on C?" by reading dates; a contest is marked problem by problem, so the tree
+   is shaped the way the work is actually reviewed. */
+let feedData=[];
+const openUsers=new Set(), openProblems=new Set();
 
 async function loadFeed(){
   if(selected==null) return;
   const {body}=await api('GET',`/api/admin/contests/${selected}/submissions/grouped`);
   if(!Array.isArray(body)) return;
-  feedGroups={};
+  feedData=body.map(g=>({...g, problems:groupByProblem(g.submissions||[])}));
+  renderFeed();
+}
+
+/* The server already sends each participant's attempts newest-first, so the
+   order inside a problem is preserved by simply not touching it. */
+function groupByProblem(subs){
+  const byCode=new Map();
+  subs.forEach(s=>{
+    const code=s.problemCode||'—';
+    if(!byCode.has(code)) byCode.set(code,[]);
+    byCode.get(code).push(s);
+  });
+  return [...byCode.entries()]
+    .sort((a,b)=>a[0].localeCompare(b[0]))
+    .map(([code,list])=>({code,list}));
+}
+
+function renderFeed(){
   const tb=$('feedTable').querySelector('tbody');
-  if(!body.length){ tb.innerHTML='<tr><td colspan="5" class="empty">No submissions yet.</td></tr>'; return; }
+  if(!feedData.length){
+    tb.innerHTML='<tr><td colspan="5" class="empty">No submissions yet.</td></tr>'; return;
+  }
   let html='';
-  body.forEach((g,gi)=>{
-    feedGroups[gi]=false;
-    const vClass=g.bestVerdict?'v-'+g.bestVerdict:'v-none';
-    html+=`<tr class="group-head" onclick="toggleGroup(${gi})">
+  feedData.forEach((g,gi)=>{
+    const userOpen=openUsers.has(gi);
+    html+=`<tr class="group-head ${userOpen?'open':''}" onclick="toggleUser(${gi})">
       <td>▶</td>
       <td><b>${esc(g.username)}</b> <span class="hint">${esc(g.displayName)}</span></td>
       <td>${g.totalSubmissions}</td>
       <td>${g.acceptedCount}</td>
-      <td class="${vClass}">${g.bestVerdict||'—'}</td>
+      <td class="${g.bestVerdict?'v-'+g.bestVerdict:'v-none'}">${g.bestVerdict||'—'}</td>
     </tr>`;
-    if(g.submissions) g.submissions.forEach(s=>{
-      const testStr = s.totalTestCases > 0 ? ` · ${s.passedTestCount}/${s.totalTestCases} passed` : '';
-      html+=`<tr class="sub-row collapsed" data-group="${gi}">
-        <td style="text-align:center;color:var(--muted)">↳</td>
-        <td><b>${esc(s.problemCode)}</b> <span class="hint" style="margin-left:6px">${esc(s.language||'—')}${testStr} · ${new Date(s.submittedAtMs).toLocaleTimeString()}</span></td>
-        <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
-        <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
-        <td><button class="btn sm" onclick="event.stopPropagation();viewSource(${s.id})">View code</button></td>
+    if(!userOpen) return;
+
+    g.problems.forEach((p,pi)=>{
+      const key=gi+':'+pi, problemOpen=openProblems.has(key);
+      const accepted=p.list.filter(s=>s.verdict==='AC').length;
+      const best=accepted ? 'AC' : ((p.list.find(s=>s.verdict)||{}).verdict||null);
+      html+=`<tr class="problem-head ${problemOpen?'open':''}" onclick="toggleProblem('${key}')">
+        <td style="text-align:right;color:var(--muted)">▶</td>
+        <td style="padding-left:34px"><b>${esc(p.code)}</b></td>
+        <td>${p.list.length}</td>
+        <td>${accepted}</td>
+        <td class="${best?'v-'+best:'v-none'}">${best||'—'}</td>
       </tr>`;
+      if(!problemOpen) return;
+
+      p.list.forEach(s=>{
+        const tests=s.totalTestCases>0?` · ${s.passedTestCount}/${s.totalTestCases} passed`:'';
+        html+=`<tr class="sub-row">
+          <td style="text-align:center;color:var(--muted)">↳</td>
+          <td style="padding-left:62px"><span class="hint">${esc(s.language||'—')}${tests}`
+            +` · ${new Date(s.submittedAtMs).toLocaleTimeString()}</span></td>
+          <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
+          <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
+          <td><button class="btn sm" onclick="event.stopPropagation();viewSource(${s.id})">View code</button></td>
+        </tr>`;
+      });
     });
   });
   tb.innerHTML=html;
 }
 
-function toggleGroup(gi){
-  feedGroups[gi]=!feedGroups[gi];
-  const heads=document.querySelectorAll('#feedTable .group-head');
-  if(heads[gi]) heads[gi].classList.toggle('open',feedGroups[gi]);
-  document.querySelectorAll(`#feedTable tr.sub-row[data-group="${gi}"]`)
-    .forEach(r=>r.classList.toggle('collapsed',!feedGroups[gi]));
+function toggleUser(gi){
+  openUsers.has(gi) ? openUsers.delete(gi) : openUsers.add(gi);
+  renderFeed();
+}
+
+function toggleProblem(key){
+  openProblems.has(key) ? openProblems.delete(key) : openProblems.add(key);
+  renderFeed();
 }
 
 async function scheduleLobby(){
@@ -703,32 +864,308 @@ async function viewParticipantCodes(username, displayName){
   $('bestSourceCard').classList.remove('hide');
 }
 
-function exportCSV(){
-  if(!standingsData.length){ log(400,'Load standings first'); return; }
-  let csv='\uFEFFUsername,Display Name,Solved,Penalty,Best Time (ms),Language,Marks\n';
-  standingsData.forEach(s=>{
-    csv+=`"${(s.username||'').replace(/"/g,'""')}","${(s.displayName||'').replace(/"/g,'""')}",${s.solved},${s.penaltyMinutes},${s.bestExecTimeMs>=0?s.bestExecTimeMs:''},${s.bestLanguage||''},${s.marks!=null?s.marks:''}\n`;
-  });
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `standings_contest_${selected||'all'}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  log(200,'Downloaded Excel CSV file');
+/* \u2500\u2500 the address students type into their client \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+
+async function loadServerInfo(){
+  const {status,body}=await api('GET','/api/admin/server',null,true);
+  if(status>=300||!body||!body.clientAddress) return;
+  serverInfo=body;
+  $('lanAddress').textContent=body.clientAddress;
+  $('lanHost').textContent='hostname '+body.hostname;
+  $('sideAddress').textContent='\uD83D\uDCE1 '+body.clientAddress;
+  // Every other address is listed too: only the person in the room knows which
+  // interface is the lab network, and the first one is a guess, not an answer.
+  const others=(body.addresses||[]).filter(a=>a.ip!==body.primary);
+  $('lanOther').innerHTML = others.length
+    ? 'Also reachable on '+others.map(a=>`<b>${esc(a.ip)}:${body.port}</b> (${esc(a.iface)})`).join(' \u00B7 ')
+      +'. If students cannot reach the address above, one of these is the lab network.'
+    : 'This machine has no other network address.';
 }
+
+async function copyAddress(){
+  if(!serverInfo) return;
+  try{
+    await navigator.clipboard.writeText(serverInfo.clientAddress);
+    log(200,'Copied '+serverInfo.clientAddress);
+  }catch{
+    log(200,'Clipboard unavailable \u2014 the address is '+serverInfo.clientAddress);
+  }
+}
+
+/* \u2500\u2500 export \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+
+const csvCell=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'contest';
+
+function openExport(){
+  if(selected==null){ log(400,'Select a contest first'); return; }
+  $('exStatus').textContent='';
+  $('exportModal').classList.remove('hide');
+}
+function closeExport(){ $('exportModal').classList.add('hide'); }
+
+async function runExport(){
+  const o={ summary:$('exSummary').checked, problems:$('exProblems').checked,
+            best:$('exBest').checked,       source:$('exSource').checked,
+            fmt:document.querySelector('input[name=exFmt]:checked').value };
+  if(!o.summary&&!o.problems&&!o.best&&!o.source){
+    $('exStatus').textContent='Tick at least one thing to include.'; return;
+  }
+  const btn=$('exRun'); btn.disabled=true;
+  try{
+    $('exStatus').textContent='Loading standings\u2026';
+    const {status,body}=await api('GET',`/api/admin/contests/${selected}/standings`,null,true);
+    if(status>=300||!Array.isArray(body)){ $('exStatus').textContent='Could not load standings.'; return; }
+    if(!body.length){ $('exStatus').textContent='Nothing to export \u2014 no submissions yet.'; return; }
+    standingsData=body;
+
+    const codes={};
+    if(o.source){
+      for(let i=0;i<body.length;i++){
+        $('exStatus').textContent=`Fetching code ${i+1} of ${body.length} \u2014 ${body[i].username}\u2026`;
+        const r=await api('GET',
+          `/api/admin/contests/${selected}/participants/${encodeURIComponent(body[i].username)}/codes`,
+          null,true);
+        codes[body[i].username]=(r.status<300&&Array.isArray(r.body))?r.body:[];
+      }
+    }
+
+    const problems=problemColumns(body);
+    const name=`arbitrator_${slug(state&&state.title?state.title:'contest-'+selected)}`
+             +`_${new Date().toISOString().slice(0,10)}`;
+    if(o.fmt==='csv') download(name+'.csv', buildCsv(body,codes,problems,o), 'text/csv;charset=utf-8;');
+    else             download(name+'.html', buildReport(body,codes,problems,o), 'text/html;charset=utf-8;');
+
+    $('exStatus').textContent='Downloaded.';
+    log(200,`Exported ${body.length} participant(s) as ${o.fmt.toUpperCase()}`);
+  } finally { btn.disabled=false; }
+}
+
+/* Column order comes from the longest cells array: a participant with no
+   submissions can carry fewer cells than the contest has problems. */
+function problemColumns(rows){
+  let longest=[];
+  rows.forEach(r=>{ if((r.cells||[]).length>longest.length) longest=r.cells; });
+  return longest.map(c=>c.problemCode);
+}
+
+function cellText(row,code){
+  const c=(row.cells||[]).find(x=>x.problemCode===code);
+  if(!c) return '';
+  if(c.solved) return `solved at ${c.solvedAtMinutes}m`
+                    +(c.failedAttempts>0?` (${c.failedAttempts} rejected)`:'');
+  return c.failedAttempts>0?`${c.failedAttempts} rejected`:'';
+}
+
+/* Exactly one row per participant, always \u2014 the row IS the person, which is how
+   a class list is read and marked. Code goes sideways instead of downwards: one
+   "Code A", "Code B" \u2026 column per problem, so a participant's whole contest
+   stays on the line with their name. */
+function buildCsv(rows,codes,problems,o){
+  const head=['Username','Display Name'];
+  if(o.summary)  head.push('Solved','Penalty (min)','Marks');
+  if(o.problems) problems.forEach(c=>head.push('Problem '+c));
+  if(o.best)     head.push('Best Verdict','Best Time (ms)','Best Language','Best Submission Id');
+  if(o.source)   problems.forEach(c=>head.push('Code '+c));
+
+  const out=[head.map(csvCell).join(',')];
+  rows.forEach(r=>{
+    const line=[r.username||'',r.displayName||''];
+    if(o.summary)  line.push(r.solved,r.penaltyMinutes,r.marks!=null?r.marks:'');
+    if(o.problems) problems.forEach(c=>line.push(cellText(r,c)));
+    if(o.best)     line.push(r.bestVerdict||'', r.bestExecTimeMs>=0?r.bestExecTimeMs:'',
+                             r.bestLanguage||'', r.bestSubmissionId!=null?r.bestSubmissionId:'');
+    if(o.source){
+      const byProblem={};
+      (codes[r.username]||[]).forEach(p=>{ byProblem[p.problemCode]=p; });
+      // A problem the participant never submitted leaves an empty cell rather
+      // than shifting the columns \u2014 every row has the same shape.
+      problems.forEach(c=>line.push(byProblem[c] ? (byProblem[c].sourceCode||'') : ''));
+    }
+    out.push(line.map(csvCell).join(','));
+  });
+  // BOM + CRLF: both are needed for Excel to open a UTF-8 CSV without dragging
+  // the user through its import wizard.
+  return '\uFEFF'+out.join('\r\n')+'\r\n';
+}
+
+/* Code in a spreadsheet cell is technically exported and practically unreadable.
+   The HTML report is the format for the case that actually motivates keeping
+   code \u2014 reading the work back weeks later. Self-contained, prints to PDF. */
+function buildReport(rows,codes,problems,o){
+  const title=state&&state.title?state.title:'Contest '+selected;
+  let h=`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+  <title>${esc(title)} \u2014 Arbitrator export</title><style>
+    body{font:14px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;color:#1c2430;background:#fff;
+         margin:0;padding:28px;max-width:1000px}
+    h1{font-size:21px;margin:0 0 4px}
+    h2{font-size:16px;margin:26px 0 8px;border-bottom:1px solid #d6dbe3;padding-bottom:5px}
+    h3{font-size:13.5px;margin:18px 0 5px}
+    .meta{color:#6b7684;font-size:12.5px;margin-bottom:18px}
+    table{width:100%;border-collapse:collapse;margin-bottom:8px}
+    th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+       color:#6b7684;border-bottom:1px solid #d6dbe3;padding:7px 9px}
+    td{padding:7px 9px;border-bottom:1px solid #eceff3}
+    pre{background:#f5f7fa;border:1px solid #d6dbe3;border-radius:7px;padding:12px;overflow:auto;
+        white-space:pre-wrap;word-break:break-word;tab-size:4;
+        font:12px/1.5 ui-monospace,Menlo,Consolas,monospace}
+    .v{font-weight:700} .AC{color:#21a366} .WA{color:#d64545}
+    .TLE,.MLE,.RE,.OLE{color:#a9750a} .CE{color:#8257c7}
+    @media print{ body{padding:0} pre{white-space:pre-wrap} }
+  </style></head><body>
+  <h1>${esc(title)}</h1>
+  <div class="meta">Exported ${esc(new Date().toLocaleString())} \u00B7 ${rows.length} participant(s)</div>`;
+
+  if(o.summary||o.problems||o.best){
+    h+='<h2>Standings</h2><table><thead><tr><th>#</th><th>Username</th><th>Name</th>';
+    if(o.summary)  h+='<th>Solved</th><th>Penalty</th><th>Marks</th>';
+    if(o.problems) problems.forEach(c=>h+=`<th>${esc(c)}</th>`);
+    if(o.best)     h+='<th>Best verdict</th><th>Best time</th><th>Language</th>';
+    h+='</tr></thead><tbody>';
+    rows.forEach((r,i)=>{
+      h+=`<tr><td>${i+1}</td><td><b>${esc(r.username)}</b></td><td>${esc(r.displayName||'')}</td>`;
+      if(o.summary)  h+=`<td>${r.solved}</td><td>${r.penaltyMinutes}m</td>`
+                      +`<td>${r.marks!=null?r.marks:'\u2014'}</td>`;
+      if(o.problems) problems.forEach(c=>h+=`<td>${esc(cellText(r,c)||'\u2014')}</td>`);
+      if(o.best)     h+=`<td class="v ${esc(r.bestVerdict||'')}">${esc(r.bestVerdict||'\u2014')}</td>`
+                      +`<td>${r.bestExecTimeMs>=0?r.bestExecTimeMs+' ms':'\u2014'}</td>`
+                      +`<td>${esc(r.bestLanguage||'\u2014')}</td>`;
+      h+='</tr>';
+    });
+    h+='</tbody></table>';
+  }
+
+  if(o.source){
+    h+='<h2>Submitted code</h2>';
+    rows.forEach(r=>{
+      h+=`<h3>${esc(r.username)} \u2014 ${esc(r.displayName||'')}</h3>`;
+      const subs=codes[r.username]||[];
+      if(!subs.length){ h+='<div class="meta">No submissions.</div>'; return; }
+      subs.forEach(p=>{
+        h+=`<div class="meta">Problem <b>${esc(p.problemCode||'?')}</b> ${esc(p.problemTitle||'')}`
+         +` \u00B7 <span class="v ${esc(p.verdict||'')}">${esc(p.verdict||'judging')}</span>`
+         +` \u00B7 ${p.execTimeMs>=0?p.execTimeMs+' ms':'\u2014'} \u00B7 ${esc(p.language||'\u2014')}`
+         +` \u00B7 ${p.submittedAtMs?esc(new Date(p.submittedAtMs).toLocaleString()):'\u2014'}</div>`
+         +`<pre>${esc(p.sourceCode||'')}`
+         +`${p.compilerOutput?'\n\n--- compiler output ---\n'+esc(p.compilerOutput):''}</pre>`;
+      });
+    });
+  }
+  return h+'</body></html>';
+}
+
+function download(filename,text,mime){
+  const url=URL.createObjectURL(new Blob([text],{type:mime}));
+  const a=document.createElement('a');
+  a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+$('exportModal').addEventListener('click',e=>{ if(e.target===$('exportModal')) closeExport(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeExport(); });
 
 async function viewSource(id){
   const {status,body}=await api('GET','/api/admin/submissions/'+id+'/source');
   if(status>=300) return;
+  currentSourceId=id;
   $('sourceTitle').textContent=
     `#${body.id} — ${body.problemCode} by ${body.username} (${body.verdict||'judging'})`;
   $('sourceCode').textContent=(body.sourceCode||'')+
     (body.compilerOutput?'\n\n--- compiler output ---\n'+body.compilerOutput:'');
+  $('sourceOverrideSelect').selectedIndex=0;
   $('sourceCard').classList.remove('hide');
+  loadSourceTests(id);
+}
+
+/* The dropdown in the source card called this and it did not exist, so every
+   selection threw ReferenceError and the verdict silently never changed.
+   viewSource now records which submission is on screen for it to act on. */
+async function overrideCurrentSourceVerdict(verdict){
+  if(!verdict || currentSourceId==null) return;
+  await overrideVerdict(currentSourceId, verdict);
+  await viewSource(currentSourceId);      // repaint the header with the new verdict
+}
+
+/* Instructors see the tests behind any submission regardless of the contest
+   toggle — that switch governs what contestants see, not what grading sees. */
+async function loadSourceTests(id){
+  const box=$('sourceTests');
+  box.innerHTML='<div class="hint">Loading tests…</div>';
+  const {status,body}=await api('GET',`/api/admin/submissions/${id}/tests`,null,true);
+  if(status>=300||!body){ box.innerHTML='<div class="hint">Tests unavailable.</div>'; return; }
+  if(!body.tests||!body.tests.length){
+    box.innerHTML=`<div class="hint">${body.passedCount}/${body.totalTestCases} passed · `
+      +'no test rows recorded (a compilation error stops before the first test).</div>';
+    return;
+  }
+  box.innerHTML=`<div class="hint" style="margin-bottom:8px"><b>${body.passedCount}`
+    +`/${body.totalTestCases}</b> passed — every test this submission reached, `
+    +'ending with the one that failed it.</div>'
+    +body.tests.map(t=>`
+      <div style="margin-bottom:10px">
+        <div class="row" style="gap:10px;margin-bottom:4px">
+          <b>Test ${t.index}</b>
+          <span class="${t.verdict?'v-'+t.verdict:'v-none'}">${esc(t.verdict||'—')}</span>
+          <span class="hint">${t.execTimeMs>=0?t.execTimeMs+' ms':''}</span>
+          ${t.truncated?'<span class="hint">(truncated)</span>':''}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><div class="hint">Input</div><pre class="code">${esc(t.input||'')}</pre></div>
+          <div><div class="hint">Expected output</div><pre class="code">${esc(t.expectedOutput||'')}</pre></div>
+        </div>
+      </div>`).join('');
+}
+
+/* ── test case visibility for contestants ─────────────────────────────────── */
+
+async function loadTestVisibility(){
+  if(selected==null) return;
+  const {status,body}=await api('GET',`/api/admin/contests/${selected}/test-visibility`,null,true);
+  if(status===404){ staleServer(); return; }
+  if(status>=300||!body) return;
+  $('tvCheck').disabled=false;
+  $('tvNote').classList.add('hide');
+  paintTestVisibility(!!body.visible);
+}
+
+/* The console is a static file served by the JVM. An IDE that recompiles
+   resources without restarting the process leaves a NEW page talking to an OLD
+   server, and the control just sits there doing nothing — which is impossible
+   to diagnose from the UI unless the UI says it. */
+function staleServer(){
+  $('tvBadge').textContent='SERVER OUT OF DATE';
+  $('tvBadge').className='badge b-PAUSED';
+  $('tvCheck').checked=false;
+  $('tvCheck').disabled=true;
+  $('tvNote').textContent='This console is newer than the server running it — that build has no '
+    +'test-visibility endpoint (HTTP 404). Restart the server on the current build.';
+  $('tvNote').classList.remove('hide');
+}
+
+function paintTestVisibility(on){
+  testVisibility=on;
+  $('tvCheck').checked = on;
+  const badge=$('tvBadge');
+  badge.textContent = on ? 'VISIBLE' : 'HIDDEN';
+  badge.className   = 'badge ' + (on ? 'b-ACTIVE' : 'b-ENDED');
+}
+
+/* Driven by the checkbox, so the requested state is whatever the box now shows.
+   The server's answer is what gets painted back, not the click — if the call
+   fails the box returns to the truth instead of lying about it. */
+async function setTestVisibility(wanted){
+  if(selected==null){ paintTestVisibility(testVisibility); return; }
+  const {status,body}=await api('POST',
+    `/api/admin/contests/${selected}/test-visibility`,{visible:!!wanted});
+  if(status===404){ staleServer(); return; }
+  if(status<300&&body){
+    paintTestVisibility(!!body.visible);
+    log(200, body.visible ? 'Participants can now see their own test cases'
+                          : 'Test cases hidden from participants');
+  } else {
+    paintTestVisibility(testVisibility);
+  }
 }
 </script>
 </body>

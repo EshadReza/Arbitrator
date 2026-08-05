@@ -236,9 +236,18 @@ public class JudgeWorker {
             return new Outcome(Verdict.CE, -1, -1, compilerOutput, -1);
         }
 
-        /** Checker/infrastructure failure maps to RE per §6.1 glossary. */
+        /**
+         * Checker/infrastructure failure maps to RE per §6.1 glossary.
+         *
+         * The message rides along in compilerOutput because that is the only
+         * free-text channel to the client. Dropping it made a judge-side
+         * misconfiguration — an unbound languages.yml above, say — arrive as a
+         * bare RE indistinguishable from the student's own crash, with nothing
+         * on screen or in the stored record to say otherwise.
+         */
         static Outcome internalError(String message) {
-            return new Outcome(Verdict.RE, -1, -1, null, -1);
+            return new Outcome(Verdict.RE, -1, -1,
+                    message == null ? null : truncate("Judge error: " + message), -1);
         }
     }
 }

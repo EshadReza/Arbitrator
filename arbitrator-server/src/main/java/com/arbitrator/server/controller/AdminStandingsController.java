@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.api.ApiPaths;
+import com.arbitrator.common.dto.VerdictEventDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
 import com.arbitrator.common.dto.ProblemSourceDto;
@@ -29,6 +30,8 @@ import com.arbitrator.server.leaderboard.LeaderboardService;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.UserRepository;
+import com.arbitrator.server.leaderboard.LeaderboardBroadcaster;
+import com.arbitrator.server.realtime.VerdictPublisher;
 import com.arbitrator.server.service.ContestService;
 
 @RestController
@@ -39,17 +42,23 @@ public class AdminStandingsController {
     private final SubmissionRepository submissionRepository;
     private final UserRepository userRepository;
     private final ProblemRepository problemRepository;
+    private final VerdictPublisher verdictPublisher;
+    private final LeaderboardBroadcaster leaderboardBroadcaster;
 
     public AdminStandingsController(ContestService contestService,
                                     LeaderboardService leaderboardService,
                                     SubmissionRepository submissionRepository,
                                     UserRepository userRepository,
-                                    ProblemRepository problemRepository) {
+                                    ProblemRepository problemRepository,
+                                    VerdictPublisher verdictPublisher,
+                                    LeaderboardBroadcaster leaderboardBroadcaster) {
         this.contestService = contestService;
         this.leaderboardService = leaderboardService;
         this.submissionRepository = submissionRepository;
         this.userRepository = userRepository;
         this.problemRepository = problemRepository;
+        this.verdictPublisher = verdictPublisher;
+        this.leaderboardBroadcaster = leaderboardBroadcaster;
     }
 
     @GetMapping(ApiPaths.ADMIN_STANDINGS)
@@ -207,6 +216,17 @@ public class AdminStandingsController {
             return submissionRepository.findById(id).map(s -> {
                 s.setVerdict(v);
                 submissionRepository.save(s);
+                // An override is a verdict like any other, so it travels the
+                // same way one does (FR-15). Without this the change lived only
+                // in the database: the student's banner, badge and history all
+                // kept showing the machine's original answer until they signed
+                // out and back in.
+                userRepository.findById(s.getUserId()).ifPresent(u ->
+                        verdictPublisher.publishVerdict(u.getUsername(), new VerdictEventDto(
+                                s.getId(), s.getProblemId(), v,
+                                s.getExecTimeMs(), s.getPeakMemoryKb(),
+                                s.getCompilerOutput(), s.getFailedTestIndex())));
+                leaderboardBroadcaster.broadcastNow();
                 return ResponseEntity.ok().<Void>build();
             }).orElse(ResponseEntity.notFound().build());
         } catch (IllegalArgumentException e) {

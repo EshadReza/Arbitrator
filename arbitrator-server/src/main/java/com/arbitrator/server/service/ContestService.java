@@ -38,6 +38,10 @@ public class ContestService {
                 .filter(c -> c.endTime() != null && !Instant.now().isBefore(c.endTime()))
                 .toList();
         for (Contest c : live) {
+            // The clock ran out on its own, so the end instant IS the scheduled
+            // one — record it before flipping state, since endTime() starts
+            // answering with endedAt the moment it is set.
+            c.setEndedAt(c.endTime());
             c.setState(ContestState.ENDED);
             contests.save(c);
         }
@@ -63,6 +67,7 @@ public class ContestService {
             c = start(c.getId());
         } else if ((c.getState() == ContestState.ACTIVE || c.getState() == ContestState.FROZEN)
                 && c.endTime() != null && !Instant.now().isBefore(c.endTime())) {
+            c.setEndedAt(c.endTime());
             c.setState(ContestState.ENDED);
             c = contests.save(c);
         }
@@ -130,6 +135,7 @@ public class ContestService {
         c.setStartTime(null);          // no clock yet
         c.setPausedAt(null);
         c.setPausedMillis(0);
+        c.setEndedAt(null);            // reopening clears the previous run's end
         return contests.save(c);
     }
 
@@ -144,6 +150,7 @@ public class ContestService {
         c.setStartTime(Instant.now());
         c.setPausedAt(null);
         c.setPausedMillis(0);          // a restart resets the clock entirely
+        c.setEndedAt(null);            // ...including any early end from last time
         Contest saved = contests.save(c);
         // A restart is a fresh contest: last run's submissions must not leave
         // problems pre-solved or carry penalty into the new standings. They are
@@ -169,7 +176,22 @@ public class ContestService {
             c.setPausedMillis(c.totalPausedMillis());
             c.setPausedAt(null);
         }
+        // Ending early moves the deadline to now. Leaving it at start+duration
+        // left every clock derived from endTime() counting down to a deadline
+        // that no longer meant anything.
+        c.setEndedAt(Instant.now());
         c.setState(ContestState.ENDED);
+        return contests.save(c);
+    }
+
+    /**
+     * FR-12 adjunct: whether contestants may see the test data behind their own
+     * verdicts. Instructors only — and only ever the tests a submission
+     * actually reached, never the whole hidden set.
+     */
+    public Contest setTestCaseVisibility(long id, boolean visible) {
+        Contest c = require(id);
+        c.setShowTestCases(visible);
         return contests.save(c);
     }
 

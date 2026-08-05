@@ -51,8 +51,15 @@ public class Contest {
      * End instant on the server clock (FR-06), shifted forward by all paused
      * time — pausing has to actually give the time back, otherwise a pause
      * silently costs contestants their remaining minutes.
+     *
+     * An instructor who ends a contest early ends it *now*: endedAt wins over
+     * the schedule. Without that, every clock derived from this kept counting
+     * down to the original deadline after the contest was already over.
      */
     public Instant endTime() {
+        if (endedAt != null) {
+            return endedAt;
+        }
         if (startTime == null) {
             return null;
         }
@@ -118,6 +125,34 @@ public class Contest {
 
     @Column(name = "scheduled_start_at")
     private Instant scheduledStartAt;
+
+    /** Set when the contest actually ended; null while it has not. */
+    @Column(name = "ended_at")
+    private Instant endedAt;
+
+    /**
+     * FR-12 adjunct: may contestants see the test data behind their own
+     * verdicts? Off by default — showing tests changes what the contest
+     * measures, so it is the instructor's deliberate choice, per contest.
+     */
+    @Column(name = "show_test_cases", nullable = false)
+    private boolean showTestCases = false;
+
+    public Instant getEndedAt() {
+        return endedAt;
+    }
+
+    public void setEndedAt(Instant endedAt) {
+        this.endedAt = endedAt;
+    }
+
+    public boolean isShowTestCases() {
+        return showTestCases;
+    }
+
+    public void setShowTestCases(boolean showTestCases) {
+        this.showTestCases = showTestCases;
+    }
 
     public Instant getFrozenAt() {
         return frozenAt;

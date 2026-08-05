@@ -11,15 +11,20 @@
 <?import javafx.scene.layout.VBox?>
 
 <!-- Contest picker (shown after login when more than one contest is joinable) -->
+<!-- Same shape as login.fxml and register.fxml: the theme toggle is pinned to
+     the top of the window, and the content below it is what gets centred. With
+     a single CENTER-aligned VBox the toggle was part of the centred stack and
+     floated in the middle of the screen, directly above the title. -->
 <VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.arbitrator.client.controller.ContestPickerController"
-      alignment="CENTER" spacing="10" styleClass="login-root">
+      alignment="TOP_CENTER" styleClass="login-root">
 
     <HBox alignment="CENTER_RIGHT" maxWidth="Infinity">
         <padding><Insets top="12" right="16" bottom="0" left="16"/></padding>
         <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button" text="🌙" />
     </HBox>
 
+    <VBox alignment="CENTER" spacing="10" VBox.vgrow="ALWAYS">
     <Label text="%app.title" styleClass="logo"/>
     <Label text="%picker.subtitle" styleClass="subtitle"/>
 
@@ -40,5 +45,6 @@
         <Button fx:id="enterButton" text="%picker.enter" onAction="#onEnter"
                 defaultButton="true" maxWidth="Infinity"/>
         <Hyperlink text="%picker.logout" onAction="#onLogout"/>
+    </VBox>
     </VBox>
 </VBox>

@@ -13,6 +13,7 @@ import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
+import com.arbitrator.common.dto.SubmissionTestsDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.common.dto.VerdictEventDto;
@@ -56,6 +57,13 @@ public interface JudgeApi extends AutoCloseable {
 
     /** UIF-12: the code behind one of my submissions. */
     SubmissionSourceDto submissionSource(long submissionId) throws ApiException;
+
+    /**
+     * The tests behind one of my verdicts — those I passed plus the one that
+     * failed me. The result carries {@code visible=false} when the instructor
+     * has not enabled it for that contest, so this is never an error path.
+     */
+    SubmissionTestsDto submissionTests(long submissionId) throws ApiException;
 
     /** Current standings over REST — first paint and after a reconnect (FR-17). */
     LeaderboardDto leaderboard() throws ApiException;

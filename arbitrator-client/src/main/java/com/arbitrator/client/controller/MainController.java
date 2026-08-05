@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.arbitrator.client.app.AppState;
+import com.arbitrator.client.app.DraftStore;
 import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
@@ -277,12 +278,16 @@ public class MainController {
     /** Back to the picker, keeping the session — same user, different contest. */
     @FXML
     private void onSwitchContest() {
+        stashDraft(currentProblemId);      // this screen is about to be rebuilt
         stopClocks();
         SceneRouter.showContestPicker();
     }
 
     @FXML
     private void onSignOut() {
+        // Save BEFORE the session is cleared: the draft is filed under the
+        // username, and afterwards there is no username to file it under.
+        stashDraft(currentProblemId);
         stopClocks();
         state.setSession(null);
         state.setContestCleared();
@@ -334,6 +339,13 @@ public class MainController {
         var selected = problemList.getSelectionModel().getSelectedItem();
         problemList.getItems().setAll(items);
         if (items.isEmpty()) {
+            // Deleting the last problem leaves nothing selected, so the
+            // selection listener never fires and the previous statement stayed
+            // on screen — a problem the student could still read but no longer
+            // submit to. Clear the panes explicitly.
+            currentProblemId = -1;
+            problemHeader.setText("");
+            statementView.getEngine().loadContent(noProblemsPage());
             return;
         }
         if (selectFirst || selected == null) {
@@ -416,16 +428,36 @@ public class MainController {
     // --- per-problem drafts --------------------------------------------------
 
     private void stashDraft(long problemId) {
-        drafts.put(problemId, new Draft(
-                editorPanelController.getCode(), editorPanelController.getLanguage()));
+        if (problemId < 0) {
+            return;
+        }
+        String code = editorPanelController.getCode();
+        Language language = editorPanelController.getLanguage();
+        drafts.put(problemId, new Draft(code, language));
+        // Also to disk: the in-memory map dies with this screen, and signing
+        // out or switching contest rebuilds it — which is how code that had
+        // already been written, and even submitted, was being thrown away.
+        DraftStore.save(username(), problemId, language, code);
     }
 
     private void restoreDraft(long problemId) {
         Draft draft = drafts.get(problemId);
-        if (draft != null) {
+        if (draft == null) {
+            // Nothing this session — fall back to what a previous session left.
+            var stored = DraftStore.load(username(), problemId);
+            if (stored.isPresent()) {
+                draft = new Draft(stored.get().code(), stored.get().language());
+                drafts.put(problemId, draft);
+            }
+        }
+        if (draft != null && draft.language() != null) {
             editorPanelController.setLanguage(draft.language());
         }
         editorPanelController.setCode(draft == null ? "" : draft.code());
+    }
+
+    private String username() {
+        return state.session() == null ? null : state.session().username();
     }
 
     // --- submit (FR-09, UIF-08/09) -------------------------------------------
@@ -440,6 +472,9 @@ public class MainController {
             return;
         }
         editorPanelController.setSubmitEnabled(false);
+        // Submitted code is the last thing anyone can afford to lose, so it is
+        // written out at the moment it is sent rather than at the next switch.
+        DraftStore.save(username(), problem.id(), language, source);
         async(() -> {
             try {
                 SubmitAckDto ack = state.api().submit(
@@ -580,8 +615,20 @@ public class MainController {
         submissionsPanelController.selectSubmission(submissionId);
     }
 
+    /** Shown when the contest is running but holds no problems. */
+    private String noProblemsPage() {
+        return placeholderPage("No problems in this contest",
+                "Your instructor has not added any yet.");
+    }
+
     /** Shown in the statement pane while the contest sits in its lobby. */
     private String waitingPage() {
+        return placeholderPage("Waiting for the contest to start",
+                "Problems appear here the moment your instructor starts it.");
+    }
+
+    /** Empty-state page in the statement pane, themed like the statement itself. */
+    private String placeholderPage(String heading, String detail) {
         boolean dark = state.darkMode();
         return """
                 <html><head><meta charset="utf-8"><style>
@@ -591,12 +638,13 @@ public class MainController {
                   h2 { font-weight: 600; }
                   p { color: %s; }
                 </style></head><body><div>
-                  <h2>Waiting for the contest to start</h2>
-                  <p>Problems appear here the moment your instructor starts it.</p>
+                  <h2>%s</h2>
+                  <p>%s</p>
                 </div></body></html>"""
                 .formatted(dark ? "#1c222c" : "#ffffff",
                         dark ? "#e6eaf0" : "#1c2430",
-                        dark ? "#9aa5b4" : "#6b7684");
+                        dark ? "#9aa5b4" : "#6b7684",
+                        heading, detail);
     }
 
     // --- timer (FR-06, UIF-05/06/07) -----------------------------------------

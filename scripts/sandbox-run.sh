@@ -81,6 +81,23 @@ PEAK=-1
 if [ -f "$RUSAGE" ]; then
     PEAK=$(grep -oP 'Maximum resident set size \(kbytes\): \K[0-9]+' "$RUSAGE" 2>/dev/null || echo -1)
     [ -z "$PEAK" ] && PEAK=-1
+
+    # Prefer the submission's own elapsed time over the START/END bracket. That
+    # bracket also spans timeout, unshare's namespace setup (--mount-proc is not
+    # free) and prlimit, so it charges wrapper overhead to the contestant — and
+    # JudgeWorker calls TLE on wall time greater than the limit, which is enough
+    # to fail a borderline program for the judge's own startup cost.
+    # /usr/bin/time measures the command alone: it is the innermost link.
+    CHILD_MS=$(awk -F': ' '/Elapsed \(wall clock\) time/ {
+                   n = split($NF, t, ":");
+                   secs = (n == 3) ? t[1] * 3600 + t[2] * 60 + t[3] : t[1] * 60 + t[2];
+                   printf "%d", secs * 1000 + 0.5;
+                   exit
+               }' "$RUSAGE" 2>/dev/null)
+    case "$CHILD_MS" in
+        '' | *[!0-9]*) ;;               # absent or unparsable: keep the bracket
+        *) ELAPSED=$CHILD_MS ;;
+    esac
 fi
 
 # 124 = timeout fired, 137 = SIGKILL, 152 = SIGXCPU (CPU rlimit hit)

@@ -16,6 +16,7 @@ import com.arbitrator.common.dto.CustomRunRequest;
 import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
+import com.arbitrator.common.dto.SubmissionTestsDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.server.judge.CustomRunService;
@@ -59,6 +60,16 @@ public class SubmissionController {
     @GetMapping(ApiPaths.SUBMISSION_SOURCE)
     public SubmissionSourceDto source(@PathVariable long id, Principal principal) {
         return submissionService.source(principal.getName(), id, false);
+    }
+
+    /**
+     * The tests behind one of my verdicts — the ones I passed plus the one that
+     * failed me. Returns visible=false rather than 403 when the instructor has
+     * not enabled it, so the client can explain instead of erroring.
+     */
+    @GetMapping(ApiPaths.SUBMISSION_TESTS)
+    public SubmissionTestsDto tests(@PathVariable long id, Principal principal) {
+        return submissionService.tests(principal.getName(), id, false);
     }
 
     /** FR-16. */

@@ -20,6 +20,8 @@ import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
+import com.arbitrator.common.dto.SubmissionTestsDto;
+import com.arbitrator.common.dto.TestCaseResultDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.common.dto.VerdictEventDto;
@@ -156,6 +158,17 @@ public class FakeJudgeApi implements JudgeApi {
                 "#include <iostream>\nint main(){long long a,b;std::cin>>a>>b;"
                         + "std::cout<<a+b<<\"\\n\";}",
                 null, System.currentTimeMillis());
+    }
+
+    @Override
+    public SubmissionTestsDto submissionTests(long submissionId) {
+        // Mock mode shows the feature switched on, with the fail-fast shape:
+        // everything up to the failure, then the test that caused it.
+        return new SubmissionTestsDto(submissionId, true, 2, 5, List.of(
+                new TestCaseResultDto(1, Verdict.AC, 12, 2048, "2 3\n", "5\n", false),
+                new TestCaseResultDto(2, Verdict.AC, 11, 2048, "-5 5\n", "0\n", false),
+                new TestCaseResultDto(3, Verdict.WA, 14, 2048,
+                        "1000000000 1000000000\n", "2000000000\n", false)));
     }
 
     @Override

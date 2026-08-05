@@ -129,10 +129,12 @@ public class EditorController {
             codeArea.setStyleSpans(0, highlight(text));
         });
         languageBox.valueProperty().addListener((obs, old, lang) -> {
-            // Switching language always loads that language's boilerplate,
-            // regardless of what was typed — the previous language's code
-            // wouldn't compile under the new one anyway.
-            if (lang != null) {
+            // Load the new language's boilerplate only when nothing has been
+            // written yet. Replacing unconditionally threw away a half-finished
+            // solution the instant someone brushed the language selector, with
+            // no way back — and MainController keeps per-problem drafts
+            // precisely so that work is never lost mid-contest.
+            if (lang != null && isUntouched(old)) {
                 codeArea.replaceText(TEMPLATES.getOrDefault(lang, ""));
                 codeArea.moveTo(0);
             }
@@ -141,6 +143,12 @@ public class EditorController {
 
         installEditingBehaviour();
         updateCount("");
+    }
+
+    /** True when the buffer is empty or still exactly {@code language}'s boilerplate. */
+    private boolean isUntouched(Language language) {
+        String text = codeArea.getText();
+        return text.isBlank() || text.equals(TEMPLATES.getOrDefault(language, ""));
     }
 
     /**

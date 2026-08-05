@@ -75,7 +75,15 @@ public class CheckerRunner {
                 contestantOutputFile.toAbsolutePath().toString(),
                 expectedOutputFile.toAbsolutePath().toString());
 
-        Path workDir = binaryPath.getParent();
+        // Scratch dir of the checker's own, inside the submission's work dir —
+        // never the directory holding the cached binary. That one is shared by
+        // every submission to this problem, and SandboxExecutor writes
+        // __stdout/__stderr/__metrics into whatever cwd it is handed, so with
+        // ten judge threads two submissions to the same problem would read each
+        // other's exit code. JudgeWorker's cleanup() takes this away with the
+        // rest of the submission's directory.
+        Path workDir = contestantOutputFile.toAbsolutePath().getParent().resolve("__checker");
+        Files.createDirectories(workDir);
         int timeLimitMs = (int) props.getCheckerTimeLimitMs();
         int memoryLimitKb = (int) props.getCheckerMemoryLimitKb();
 

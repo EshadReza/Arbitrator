@@ -24,6 +24,7 @@ import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
+import com.arbitrator.common.dto.SubmissionTestsDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.common.dto.VerdictEventDto;
@@ -109,6 +110,12 @@ public class HttpJudgeApi implements JudgeApi {
     public SubmissionSourceDto submissionSource(long submissionId) throws ApiException {
         return get(ApiPaths.SUBMISSIONS + "/" + submissionId + "/source",
                 SubmissionSourceDto.class);
+    }
+
+    @Override
+    public SubmissionTestsDto submissionTests(long submissionId) throws ApiException {
+        return get(ApiPaths.SUBMISSIONS + "/" + submissionId + "/tests",
+                SubmissionTestsDto.class);
     }
 
     @Override

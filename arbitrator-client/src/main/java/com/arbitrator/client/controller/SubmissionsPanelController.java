@@ -10,16 +10,23 @@ import org.fxmisc.richtext.LineNumberFactory;
 
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
+import com.arbitrator.common.dto.SubmissionTestsDto;
+import com.arbitrator.common.dto.TestCaseResultDto;
 import com.arbitrator.common.enums.Verdict;
 
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.geometry.Insets;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.TitledPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
@@ -42,7 +49,11 @@ public class SubmissionsPanelController {
     @FXML private Label headerLabel;
     @FXML private Label countLabel;
 
+    private static final String TESTS_TITLE = "Test cases";
+
     private CodeArea sourceView;
+    private TitledPane testsPane;
+    private VBox testsBox;
     private final AppState state = AppState.get();
 
     @FXML
@@ -53,6 +64,17 @@ public class SubmissionsPanelController {
         sourceView.getStyleClass().add("code-area");
         VBox.setVgrow(sourceView, Priority.ALWAYS);
         sourceBox.getChildren().add(sourceView);
+
+        // Collapsed by default: the code is what you came for, the tests are
+        // what you open when the verdict surprised you.
+        testsBox = new VBox(10);
+        testsBox.setPadding(new Insets(10));
+        ScrollPane scroll = new ScrollPane(testsBox);
+        scroll.setFitToWidth(true);
+        scroll.setPrefHeight(240);
+        testsPane = new TitledPane(TESTS_TITLE, scroll);
+        testsPane.setExpanded(false);
+        sourceBox.getChildren().add(testsPane);
 
         table.setPlaceholder(new Label("You haven't submitted anything yet"));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -126,8 +148,11 @@ public class SubmissionsPanelController {
         if (row == null) {
             headerLabel.setText("");
             sourceView.replaceText("");
+            testsBox.getChildren().clear();
+            testsPane.setText(TESTS_TITLE);
             return;
         }
+        loadTests(row.id());
         headerLabel.setText("#%d  ·  %s  ·  %s  ·  %s  ·  %s%s".formatted(
                 row.id(),
                 row.problemCode(),
@@ -164,6 +189,102 @@ public class SubmissionsPanelController {
         }, "source-io");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * The tests behind this verdict, when the instructor allows it.
+     *
+     * Judging stops at the first failure (BR-05), so what comes back is every
+     * test that passed plus the single one that did not — the rest of the
+     * hidden set is never sent and cannot be inferred from what is.
+     */
+    private void loadTests(long submissionId) {
+        testsBox.getChildren().clear();
+        testsPane.setText(TESTS_TITLE + " — loading…");
+
+        Thread worker = new Thread(() -> {
+            try {
+                SubmissionTestsDto dto = state.api().submissionTests(submissionId);
+                Platform.runLater(() -> {
+                    // A late response for a row the user already left would
+                    // otherwise show one submission's tests under another's code.
+                    var current = table.getSelectionModel().getSelectedItem();
+                    if (current == null || current.id() != submissionId) {
+                        return;
+                    }
+                    applyTests(dto);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    testsPane.setText(TESTS_TITLE);
+                    testsBox.getChildren().setAll(hint("Could not load tests: " + e.getMessage()));
+                });
+            }
+        }, "tests-io");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void applyTests(SubmissionTestsDto dto) {
+        testsPane.setText("%s — %d of %d passed".formatted(
+                TESTS_TITLE, dto.passedCount(), dto.totalTestCases()));
+
+        if (!dto.visible()) {
+            testsBox.getChildren().setAll(hint(
+                    "Your instructor has not enabled test viewing for this contest."));
+            return;
+        }
+        if (dto.tests().isEmpty()) {
+            testsBox.getChildren().setAll(hint(
+                    "No tests ran for this submission — a compilation error stops before the first one."));
+            return;
+        }
+        dto.tests().forEach(t -> testsBox.getChildren().add(testCard(t)));
+    }
+
+    /** One test: its verdict line, then the input and the expected output. */
+    private static VBox testCard(TestCaseResultDto t) {
+        Label title = new Label("Test %d".formatted(t.index()));
+        title.setStyle("-fx-font-weight: bold;");
+
+        Label verdict = new Label(t.verdict() == null ? "—" : t.verdict().name());
+        verdict.getStyleClass().add(t.verdict() == null ? "v-pending" : "v-" + t.verdict().name());
+
+        Label timing = new Label(t.execTimeMs() >= 0 ? t.execTimeMs() + " ms" : "");
+        timing.getStyleClass().add("subtitle");
+
+        HBox head = new HBox(10, title, verdict, timing);
+
+        VBox card = new VBox(6, head,
+                new HBox(8, labelled("Input", t.input()), labelled("Expected output", t.expectedOutput())));
+        card.getStyleClass().add("box");
+        card.setPadding(new Insets(10));
+        if (t.truncated()) {
+            card.getChildren().add(hint("Shown truncated — the full test file is larger."));
+        }
+        return card;
+    }
+
+    private static VBox labelled(String caption, String body) {
+        Label label = new Label(caption);
+        label.getStyleClass().add("subtitle");
+
+        TextArea area = new TextArea(body);
+        area.setEditable(false);
+        area.setWrapText(false);
+        area.setPrefRowCount(4);
+        area.getStyleClass().add("code-area");
+
+        VBox box = new VBox(3, label, area);
+        HBox.setHgrow(box, Priority.ALWAYS);
+        return box;
+    }
+
+    private static Label hint(String text) {
+        Label label = new Label(text);
+        label.getStyleClass().add("subtitle");
+        label.setWrapText(true);
+        return label;
     }
 
     private void buildColumns() {

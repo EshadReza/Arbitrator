@@ -20,6 +20,8 @@ spring:
     locations: classpath:db/migration
 
 arbitrator:
+  admin:
+    auto-open: false               # a test run must never launch a browser
   jwt:
     secret: test-only-secret-0123456789abcdef0123456789abcdef0123456789
     expiry-hours: 1

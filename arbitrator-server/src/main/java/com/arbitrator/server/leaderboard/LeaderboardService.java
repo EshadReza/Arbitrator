@@ -92,8 +92,19 @@ public class LeaderboardService {
             if (!problemCode.containsKey(s.getProblemId())) {
                 continue;                       // problem removed from the contest
             }
-            if (isFrozen && freezeTime != null && s.getQueuedAt() != null && s.getQueuedAt().isAfter(freezeTime)) {
-                continue;                       // FR-19: hold public standings at the moment of freeze
+            // FR-19: a freeze is a snapshot of what was KNOWN at the freeze
+            // instant, for everybody including the viewer. Filtering only on
+            // submission time was not enough: a submission sent before the
+            // freeze but judged after it still landed on the board and moved
+            // ranks, so the standings visibly changed while frozen. A result
+            // counts only if it had already been judged when the freeze fell.
+            if (isFrozen && freezeTime != null) {
+                if (s.getQueuedAt() != null && s.getQueuedAt().isAfter(freezeTime)) {
+                    continue;
+                }
+                if (s.getJudgedAt() == null || s.getJudgedAt().isAfter(freezeTime)) {
+                    continue;
+                }
             }
             Tally tally = byUser
                     .computeIfAbsent(s.getUserId(), k -> new LinkedHashMap<>())

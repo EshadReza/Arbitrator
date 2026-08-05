@@ -57,6 +57,12 @@ arbitrator:
   contest:
     reset-on-boot: ${ARBITRATOR_RESET_ON_BOOT:false}
 
+  admin:
+    # Open the instructor console in the default browser once the server is up.
+    # Set false on a headless lab server, where there is no browser to open and
+    # nobody sitting at the machine. The URL is logged either way.
+    auto-open: ${ARBITRATOR_ADMIN_AUTO_OPEN:true}
+
 logging:
   level:
     com.arbitrator: INFO

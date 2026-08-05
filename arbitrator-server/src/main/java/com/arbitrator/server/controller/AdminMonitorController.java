@@ -181,6 +181,16 @@ public class AdminMonitorController {
         return submissionService.source(principal.getName(), id, true);
     }
 
+    /**
+     * Tests behind any submission. Never gated by the contest toggle — that
+     * switch governs what contestants see, not the instructor grading them.
+     */
+    @GetMapping(ApiPaths.ADMIN_SUBMISSION_TESTS)
+    public com.arbitrator.common.dto.SubmissionTestsDto tests(@PathVariable long id,
+                                                              Principal principal) {
+        return submissionService.tests(principal.getName(), id, true);
+    }
+
     /** Also expose the raw connected count for the dashboard header. */
     @GetMapping("/api/admin/contests/{id}/online")
     public Map<String, Integer> online(@PathVariable long id) {

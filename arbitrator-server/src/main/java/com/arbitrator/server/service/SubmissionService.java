@@ -2,19 +2,24 @@ package com.arbitrator.server.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionSourceDto;
+import com.arbitrator.common.dto.SubmissionTestsDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
+import com.arbitrator.common.dto.TestCaseResultDto;
+import com.arbitrator.common.enums.Verdict;
 import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.Submission;
@@ -41,7 +46,11 @@ public class SubmissionService {
     private final JudgeQueue queue;
     private final UserRepository users;
     private final TestCaseRepository testCases;
+    private final JdbcTemplate jdbc;
     private final Duration cooldown;
+
+    /** Per-field cap on disclosed test data; a test file can be megabytes. */
+    private static final int MAX_TEST_DATA_CHARS = 4096;
 
     /** userId -> last accepted submission instant (BR-01). */
     private final Map<Long, Instant> lastSubmit = new ConcurrentHashMap<>();
@@ -53,6 +62,7 @@ public class SubmissionService {
                              JudgeQueue queue,
                              UserRepository users,
                              TestCaseRepository testCases,
+                             JdbcTemplate jdbc,
                              JudgeProperties props) {
         this.submissions = submissions;
         this.problems = problems;
@@ -61,6 +71,7 @@ public class SubmissionService {
         this.queue = queue;
         this.users = users;
         this.testCases = testCases;
+        this.jdbc = jdbc;
         this.cooldown = Duration.ofSeconds(props.getSubmitCooldownSeconds());
     }
 
@@ -130,6 +141,83 @@ public class SubmissionService {
         return new SubmissionSourceDto(s.getId(), code, owner, s.getLanguage(),
                 s.getVerdict(), s.getSourceCode(), s.getCompilerOutput(),
                 s.getQueuedAt().toEpochMilli());
+    }
+
+    /**
+     * The test cases this submission actually reached, when the instructor has
+     * allowed it for that contest.
+     *
+     * Judging is fail-fast (BR-05), so submission_results holds exactly the
+     * tests that ran: every one passed, plus the single one that failed. No
+     * filtering by verdict is needed and none is done — reading the table back
+     * cannot leak a test the submission never got to.
+     *
+     * A student may only read their own (LRR-02); an admin may read any, and is
+     * never gated by the contest toggle, which exists to control what
+     * *contestants* see.
+     */
+    public SubmissionTestsDto tests(String username, long submissionId, boolean admin) {
+        Submission s = submissions.findById(submissionId).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "No such submission"));
+        User caller = userService.requireByUsername(username);
+        if (!admin && !s.getUserId().equals(caller.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "You can only view your own submissions");
+        }
+
+        int total = testCases.findByProblemIdOrderByIdxAsc(s.getProblemId()).size();
+        int passed = s.getVerdict() == Verdict.AC ? total : Math.max(0, s.getFailedTestIndex() - 1);
+
+        if (!admin && !contestService.require(s.getContestId()).isShowTestCases()) {
+            return SubmissionTestsDto.hidden(submissionId, passed, total);
+        }
+
+        // Keyed by test index so a submission judged twice — crash recovery
+        // requeues anything not DONE — yields one row per test, the latest.
+        Map<Integer, TestCaseResultDto> byIndex = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT r.test_index, r.verdict, r.exec_time_ms, r.peak_memory_kb,
+                       t.input_data, t.expected_output
+                  FROM submission_results r
+                  JOIN test_cases t ON t.problem_id = ? AND t.idx = r.test_index
+                 WHERE r.submission_id = ?
+                 ORDER BY r.id ASC
+                """, rs -> {
+            String input = rs.getString("input_data");
+            String expected = rs.getString("expected_output");
+            boolean truncated = length(input) > MAX_TEST_DATA_CHARS
+                    || length(expected) > MAX_TEST_DATA_CHARS;
+            int index = rs.getInt("test_index");
+            byIndex.put(index, new TestCaseResultDto(
+                    index,
+                    parseVerdict(rs.getString("verdict")),
+                    rs.getLong("exec_time_ms"),
+                    rs.getLong("peak_memory_kb"),
+                    clip(input), clip(expected), truncated));
+        }, s.getProblemId(), submissionId);
+
+        return new SubmissionTestsDto(submissionId, true, passed, total,
+                List.copyOf(byIndex.values()));
+    }
+
+    private static Verdict parseVerdict(String name) {
+        try {
+            return name == null ? null : Verdict.valueOf(name);
+        } catch (IllegalArgumentException e) {
+            return null;      // a verdict this build no longer knows about
+        }
+    }
+
+    private static int length(String s) {
+        return s == null ? 0 : s.length();
+    }
+
+    /** A test file can be megabytes; nobody reads that in a panel. */
+    private static String clip(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= MAX_TEST_DATA_CHARS ? s : s.substring(0, MAX_TEST_DATA_CHARS);
     }
 
     /** FR-16: personal history, newest first. */

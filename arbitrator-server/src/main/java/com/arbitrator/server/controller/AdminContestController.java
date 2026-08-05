@@ -1,6 +1,7 @@
 package com.arbitrator.server.controller;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -105,6 +106,24 @@ public class AdminContestController {
     @PostMapping(ApiPaths.ADMIN_CONTEST_UNFREEZE)
     public ContestStateDto unfreeze(@PathVariable long id) {
         return applied(contestService.unfreeze(id));
+    }
+
+    /**
+     * Whether contestants may see the tests behind their own verdicts.
+     *
+     * Kept off the contest DTOs deliberately: those are a frozen contract
+     * (rules.md Rule 2) and this is one boolean only the console needs.
+     */
+    @GetMapping(ApiPaths.ADMIN_CONTEST_TEST_VISIBILITY)
+    public Map<String, Boolean> testVisibility(@PathVariable long id) {
+        return Map.of("visible", contestService.require(id).isShowTestCases());
+    }
+
+    @PostMapping(ApiPaths.ADMIN_CONTEST_TEST_VISIBILITY)
+    public Map<String, Boolean> setTestVisibility(@PathVariable long id,
+                                                 @RequestParam boolean visible) {
+        return Map.of("visible",
+                contestService.setTestCaseVisibility(id, visible).isShowTestCases());
     }
 
     /** BR-02: submissions are refused from this moment on. */

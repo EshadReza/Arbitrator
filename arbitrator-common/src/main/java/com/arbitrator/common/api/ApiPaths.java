@@ -24,6 +24,8 @@ public final class ApiPaths {
     public static final String SUBMISSIONS_MINE = "/api/submissions/mine"; // GET history
     public static final String RUN_CUSTOM = "/api/run";                    // POST, not judged
     public static final String SUBMISSION_SOURCE = "/api/submissions/{id}/source";
+    /** Test data behind my own verdict — only if the instructor allowed it. */
+    public static final String SUBMISSION_TESTS = "/api/submissions/{id}/tests";
     public static final String LEADERBOARD = "/api/leaderboard";           // GET current contest
 
     // --- admin: loopback + ADMIN JWT, both enforced (decision D3) ---
@@ -52,6 +54,12 @@ public final class ApiPaths {
     public static final String ADMIN_OVERRIDE_VERDICT = "/api/admin/submissions/{id}/verdict";
     public static final String ADMIN_ADJUST_PENALTY = "/api/admin/contests/{id}/participants/{username}/penalty";
     public static final String ADMIN_CONTEST_SCHEDULE = "/api/admin/contests/{id}/schedule";
+    /** Toggle whether contestants may see the tests behind their verdicts. */
+    public static final String ADMIN_CONTEST_TEST_VISIBILITY =
+            "/api/admin/contests/{id}/test-visibility";
+    public static final String ADMIN_SUBMISSION_TESTS = "/api/admin/submissions/{id}/tests";
+    /** This machine's LAN addresses — what the instructor reads out to the room. */
+    public static final String ADMIN_SERVER_INFO = "/api/admin/server";
 
     // --- static admin panel, loopback only ---
     public static final String ADMIN_PANEL_PREFIX = "/admin";
