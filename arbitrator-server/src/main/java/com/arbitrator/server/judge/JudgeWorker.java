@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import com.arbitrator.common.dto.VerdictEventDto;
+import com.arbitrator.common.enums.CheckerType;
 import com.arbitrator.common.enums.Verdict;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.Submission;
@@ -44,6 +45,7 @@ public class JudgeWorker {
     private final UserRepository users;
     private final SandboxExecutor sandbox;
     private final VerdictEvaluator evaluator;
+    private final CheckerRunner checkerRunner;
     private final VerdictPublisher publisher;
     private final LeaderboardBroadcaster leaderboardBroadcaster;
     private final JudgeProperties props;
@@ -55,6 +57,7 @@ public class JudgeWorker {
                        UserRepository users,
                        SandboxExecutor sandbox,
                        VerdictEvaluator evaluator,
+                       CheckerRunner checkerRunner,
                        VerdictPublisher publisher,
                        LeaderboardBroadcaster leaderboardBroadcaster,
                        JudgeProperties props,
@@ -65,6 +68,7 @@ public class JudgeWorker {
         this.users = users;
         this.sandbox = sandbox;
         this.evaluator = evaluator;
+        this.checkerRunner = checkerRunner;
         this.publisher = publisher;
         this.leaderboardBroadcaster = leaderboardBroadcaster;
         this.props = props;
@@ -153,6 +157,12 @@ public class JudgeWorker {
                 v = Verdict.OLE;
             } else if (r.exitCode() != 0) {
                 v = Verdict.RE;
+            } else if (problem.getCheckerType() == CheckerType.CUSTOM) {
+                Path contestantOut = workDir.resolve("__actual_output_" + tc.getIdx() + ".txt");
+                Path expectedOut = workDir.resolve("__expected_output_" + tc.getIdx() + ".txt");
+                Files.writeString(contestantOut, r.stdout(), StandardCharsets.UTF_8);
+                Files.writeString(expectedOut, tc.getExpectedOutput(), StandardCharsets.UTF_8);
+                v = checkerRunner.check(problem, input, contestantOut, expectedOut);
             } else if (evaluator.matches(tc.getExpectedOutput(), r.stdout())) {
                 v = Verdict.AC;
             } else {

@@ -75,7 +75,7 @@ class ProblemPackageServiceTest {
             }
         };
 
-        service = new ProblemPackageService(problems, testCases, contestService);
+        service = new ProblemPackageService(problems, testCases, contestService, null);
     }
 
     // --- happy path ----------------------------------------------------

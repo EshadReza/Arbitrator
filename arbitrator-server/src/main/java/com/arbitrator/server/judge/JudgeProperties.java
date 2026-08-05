@@ -22,6 +22,10 @@ public class JudgeProperties {
 
     private long compileTimeoutMs = 30000;
 
+    private long checkerTimeLimitMs = 5000;
+
+    private long checkerMemoryLimitKb = 262144; // 256 MiB
+
     /** BR-01: one submission per user per this many seconds. */
     private int submitCooldownSeconds = 30;
 
@@ -93,6 +97,22 @@ public class JudgeProperties {
 
     public void setCompileTimeoutMs(long compileTimeoutMs) {
         this.compileTimeoutMs = compileTimeoutMs;
+    }
+
+    public long getCheckerTimeLimitMs() {
+        return checkerTimeLimitMs;
+    }
+
+    public void setCheckerTimeLimitMs(long checkerTimeLimitMs) {
+        this.checkerTimeLimitMs = checkerTimeLimitMs;
+    }
+
+    public long getCheckerMemoryLimitKb() {
+        return checkerMemoryLimitKb;
+    }
+
+    public void setCheckerMemoryLimitKb(long checkerMemoryLimitKb) {
+        this.checkerMemoryLimitKb = checkerMemoryLimitKb;
     }
 
     public int getSubmitCooldownSeconds() {

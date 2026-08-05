@@ -18,8 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.arbitrator.common.dto.ProblemPackageResultDto;
+import com.arbitrator.common.enums.CheckerType;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.TestCase;
+import com.arbitrator.server.judge.CheckerCompilationException;
+import com.arbitrator.server.judge.CheckerRunner;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
 
@@ -31,6 +34,7 @@ import com.arbitrator.server.repo.TestCaseRepository;
  *   config.json              { "code": "A", "title": "...", "timeLimitMs": 2000,
  *                              "memoryLimitKb": 262144 }
  *   statement/statement.html
+ *   checker/checker.cpp      (optional)
  *   tests/01.in  01.out  02.in  02.out ...
  * </pre>
  * A single wrapping top-level directory is tolerated, because "zip the folder"
@@ -56,15 +60,24 @@ public class ProblemPackageService {
     private final ProblemRepository problems;
     private final TestCaseRepository testCases;
     private final ContestService contestService;
+    private final CheckerRunner checkerRunner;
     private final ObjectMapper json = new ObjectMapper();
 
     public ProblemPackageService(ProblemRepository problems,
                                  TestCaseRepository testCases,
-                                 ContestService contestService) {
+                                 ContestService contestService,
+                                 CheckerRunner checkerRunner) {
         this.problems = problems;
         this.testCases = testCases;
         this.contestService = contestService;
+        this.checkerRunner = checkerRunner;
     }
+//
+//    public ProblemPackageService(ProblemRepository problems,
+//                                 TestCaseRepository testCases,
+//                                 ContestService contestService) {
+//        this(problems, testCases, contestService, null);
+//    }
 
     @Transactional
     public ProblemPackageResultDto importPackage(byte[] zipBytes) {
@@ -126,6 +139,22 @@ public class ProblemPackageService {
         // --- statement ---
         String statementHtml = findStatement(files, errors);
 
+        // --- checker (optional custom checker, FR-14) ---
+        CheckerType checkerType = CheckerType.EXACT;
+        String checkerSource = null;
+        byte[] checkerBytes = files.get("checker/checker.cpp");
+        if (checkerBytes != null) {
+            checkerType = CheckerType.CUSTOM;
+            checkerSource = new String(checkerBytes, StandardCharsets.UTF_8);
+            if (checkerRunner != null) {
+                try {
+                    checkerRunner.validateChecker(checkerSource);
+                } catch (CheckerCompilationException e) {
+                    errors.add("Checker compilation failed: " + e.getCompilerOutput());
+                }
+            }
+        }
+
         // --- tests: every .in needs its .out (FMEA-07) ---
         Map<String, String> inputs = new TreeMap<>();
         Map<String, String> outputs = new TreeMap<>();
@@ -178,6 +207,8 @@ public class ProblemPackageService {
         problem.setTimeLimitMs(timeLimitMs);
         problem.setMemoryLimitKb(memoryLimitKb);
         problem.setOrdering(problems.findByContestIdOrderByOrderingAscCodeAsc(contestId).size() + 1);
+        problem.setCheckerType(checkerType);
+        problem.setCheckerSource(checkerSource);
         problems.save(problem);
 
         int idx = 1;
