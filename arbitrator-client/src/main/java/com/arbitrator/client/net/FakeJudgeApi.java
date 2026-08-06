@@ -173,7 +173,8 @@ public class FakeJudgeApi implements JudgeApi {
                 new TestCaseResultDto(1, Verdict.AC, 12, 2048, "2 3\n", "5\n", "5\n", false),
                 new TestCaseResultDto(2, Verdict.AC, 11, 2048, "-5 5\n", "0\n", "0\n", false),
                 new TestCaseResultDto(3, Verdict.WA, 14, 2048,
-                        "1000000000 1000000000\n", "2000000000\n", "-294967296\n", false)));
+                        "1000000000 1000000000\n", "2000000000\n", "-294967296\n", false)),
+                null);
     }
 
     @Override
@@ -199,16 +200,20 @@ public class FakeJudgeApi implements JudgeApi {
                 () -> onUpdate.accept(fakeBoard()), 1, 5, TimeUnit.SECONDS);
     }
 
-    /** Enough rows and shapes to exercise every cell state in UIF-13. */
+    /**
+     * Enough rows and shapes to exercise every cell state in UIF-13: a first
+     * solve (dark green) in each column, ordinary accepts with and without
+     * prior attempts, a tried-and-failed cell, and columns nobody has touched.
+     */
     private LeaderboardDto fakeBoard() {
         List<String> codes = List.of("A", "B", "C");
         List<LeaderboardRowDto> rows = List.of(
                 row(1, "bob", "Bob", 3, 178,
-                        cell("A", true, 0, 12), cell("B", true, 1, 44), cell("C", true, 2, 82)),
+                        ac("A", 0, 12, false), ac("B", 1, 44, true), ac("C", 2, 82, true)),
                 row(2, "alice", "Alice", 2, 96,
-                        cell("A", true, 0, 16), cell("B", true, 2, 40), cell("C", false, 3, -1)),
+                        ac("A", 0, 16, false), ac("B", 2, 40, false), tried("C", 3)),
                 row(3, "carol", "Carol", 1, 21,
-                        cell("A", true, 1, 1), cell("B", false, 0, -1), cell("C", false, 0, -1)));
+                        ac("A", 1, 1, true), untouched("B"), untouched("C")));
         return new LeaderboardDto(1, false, System.currentTimeMillis(), codes, rows);
     }
 
@@ -217,8 +222,18 @@ public class FakeJudgeApi implements JudgeApi {
         return new LeaderboardRowDto(rank, user, display, solved, penalty, List.of(cells));
     }
 
-    private static LeaderboardCellDto cell(String code, boolean solved, int failed, long at) {
-        return new LeaderboardCellDto(code, solved, failed, at);
+    /** Accepted at {@code atMinutes}, with a few seconds of jitter so the clock reads real. */
+    private static LeaderboardCellDto ac(String code, int failed, long atMinutes, boolean first) {
+        return new LeaderboardCellDto(code, true, failed, atMinutes,
+                atMinutes * 60 + (atMinutes % 47), first);
+    }
+
+    private static LeaderboardCellDto tried(String code, int failed) {
+        return new LeaderboardCellDto(code, false, failed, -1, -1, false);
+    }
+
+    private static LeaderboardCellDto untouched(String code) {
+        return new LeaderboardCellDto(code, false, 0, -1, -1, false);
     }
 
     @Override
@@ -273,6 +288,11 @@ public class FakeJudgeApi implements JudgeApi {
             }
         }, 4, TimeUnit.SECONDS);
         return asked;
+    }
+
+    @Override
+    public boolean clarificationPrivacyAllowed(long contestId) {
+        return true;   // mock mode always offers the private option
     }
 
     @Override

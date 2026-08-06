@@ -112,6 +112,8 @@ public class LeaderboardService {
             tally.accept(s, start);
         }
 
+        Map<Long, Long> firstSolverByProblem = firstSolvers(byUser);
+
         List<LeaderboardRowDto> rows = new ArrayList<>();
         for (Map.Entry<Long, Map<Long, Tally>> e : byUser.entrySet()) {
             User user = userById.get(e.getKey());
@@ -126,7 +128,7 @@ public class LeaderboardService {
             for (Map.Entry<Long, String> p : problemCode.entrySet()) {
                 Tally t = e.getValue().get(p.getKey());
                 if (t == null) {
-                    cells.add(new LeaderboardCellDto(p.getValue(), false, 0, -1));
+                    cells.add(new LeaderboardCellDto(p.getValue(), false, 0, -1, -1, false));
                     continue;
                 }
                 penalty += t.manualDelta;
@@ -135,9 +137,13 @@ public class LeaderboardService {
                     penalty += t.solvedAtMinutes + (long) PENALTY_PER_REJECT * t.rejectsBeforeAc;
                     lastAcceptedAt = Math.max(lastAcceptedAt, t.solvedAtMinutes);
                 }
+                boolean first = t.solved
+                        && e.getKey().equals(firstSolverByProblem.get(p.getKey()));
                 cells.add(new LeaderboardCellDto(p.getValue(), t.solved,
                         t.solved ? t.rejectsBeforeAc : t.rejects,
-                        t.solved ? t.solvedAtMinutes : -1));
+                        t.solved ? t.solvedAtMinutes : -1,
+                        t.solved ? t.solvedAtSeconds : -1,
+                        first));
             }
             penalty = Math.max(0, penalty);
             rows.add(new LeaderboardRowDto(0, user.getUsername(), user.getDisplayName(),
@@ -172,6 +178,42 @@ public class LeaderboardService {
                 ranked);
     }
 
+    /**
+     * Who took each problem down first — problemId to userId.
+     *
+     * Decided on the exact accepted instant rather than the displayed minute,
+     * because two contestants solving inside the same minute is ordinary and
+     * would otherwise both light up as "first". A genuine dead heat (identical
+     * instant) falls back to the lower user id purely so the board is stable
+     * between refreshes instead of flickering between two equally valid answers.
+     *
+     * Fed the same post-freeze-filter tallies the rows are built from, so a
+     * frozen board never reveals a first solve the rest of it is hiding.
+     */
+    private static Map<Long, Long> firstSolvers(Map<Long, Map<Long, Tally>> byUser) {
+        Map<Long, Long> owner = new LinkedHashMap<>();
+        Map<Long, Instant> earliest = new LinkedHashMap<>();
+        for (Map.Entry<Long, Map<Long, Tally>> user : byUser.entrySet()) {
+            long userId = user.getKey();
+            for (Map.Entry<Long, Tally> p : user.getValue().entrySet()) {
+                Tally t = p.getValue();
+                if (!t.solved || t.acceptedAt == null) {
+                    continue;
+                }
+                long problemId = p.getKey();
+                Instant best = earliest.get(problemId);
+                boolean wins = best == null
+                        || t.acceptedAt.isBefore(best)
+                        || (t.acceptedAt.equals(best) && userId < owner.get(problemId));
+                if (wins) {
+                    earliest.put(problemId, t.acceptedAt);
+                    owner.put(problemId, userId);
+                }
+            }
+        }
+        return owner;
+    }
+
     /** BR-04: CE never adds penalty. Everything else rejected does. */
     static boolean countsTowardPenalty(Verdict verdict) {
         return verdict != Verdict.AC && verdict != Verdict.CE;
@@ -182,6 +224,9 @@ public class LeaderboardService {
 
         boolean solved;
         long solvedAtMinutes = -1;
+        long solvedAtSeconds = -1;
+        /** Exact instant of the accepted submission — only for ordering first solves. */
+        Instant acceptedAt;
         int rejects;            // all rejected attempts (for the unsolved display)
         int rejectsBeforeAc;    // only those before the first AC — what FR-18 charges
         int manualDelta;
@@ -195,10 +240,12 @@ public class LeaderboardService {
             if (s.getVerdict() == Verdict.AC) {
                 solved = true;
                 rejectsBeforeAc = rejects;
+                acceptedAt = s.getQueuedAt();
                 // FR-18 charges the SUBMISSION time, not when judging finished —
                 // a slow judge must never cost a contestant penalty minutes.
-                long minutes = Duration.between(contestStart, s.getQueuedAt()).toMinutes();
-                solvedAtMinutes = Math.max(0, minutes);
+                Duration elapsed = Duration.between(contestStart, s.getQueuedAt());
+                solvedAtMinutes = Math.max(0, elapsed.toMinutes());
+                solvedAtSeconds = Math.max(0, elapsed.getSeconds());
             } else if (countsTowardPenalty(s.getVerdict())) {
                 rejects++;
             }

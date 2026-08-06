@@ -19,6 +19,7 @@ import com.arbitrator.common.dto.SubmissionTestsDto;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.common.dto.TestCaseResultDto;
+import com.arbitrator.common.enums.CheckerType;
 import com.arbitrator.common.enums.Verdict;
 import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.entity.Problem;
@@ -172,6 +173,23 @@ public class SubmissionService {
             return SubmissionTestsDto.hidden(submissionId, passed, total);
         }
 
+        // A checker-graded problem may accept more than one valid output, so
+        // "the" expected output shown next to the participant's is not just a
+        // data leak, it's actively misleading. A contestant gets a one-line
+        // pass/fail summary instead; the instructor still sees the raw tests
+        // below, unchanged, to debug the checker itself (same "always visible
+        // to admins" rule the contest toggle above already follows).
+        if (!admin) {
+            Problem problem = problems.findById(s.getProblemId()).orElseThrow(() ->
+                    new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
+            if (problem.getCheckerType() == CheckerType.CUSTOM) {
+                String summary = s.getVerdict() == Verdict.AC
+                        ? "All outputs match."
+                        : "Participant's output does not match the correct output.";
+                return new SubmissionTestsDto(submissionId, true, passed, total, List.of(), summary);
+            }
+        }
+
         // Keyed by test index so a submission judged twice — crash recovery
         // requeues anything not DONE — yields one row per test, the latest.
         Map<Integer, TestCaseResultDto> byIndex = new LinkedHashMap<>();
@@ -203,7 +221,7 @@ public class SubmissionService {
         }, s.getProblemId(), submissionId);
 
         return new SubmissionTestsDto(submissionId, true, passed, total,
-                List.copyOf(byIndex.values()));
+                List.copyOf(byIndex.values()), null);
     }
 
     private static Verdict parseVerdict(String name) {

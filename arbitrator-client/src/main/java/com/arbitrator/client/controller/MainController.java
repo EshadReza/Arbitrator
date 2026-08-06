@@ -35,12 +35,14 @@ import javafx.scene.control.TabPane;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.transform.Scale;
 import javafx.scene.web.WebView;
 import javafx.util.Duration;
 
@@ -54,6 +56,9 @@ import javafx.util.Duration;
 public class MainController {
 
     @FXML private StackPane rootStack;
+    /** Everything except the overlay layer; this is what zoom scales. */
+    @FXML private BorderPane contentRoot;
+    @FXML private Label zoomLabel;
     @FXML private TabPane tabs;
     @FXML private Label contestTitleLabel;
     @FXML private Label timerLabel;
@@ -150,23 +155,94 @@ public class MainController {
         Platform.runLater(this::installShortcuts);
     }
 
-    private double currentZoomScale = 1.0;
+    /**
+     * Zoom steps, browser-style. A fixed ladder rather than "current ± 0.1":
+     * with a free-running delta, mixing Ctrl+scroll (a small step) and
+     * Ctrl+plus (a larger one) leaves you on values like 1.05 that no number
+     * of further steps ever lands back on exactly 1.0, so the UI could not be
+     * returned to true 100% without the reset shortcut nobody knows about.
+     * Every level here is reachable in both directions and 100 is one of them.
+     */
+    private static final int[] ZOOM_LEVELS = { 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 };
 
-    private void changeZoom(double delta) {
-        currentZoomScale = Math.max(0.75, Math.min(1.75, currentZoomScale + delta));
-        applyZoom();
+    /** Index into {@link #ZOOM_LEVELS}; starts on 100%. */
+    private int zoomIndex = 5;
+
+    /** Applied to contentRoot with a 0,0 pivot so scaling grows right/down. */
+    private final Scale zoomScale = new Scale(1, 1);
+
+    private void changeZoom(int steps) {
+        int next = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, zoomIndex + steps));
+        if (next != zoomIndex) {
+            zoomIndex = next;
+            applyZoom();
+        }
     }
 
     private void resetZoom() {
-        currentZoomScale = 1.0;
+        zoomIndex = 5;                      // ZOOM_LEVELS[5] == 100
         applyZoom();
     }
 
+    @FXML private void onZoomIn()    { changeZoom(+1); }
+    @FXML private void onZoomOut()   { changeZoom(-1); }
+    @FXML private void onZoomReset() { resetZoom(); }
+
+    /**
+     * A real zoom, not a visual one.
+     *
+     * The old implementation set scaleX/scaleY on the root. That is a render
+     * transform: it stretches the finished picture without telling the layout
+     * anything, so the content kept the size of the unzoomed window — zooming
+     * out shrank the whole UI away from the window edges and left a border of
+     * dead background around it, and zooming in pushed it past those edges
+     * where it was simply clipped and unreachable. Exactly the "whitespace
+     * outwards / doesn't fit anymore" this replaces.
+     *
+     * Scaling by z while laying the content out at (window / z) gives the
+     * browser behaviour instead: everything is drawn z times larger AND the
+     * content still occupies exactly the window, so it reflows into the space
+     * rather than overflowing it. Panels re-divide, tables re-measure, and
+     * nothing is left stranded off-screen.
+     */
     private void applyZoom() {
-        if (rootStack != null) {
-            rootStack.setScaleX(currentZoomScale);
-            rootStack.setScaleY(currentZoomScale);
+        double z = ZOOM_LEVELS[zoomIndex] / 100.0;
+        zoomScale.setX(z);
+        zoomScale.setY(z);
+        if (contentRoot != null && rootStack.getWidth() > 0) {
+            // The compensating half: lay out in logical pixels that the scale
+            // then multiplies back up to exactly the real window size.
+            //
+            // min AND max, not just pref: contentRoot's parent is a StackPane,
+            // which resizes every child to fill itself and treats pref as a
+            // suggestion it is free to ignore — which it did, so the content
+            // stayed window-sized and the scale shrank it away from the edges.
+            // Pinning min == pref == max leaves the StackPane no choice.
+            double logicalWidth = rootStack.getWidth() / z;
+            double logicalHeight = rootStack.getHeight() / z;
+            contentRoot.setMinSize(logicalWidth, logicalHeight);
+            contentRoot.setPrefSize(logicalWidth, logicalHeight);
+            contentRoot.setMaxSize(logicalWidth, logicalHeight);
         }
+        if (zoomLabel != null) {
+            zoomLabel.setText(ZOOM_LEVELS[zoomIndex] + "%");
+        }
+    }
+
+    /** Hooks the zoom transform up once the scene exists. */
+    private void installZoom() {
+        // Anchor top-left: a StackPane centres its children, so an
+        // above-100% layout (wider than the window by design) would be
+        // centred on negative coordinates and lose its left edge off-screen,
+        // while the scale pivot below expands from 0,0.
+        StackPane.setAlignment(contentRoot, Pos.TOP_LEFT);
+        contentRoot.getTransforms().add(zoomScale);
+        // Re-derive the logical size on every window resize, or the content
+        // keeps the size computed for the previous window and the zoom stops
+        // matching the frame.
+        rootStack.widthProperty().addListener((o, a, b) -> applyZoom());
+        rootStack.heightProperty().addListener((o, a, b) -> applyZoom());
+        applyZoom();
     }
 
     private void installShortcuts() {
@@ -183,22 +259,24 @@ public class MainController {
                 this::onToggleStatementFullscreen);
         accelerators.put(new KeyCodeCombination(KeyCode.R, KeyCombination.CONTROL_DOWN),
                 this::onRefresh);
-        accelerators.put(new KeyCodeCombination(KeyCode.EQUALS, KeyCombination.CONTROL_DOWN), () -> changeZoom(0.1));
-        accelerators.put(new KeyCodeCombination(KeyCode.ADD, KeyCombination.CONTROL_DOWN), () -> changeZoom(0.1));
-        accelerators.put(new KeyCodeCombination(KeyCode.MINUS, KeyCombination.CONTROL_DOWN), () -> changeZoom(-0.1));
-        accelerators.put(new KeyCodeCombination(KeyCode.SUBTRACT, KeyCombination.CONTROL_DOWN), () -> changeZoom(-0.1));
+        accelerators.put(new KeyCodeCombination(KeyCode.EQUALS, KeyCombination.CONTROL_DOWN), () -> changeZoom(+1));
+        accelerators.put(new KeyCodeCombination(KeyCode.ADD, KeyCombination.CONTROL_DOWN), () -> changeZoom(+1));
+        accelerators.put(new KeyCodeCombination(KeyCode.MINUS, KeyCombination.CONTROL_DOWN), () -> changeZoom(-1));
+        accelerators.put(new KeyCodeCombination(KeyCode.SUBTRACT, KeyCombination.CONTROL_DOWN), () -> changeZoom(-1));
         accelerators.put(new KeyCodeCombination(KeyCode.DIGIT0, KeyCombination.CONTROL_DOWN), this::resetZoom);
 
         scene.setOnScroll(event -> {
             if (event.isControlDown()) {
                 if (event.getDeltaY() > 0) {
-                    changeZoom(0.05);
+                    changeZoom(+1);
                 } else if (event.getDeltaY() < 0) {
-                    changeZoom(-0.05);
+                    changeZoom(-1);
                 }
                 event.consume();
             }
         });
+
+        installZoom();
     }
 
     // --- layout: collapse and fullscreen -----------------------------------

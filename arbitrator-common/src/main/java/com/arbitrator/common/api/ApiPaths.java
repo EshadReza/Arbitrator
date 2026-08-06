@@ -50,6 +50,10 @@ public final class ApiPaths {
     public static final String ADMIN_PROBLEM_UPLOAD = "/api/admin/problems/upload"; // POST multipart
     /** GET the full problem for editing, PUT the edits back, DELETE to remove. */
     public static final String ADMIN_PROBLEM_BY_ID = "/api/admin/problems/{id}";
+    /** Re-upload just the PDF statement, replacing whatever was there before. */
+    public static final String ADMIN_PROBLEM_STATEMENT_PDF = "/api/admin/problems/{id}/statement.pdf";
+    /** Resequences a contest's problems; codes are recomputed A, B, C... to match. */
+    public static final String ADMIN_PROBLEM_REORDER = "/api/admin/contests/{id}/problems/reorder";
     public static final String ADMIN_PARTICIPANTS = "/api/admin/contests/{id}/participants";
     public static final String ADMIN_CONTEST_SUBMISSIONS = "/api/admin/contests/{id}/submissions";
     public static final String ADMIN_SUBMISSION_SOURCE = "/api/admin/submissions/{id}/source";
@@ -64,6 +68,12 @@ public final class ApiPaths {
     /** Toggle whether contestants may see the tests behind their verdicts. */
     public static final String ADMIN_CONTEST_TEST_VISIBILITY =
             "/api/admin/contests/{id}/test-visibility";
+    /** Toggle whether an asker may mark a clarification private in this contest. */
+    public static final String ADMIN_CONTEST_CLARIFICATION_PRIVACY =
+            "/api/admin/contests/{id}/clarification-privacy";
+    /** Same toggle, read-only, reachable by a contestant (not loopback/admin-gated). */
+    public static final String CONTEST_CLARIFICATION_PRIVACY =
+            "/api/contests/{id}/clarification-privacy";
     public static final String ADMIN_SUBMISSION_TESTS = "/api/admin/submissions/{id}/tests";
     /** This machine's LAN addresses — what the instructor reads out to the room. */
     public static final String ADMIN_SERVER_INFO = "/api/admin/server";

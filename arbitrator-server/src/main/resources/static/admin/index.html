@@ -96,6 +96,8 @@ tr:last-child td{border-bottom:none}
 tbody tr:hover{background:var(--surface2)}
 tr.sel{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .empty{color:var(--muted);text-align:center;padding:22px}
+.drag-handle{cursor:grab;color:var(--muted);letter-spacing:-2px;user-select:none;text-align:center}
+tr.drag-row.dragging{opacity:.35}
 
 /* ── verdict colours (mirrors the client) ────────────────────────────────── */
 .v-AC{color:var(--green);font-weight:700}
@@ -269,6 +271,26 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
         </div>
       </div>
 
+      <div class="card">
+        <header>Private clarifications <span class="spacer"></span>
+          <span class="badge" id="cpBadge">—</span></header>
+        <div class="body">
+          <label class="opt" style="padding:0">
+            <input type="checkbox" id="cpCheck" onchange="setClarificationPrivacy(this.checked)">
+            <span><b>Let participants mark a question private</b>
+              <span class="d">Applies to the selected contest, immediately.</span></span>
+          </label>
+          <p class="hint" style="margin-top:10px">
+            When ticked, a participant asking a clarification can choose to keep it between
+            themselves and you instead of posting it to the public board.
+          </p>
+          <p class="hint" style="margin-top:8px">
+            Switching this off does not touch clarifications already asked — it only forces
+            every <b>new</b> question public, regardless of what the asker requests.
+          </p>
+        </div>
+      </div>
+
       <div class="card" id="cardLobbyCountdown">
         <header>Lobby Start Countdown</header>
         <div class="body">
@@ -307,8 +329,8 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
         <header>In this contest <span class="spacer"></span>
           <button class="btn sm" onclick="listProblems()">⟳ Refresh</button></header>
         <div class="body" style="padding:0">
-          <table id="pTable"><thead><tr><th style="width:70px">Code</th><th>Title</th>
-            <th style="width:110px"></th></tr></thead><tbody></tbody></table>
+          <table id="pTable"><thead><tr><th style="width:28px"></th><th style="width:70px">Code</th><th>Title</th>
+            <th style="width:130px"></th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="card">
@@ -451,6 +473,19 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
   </main>
 </div>
 
+<div class="modal hide" id="confirmModal">
+  <div class="card">
+    <header><span id="confirmTitle">Confirm</span></header>
+    <div class="body">
+      <p id="confirmMessage" style="margin:0 0 16px 0"></p>
+      <div class="row" style="justify-content:flex-end;gap:8px">
+        <button class="btn sm" onclick="resolveConfirm(false)">Cancel</button>
+        <button class="btn sm danger" onclick="resolveConfirm(true)">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal hide" id="sourceModal">
   <div class="card wide">
     <header>
@@ -499,11 +534,25 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
         <input type="number" id="peMem" min="1024" step="1024" style="width:130px" title="memory limit (KB)">
         <span class="hint">KB</span>
       </div>
-      <div class="hint" style="margin-bottom:5px">Statement (HTML — exactly what the client renders)</div>
-      <textarea id="peStatement" spellcheck="false"
-                style="width:100%;height:340px;padding:11px;border:1px solid var(--border);
-                       border-radius:8px;background:var(--surface2);resize:vertical;
-                       font:12px/1.5 ui-monospace,Menlo,monospace;tab-size:2"></textarea>
+      <div id="peStatementSection">
+        <div class="hint" style="margin-bottom:5px">Statement (HTML — exactly what the client renders)</div>
+        <textarea id="peStatement" spellcheck="false"
+                  style="width:100%;height:340px;padding:11px;border:1px solid var(--border);
+                         border-radius:8px;background:var(--surface2);resize:vertical;
+                         font:12px/1.5 ui-monospace,Menlo,monospace;tab-size:2"></textarea>
+      </div>
+      <div id="pePdfSection" class="hide">
+        <div class="hint" style="margin-bottom:5px">Statement is a PDF</div>
+        <div class="row">
+          <input type="file" id="pePdfFile" accept=".pdf">
+          <button class="btn sm" onclick="replaceStatementPdf()">Replace PDF</button>
+        </div>
+        <p class="hint" style="margin-top:8px">
+          Uploading here replaces the current PDF for every client immediately. Test data, the
+          checker and the limits above are untouched — only the statement bytes change.
+        </p>
+        <p class="hint" id="pePdfStatus" style="margin-top:8px"></p>
+      </div>
       <p class="hint" style="margin-top:10px">
         Test data is not touched here — only the wording and the limits. Saving reaches every
         connected client at once, so a correction mid-contest does not need anyone to sign out.
@@ -560,7 +609,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
 
 <script>
 let token=null, selected=null, state=null, tick=null, monitorTick=null, serverInfo=null;
-let currentSourceId=null, testVisibility=false, stateTick=null, polling=false;
+let currentSourceId=null, testVisibility=false, clarificationPrivacy=true, stateTick=null, polling=false;
 const $=id=>document.getElementById(id);
 const two=n=>String(n).padStart(2,'0');
 const clock=ms=>{ if(ms==null||ms<0) return '—';
@@ -620,7 +669,8 @@ async function loadContests(){
   const {body}=await api('GET','/api/admin/contests');
   if(!Array.isArray(body)) return;
   $('cTable').querySelector('tbody').innerHTML = body.length? body.map(c=>`
-    <tr class="${c.id===selected?'sel':''}">
+    <tr class="${c.id===selected?'sel':''}" style="cursor:pointer"
+        onclick="if(!event.target.closest('input,button'))selectContest(${c.id})">
       <td><input type="radio" name="csel" ${c.id===selected?'checked':''} onchange="selectContest(${c.id})"></td>
       <td><b>${esc(c.title)}</b></td>
       <td><span class="badge b-${c.state}">${c.state}</span></td>
@@ -640,7 +690,7 @@ async function selectContest(id){
 }
 
 async function deleteContest(id,title){
-  if(!confirm(`Permanently delete contest "${title}" along with all its problems, test cases, and submissions?`)) return;
+  if(!(await showConfirm(`Permanently delete contest "${title}" along with all its problems, test cases, and submissions?`))) return;
   const {status}=await api('DELETE','/api/admin/contests/'+id);
   if(status<300){
     log(200,`Deleted contest "${title}"`);
@@ -671,6 +721,7 @@ async function refreshSelected(){
   const cardLobby = $('cardLobbyCountdown');
   if (cardLobby) cardLobby.classList.toggle('disabled', started);
   loadTestVisibility();
+  loadClarificationPrivacy();
   paintClocks();
 }
 
@@ -744,7 +795,7 @@ function extendBy(sign){
   if(!n){ log(400,'Enter a number of minutes first'); return; }
   extend(sign*n);
 }
-function confirmEnd(){ if(confirm('End this contest? Submissions are refused from now on.')) act('end'); }
+async function confirmEnd(){ if(await showConfirm('End this contest? Submissions are refused from now on.')) act('end'); }
 
 async function createContest(){
   const title=$('newTitle').value.trim();
@@ -754,17 +805,81 @@ async function createContest(){
   if(status<300){ $('newTitle').value=''; selected=body.id; await loadContests(); }
 }
 
+/** Order as last fetched — dragging reshuffles this before posting it back. */
+let currentProblems=[];
+let dragProblemId=null;
+
 async function listProblems(){
   const path = selected != null ? `/api/admin/problems?contestId=${selected}` : '/api/admin/problems';
   const {body}=await api('GET',path);
+  currentProblems = Array.isArray(body) ? body : [];
   $('pTable').querySelector('tbody').innerHTML =
-    Array.isArray(body)&&body.length ? body.map(p=>`<tr>
+    currentProblems.length ? currentProblems.map(p=>`<tr draggable="true" data-id="${p.id}" class="drag-row">
+        <td class="drag-handle" title="Drag to reorder">&#8942;&#8942;</td>
         <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
         <td style="white-space:nowrap">
           <button class="btn sm" onclick="editProblem(${p.id})">Edit</button>
           <button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
       </tr>`).join('')
-    : '<tr><td colspan="3" class="empty">No problems yet — upload a package below.</td></tr>';
+    : '<tr><td colspan="4" class="empty">No problems yet — upload a package below.</td></tr>';
+  wireProblemDragAndDrop();
+}
+
+/**
+ * HTML5 drag-and-drop over the row list: dragstart remembers which problem
+ * is moving, dragover on another row previews the drop by reordering
+ * currentProblems (and re-rendering) live, and drop posts whatever order
+ * that live preview settled on. Codes are always the alphabetic position, so
+ * a reorder re-letters everyone on the server side.
+ */
+function wireProblemDragAndDrop(){
+  const rows=$('pTable').querySelectorAll('tbody tr.drag-row');
+  rows.forEach(row=>{
+    row.addEventListener('dragstart',()=>{
+      dragProblemId=Number(row.dataset.id);
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend',()=>row.classList.remove('dragging'));
+    row.addEventListener('dragover',e=>{
+      e.preventDefault();
+      const overId=Number(row.dataset.id);
+      if(dragProblemId==null||overId===dragProblemId) return;
+      const from=currentProblems.findIndex(p=>p.id===dragProblemId);
+      const to=currentProblems.findIndex(p=>p.id===overId);
+      if(from<0||to<0||from===to) return;
+      const [moved]=currentProblems.splice(from,1);
+      currentProblems.splice(to,0,moved);
+      renderProblemRows();
+    });
+    row.addEventListener('drop',async e=>{
+      e.preventDefault();
+      const ids=currentProblems.map(p=>p.id);
+      const res=await fetch(`/api/admin/contests/${selected}/problems/reorder`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+        body:JSON.stringify(ids)});
+      if(res.ok){
+        log(200,'Problem order updated');
+        await listProblems();
+      } else {
+        const err=await res.json().catch(()=>({}));
+        log(res.status, err.message||'Reorder failed');
+        await listProblems();
+      }
+    });
+  });
+}
+
+/** Redraws rows from the in-memory order during a drag, without a round trip. */
+function renderProblemRows(){
+  $('pTable').querySelector('tbody').innerHTML = currentProblems.map(p=>`<tr draggable="true" data-id="${p.id}" class="drag-row">
+      <td class="drag-handle" title="Drag to reorder">&#8942;&#8942;</td>
+      <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" onclick="editProblem(${p.id})">Edit</button>
+        <button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
+    </tr>`).join('');
+  wireProblemDragAndDrop();
 }
 
 /* Editing a statement used to mean deleting the problem and re-uploading the
@@ -781,7 +896,30 @@ async function editProblem(id){
   $('peMem').value=body.memoryLimitKb||'';
   $('peStatement').value=body.statementHtml||'';
   $('peStatus').textContent='';
+  $('pePdfStatus').textContent='';
+  $('pePdfFile').value='';
+  const isPdf=!!body.pdfStatement;
+  $('peStatementSection').classList.toggle('hide',isPdf);
+  $('pePdfSection').classList.toggle('hide',!isPdf);
   openModal('problemModal');
+}
+
+async function replaceStatementPdf(){
+  if(editingProblemId==null) return;
+  const input=$('pePdfFile');
+  if(!input.files.length){ $('pePdfStatus').textContent='Choose a PDF file first.'; return; }
+  const form=new FormData(); form.append('file',input.files[0]);
+  const res=await fetch(`/api/admin/problems/${editingProblemId}/statement.pdf`,
+    {method:'POST',headers:token?{Authorization:'Bearer '+token}:{},body:form});
+  const body=await res.json().catch(()=>({}));
+  if(res.ok){
+    $('pePdfStatus').textContent='PDF replaced — clients updated.';
+    log(200,'Problem PDF statement replaced');
+    input.value='';
+  } else {
+    $('pePdfStatus').textContent=body.message||('Replace failed (HTTP '+res.status+')');
+    log(res.status, body.message||'PDF replace failed');
+  }
 }
 
 async function saveProblem(){
@@ -810,7 +948,7 @@ async function saveProblem(){
 }
 
 async function delProblem(id,code){
-  if(!confirm(`Delete problem ${code}? This cannot be undone.`)) return;
+  if(!(await showConfirm(`Delete problem ${code}? This cannot be undone.`))) return;
   await api('DELETE','/api/admin/problems/'+id); await listProblems(); await loadContests();
 }
 
@@ -1076,7 +1214,7 @@ async function publishAnnouncement(){
   if(selected==null){ log(400,'Select a contest first'); return; }
   const body=$('annBody').value.trim();
   if(!body){ $('annStatus').textContent='Write something first.'; return; }
-  if(!confirm('Publish this to every participant? It pops up on their screen immediately.')) return;
+  if(!(await showConfirm('Publish this to every participant? It pops up on their screen immediately.'))) return;
 
   const btn=$('annPublish'); btn.disabled=true; $('annStatus').textContent='Publishing\u2026';
   const res=await fetch(`/api/admin/contests/${selected}/announcements`,{
@@ -1099,21 +1237,17 @@ async function loadAnnouncements(){
   if(selected==null) return;
   const {status,body}=await api('GET',`/api/admin/contests/${selected}/announcements`,null,true);
   if(status>=300||!Array.isArray(body)) return;
+  /* No delete control: an announcement has already popped up on every screen
+     in the room by the time it is listed here, so removing the record only
+     makes the console disagree with what participants were actually told.
+     The REST endpoint still exists for a genuine mistake. */
   $('annList').innerHTML = body.length ? body.map(a=>`
     <div style="border:1px solid var(--border);border-radius:8px;padding:11px;margin-bottom:10px">
       <div class="row" style="margin-bottom:6px">
         <span class="hint">${esc(new Date(a.createdAtMs).toLocaleString())}</span>
-        <span class="spacer"></span>
-        <button class="btn sm danger" onclick="deleteAnnouncement(${a.id})">Delete</button>
       </div>
       <div>${a.body}</div>
     </div>`).join('') : '<div class="empty">Nothing published yet.</div>';
-}
-
-async function deleteAnnouncement(id){
-  if(!confirm('Delete this announcement? Participants who already saw it keep what they read.')) return;
-  const {status}=await api('DELETE','/api/admin/announcements/'+id);
-  if(status<300) await loadAnnouncements();
 }
 
 /* \u2500\u2500 clarifications \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
@@ -1396,7 +1530,34 @@ MODALS.forEach(id=>{
   const el=$(id);
   if(el) el.addEventListener('click',e=>{ if(e.target===el) closeModal(id); });
 });
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') MODALS.forEach(closeModal); });
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  if(!$('confirmModal').classList.contains('hide')){ resolveConfirm(false); return; }
+  MODALS.forEach(closeModal);
+});
+
+/**
+ * In-page replacement for window.confirm(). Native confirm() is fragile in
+ * a way that reads as a silent bug: Chrome auto-suppresses it (returns false
+ * with no dialog at all) after a page has shown a few in quick succession —
+ * exactly the "I clicked Delete and nothing happened" symptom, with nothing
+ * in the UI to explain why. This can never be silently suppressed by the
+ * browser because it is not a native dialog — it is ordinary DOM the page
+ * already draws.
+ */
+let confirmResolver=null;
+function showConfirm(message){
+  $('confirmMessage').textContent=message;
+  openModal('confirmModal');
+  return new Promise(resolve=>{ confirmResolver=resolve; });
+}
+function resolveConfirm(result){
+  closeModal('confirmModal');
+  if(confirmResolver){ const r=confirmResolver; confirmResolver=null; r(result); }
+}
+$('confirmModal').addEventListener('click',e=>{
+  if(e.target===$('confirmModal')) resolveConfirm(false);
+});
 
 async function viewSource(id){
   const {status,body}=await api('GET','/api/admin/submissions/'+id+'/source');
@@ -1504,6 +1665,38 @@ async function setTestVisibility(wanted){
                           : 'Test cases hidden from participants');
   } else {
     paintTestVisibility(testVisibility);
+  }
+}
+
+/* ── whether askers may mark a clarification private ──────────────────────── */
+
+async function loadClarificationPrivacy(){
+  if(selected==null) return;
+  const {status,body}=await api('GET',`/api/admin/contests/${selected}/clarification-privacy`,null,true);
+  if(status===404) return;   // stale-server badge is already owned by test-visibility
+  if(status>=300||!body) return;
+  $('cpCheck').disabled=false;
+  paintClarificationPrivacy(!!body.allowed);
+}
+
+function paintClarificationPrivacy(on){
+  clarificationPrivacy=on;
+  $('cpCheck').checked=on;
+  const badge=$('cpBadge');
+  badge.textContent = on ? 'ALLOWED' : 'PUBLIC ONLY';
+  badge.className   = 'badge ' + (on ? 'b-ACTIVE' : 'b-ENDED');
+}
+
+async function setClarificationPrivacy(wanted){
+  if(selected==null){ paintClarificationPrivacy(clarificationPrivacy); return; }
+  const {status,body}=await api('POST',
+    `/api/admin/contests/${selected}/clarification-privacy`,{allowed:!!wanted});
+  if(status<300&&body){
+    paintClarificationPrivacy(!!body.allowed);
+    log(200, body.allowed ? 'Participants can now ask private clarifications'
+                          : 'Clarifications are public-only from now on');
+  } else {
+    paintClarificationPrivacy(clarificationPrivacy);
   }
 }
 </script>

@@ -138,6 +138,17 @@ public class Contest {
     @Column(name = "show_test_cases", nullable = false)
     private boolean showTestCases = false;
 
+    /**
+     * Per-contest kill switch (V61): may an asker mark a clarification
+     * private, or does every question in this contest go to the public
+     * board? On by default — the option existed unconditionally before this
+     * toggle did, so an untouched contest keeps behaving the way it always
+     * has. Enforced in ClarificationService.ask(), never trusted from the
+     * client's own checkbox state.
+     */
+    @Column(name = "allow_private_clarifications", nullable = false)
+    private boolean allowPrivateClarifications = true;
+
     public Instant getEndedAt() {
         return endedAt;
     }
@@ -152,6 +163,14 @@ public class Contest {
 
     public void setShowTestCases(boolean showTestCases) {
         this.showTestCases = showTestCases;
+    }
+
+    public boolean isAllowPrivateClarifications() {
+        return allowPrivateClarifications;
+    }
+
+    public void setAllowPrivateClarifications(boolean allowPrivateClarifications) {
+        this.allowPrivateClarifications = allowPrivateClarifications;
     }
 
     public Instant getFrozenAt() {

@@ -67,6 +67,9 @@ public interface JudgeApi extends AutoCloseable {
     ClarificationDto askClarification(Long problemId, long contestId, String question,
                                       boolean isPublic) throws ApiException;
 
+    /** Whether this contest lets an asker mark a clarification private (V61). */
+    boolean clarificationPrivacyAllowed(long contestId) throws ApiException;
+
     SubmitAckDto submit(SubmitRequest request) throws ApiException;
 
     /** Run against custom input without submitting — never judged or stored. */

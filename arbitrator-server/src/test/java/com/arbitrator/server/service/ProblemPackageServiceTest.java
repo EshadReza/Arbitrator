@@ -241,16 +241,22 @@ class ProblemPackageServiceTest {
         assertTrue(r.errors().stream().anyMatch(e -> e.contains("timeLimitMs")));
     }
 
+    /**
+     * "code" no longer comes from config.json at all — it is always the
+     * problem's alphabetic position among the contest's problems, so a
+     * second upload can never collide with the first regardless of what (if
+     * anything) config.json says.
+     */
     @Test
-    void duplicateProblemCodeInSameContestIsRejected() {
+    void codeIsAlwaysTheNextAlphabeticPositionRegardlessOfConfigJson() {
         Problem existing = new Problem();
         existing.setCode("A");
         existing.setTitle("Already here");
         existingProblems.add(existing);
 
         ProblemPackageResultDto r = service.importPackage(validZip());
-        assertFalse(r.accepted());
-        assertTrue(r.errors().stream().anyMatch(e -> e.contains("already exists")));
+        assertTrue(r.accepted(), () -> "expected import, got: " + r.errors());
+        assertEquals("B", r.code());
     }
 
     @Test

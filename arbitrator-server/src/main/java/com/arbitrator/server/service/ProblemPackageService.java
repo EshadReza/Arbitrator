@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,9 +13,11 @@ import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -116,16 +119,14 @@ public class ProblemPackageService {
                     List.of("config.json is not valid JSON: " + e.getMessage()));
         }
 
-        String code = text(config, "code");
+        // "code" is deliberately not read here — a problem's code is always
+        // its alphabetic position (A, B, C...) among the contest's problems,
+        // assigned below and kept in sync by reorder(). A code in config.json
+        // from an older package is simply ignored, not an error.
         String title = text(config, "title");
         int timeLimitMs = config.path("timeLimitMs").asInt(2000);
         int memoryLimitKb = config.path("memoryLimitKb").asInt(262144);
 
-        if (code == null || code.isBlank()) {
-            errors.add("config.json: \"code\" is required (e.g. \"A\")");
-        } else if (code.length() > 8) {
-            errors.add("config.json: \"code\" must be at most 8 characters");
-        }
         if (title == null || title.isBlank()) {
             errors.add("config.json: \"title\" is required");
         }
@@ -192,33 +193,29 @@ public class ProblemPackageService {
             }
         }
 
-        // --- uniqueness within the contest ---
         long contestId = (targetContestId != null) ? targetContestId : contestService.requireCurrent().getId();
-        if (code != null && !code.isBlank()
-                && problems.findByContestIdOrderByOrderingAscCodeAsc(contestId).stream()
-                        .anyMatch(p -> p.getCode().equalsIgnoreCase(code.trim()))) {
-            errors.add("Problem code \"" + code.trim()
-                    + "\" already exists in this contest — delete it first or use another code");
-        }
 
         if (!errors.isEmpty()) {
             return ProblemPackageResultDto.rejected(errors);
         }
 
         // --- persist (only now that everything validated) ---
+        int ordering = problems.findByContestIdOrderByOrderingAscCodeAsc(contestId).size() + 1;
+        String code = codeForOrdering(ordering);
+
         Problem problem = new Problem();
         problem.setContestId(contestId);
-        problem.setCode(code.trim());
+        problem.setCode(code);
         problem.setTitle(title.trim());
         // HTML wins when a package ships both; a PDF-only package gets the
         // placeholder, because statement_html is NOT NULL.
         boolean usingPdf = statementHtml == null && statementPdf != null;
         problem.setStatementHtml(usingPdf
-                ? pdfPlaceholder(code.trim(), title.trim()) : statementHtml);
+                ? pdfPlaceholder(code, title.trim()) : statementHtml);
         problem.setStatementIsPdf(usingPdf);
         problem.setTimeLimitMs(timeLimitMs);
         problem.setMemoryLimitKb(memoryLimitKb);
-        problem.setOrdering(problems.findByContestIdOrderByOrderingAscCodeAsc(contestId).size() + 1);
+        problem.setOrdering(ordering);
         problem.setCheckerType(checkerType);
         problem.setCheckerSource(checkerSource);
         problems.save(problem);
@@ -241,6 +238,100 @@ public class ProblemPackageService {
 
         return new ProblemPackageResultDto(true, problem.getId(), problem.getCode(),
                 problem.getTitle(), inputs.size(), List.of());
+    }
+
+    /**
+     * Resequences a contest's problems to the given order and re-letters every
+     * one of them to match (A, B, C...), regardless of what code each had
+     * before. That covers both a plain drag-to-reorder and the one-time
+     * cleanup of codes from packages that still set "code" in config.json —
+     * the moment an admin reorders once, everything falls in line.
+     */
+    @Transactional
+    public List<Problem> reorder(long contestId, List<Long> orderedProblemIds) {
+        List<Problem> current = problems.findByContestIdOrderByOrderingAscCodeAsc(contestId);
+        Map<Long, Problem> byId = new HashMap<>();
+        for (Problem p : current) {
+            byId.put(p.getId(), p);
+        }
+        if (orderedProblemIds.size() != current.size() || !byId.keySet().containsAll(orderedProblemIds)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "The reorder list must contain exactly this contest's problems, once each");
+        }
+        // Two passes, not one: problems.code is unique per (contest, code), so
+        // assigning final letters directly can collide mid-transaction with
+        // another row's CURRENT code that hasn't moved yet (e.g. problem 3
+        // becoming "A" while problem 1 still IS "A"). A placeholder pass first
+        // moves every row out of the A/B/C... namespace so the second pass can
+        // never collide with anything still sitting on its old code.
+        for (int i = 0; i < current.size(); i++) {
+            Problem p = current.get(i);
+            p.setCode("#" + i);
+            problems.save(p);
+        }
+        problems.flush();
+
+        List<Problem> updated = new ArrayList<>();
+        int ordering = 1;
+        for (Long id : orderedProblemIds) {
+            Problem p = byId.get(id);
+            p.setOrdering(ordering);
+            p.setCode(codeForOrdering(ordering));
+            problems.save(p);
+            updated.add(p);
+            ordering++;
+        }
+        return updated;
+    }
+
+    /** 1 -> "A", 2 -> "B", ..., 26 -> "Z", 27 -> "AA" — spreadsheet-column style. */
+    static String codeForOrdering(int ordering) {
+        StringBuilder sb = new StringBuilder();
+        int n = ordering;
+        while (n > 0) {
+            n--;
+            sb.insert(0, (char) ('A' + n % 26));
+            n /= 26;
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Replaces just the PDF bytes behind an existing problem (FR-05 follow-up,
+     * same spirit as the HTML {@link #importPackageForContest} edit path):
+     * previously a corrected PDF meant deleting the problem and re-uploading
+     * the whole package, destroying every submission against it. Test data,
+     * limits and checker are untouched — only the statement bytes move.
+     */
+    @Transactional
+    public void replaceStatementPdf(long problemId, byte[] pdfBytes) {
+        Problem p = problems.findById(problemId).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
+        if (pdfBytes == null || pdfBytes.length == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No file uploaded");
+        }
+        if (pdfBytes.length > MAX_STATEMENT_PDF_BYTES) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "The PDF statement is larger than " + (MAX_STATEMENT_PDF_BYTES / 1024 / 1024) + " MB");
+        }
+        if (!looksLikePdf(pdfBytes)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "That file does not look like a PDF (missing %PDF header)");
+        }
+        int rows = jdbc.update("UPDATE problem_statement_pdfs SET data = ? WHERE problem_id = ?",
+                pdfBytes, problemId);
+        if (rows == 0) {
+            jdbc.update("INSERT INTO problem_statement_pdfs (problem_id, data) VALUES (?, ?)",
+                    problemId, pdfBytes);
+        }
+        if (!p.isStatementIsPdf()) {
+            p.setStatementIsPdf(true);
+            problems.save(p);
+        }
+    }
+
+    private static boolean looksLikePdf(byte[] bytes) {
+        return bytes.length >= 4 && bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D' && bytes[3] == 'F';
     }
 
     // ------------------------------------------------------------------

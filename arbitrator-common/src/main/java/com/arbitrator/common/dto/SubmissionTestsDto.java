@@ -15,10 +15,19 @@ public record SubmissionTestsDto(
         boolean visible,
         int passedCount,
         int totalTestCases,
-        List<TestCaseResultDto> tests   // empty when visible == false
+        List<TestCaseResultDto> tests,   // empty when visible == false, or checkerSummary != null
+        /**
+         * Set instead of populating {@code tests} for a checker-graded
+         * (CheckerType.CUSTOM) problem: a special judge can accept more than
+         * one valid output, so showing "the" expected output next to the
+         * participant's would not just leak the checker's test data, it would
+         * actively misstate what was being graded. Null for exact-match
+         * problems, where the per-test breakdown is exactly what it looks like.
+         */
+        String checkerSummary
 ) {
 
     public static SubmissionTestsDto hidden(long submissionId, int passed, int total) {
-        return new SubmissionTestsDto(submissionId, false, passed, total, List.of());
+        return new SubmissionTestsDto(submissionId, false, passed, total, List.of(), null);
     }
 }

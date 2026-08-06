@@ -15,6 +15,7 @@ import com.arbitrator.client.app.ServerConfig;
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.AnnouncementDto;
 import com.arbitrator.common.dto.ClarificationDto;
+import com.arbitrator.common.dto.ClarificationPrivacyDto;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.CustomRunRequest;
 import com.arbitrator.common.dto.CustomRunResultDto;
@@ -130,6 +131,12 @@ public class HttpJudgeApi implements JudgeApi {
 
     /** Mirrors ClarificationController.AskRequest. */
     private record AskClarification(Long problemId, Long contestId, String question, Boolean isPublic) {
+    }
+
+    @Override
+    public boolean clarificationPrivacyAllowed(long contestId) throws ApiException {
+        return get(ApiPaths.CONTESTS + "/" + contestId + "/clarification-privacy",
+                ClarificationPrivacyDto.class).allowed();
     }
 
     @Override

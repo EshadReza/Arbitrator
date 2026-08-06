@@ -21,6 +21,7 @@ import com.arbitrator.server.realtime.ContestStatePublisher;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
+import com.arbitrator.server.service.ClarificationService;
 import com.arbitrator.server.service.ContestService;
 
 /**
@@ -36,19 +37,22 @@ public class AdminContestController {
     private final SubmissionRepository submissions;
     private final TestCaseRepository testCases;
     private final JdbcTemplate jdbcTemplate;
+    private final ClarificationService clarifications;
 
     public AdminContestController(ContestService contestService,
                                   ProblemRepository problems,
                                   ContestStatePublisher statePublisher,
                                   SubmissionRepository submissions,
                                   TestCaseRepository testCases,
-                                  JdbcTemplate jdbcTemplate) {
+                                  JdbcTemplate jdbcTemplate,
+                                  ClarificationService clarifications) {
         this.contestService = contestService;
         this.problems = problems;
         this.statePublisher = statePublisher;
         this.submissions = submissions;
         this.testCases = testCases;
         this.jdbcTemplate = jdbcTemplate;
+        this.clarifications = clarifications;
     }
 
     /** Every lifecycle action pushes the new state so clients react at once. */
@@ -126,6 +130,24 @@ public class AdminContestController {
                 contestService.setTestCaseVisibility(id, visible).isShowTestCases());
     }
 
+    /** Owner: Mahir — whether askers may mark a clarification private (V61). */
+    @GetMapping(ApiPaths.ADMIN_CONTEST_CLARIFICATION_PRIVACY)
+    public Map<String, Boolean> clarificationPrivacy(@PathVariable long id) {
+        return Map.of("allowed", contestService.require(id).isAllowPrivateClarifications());
+    }
+
+    @PostMapping(ApiPaths.ADMIN_CONTEST_CLARIFICATION_PRIVACY)
+    public Map<String, Boolean> setClarificationPrivacy(@PathVariable long id,
+                                                        @RequestParam boolean allowed) {
+        boolean result = contestService.setAllowPrivateClarifications(id, allowed)
+                .isAllowPrivateClarifications();
+        // Otherwise a connected client only learns about this the next time it
+        // happens to refresh on its own (asking a question, or restarting) —
+        // this piggybacks the same push the clarification board already uses.
+        clarifications.notifyBoardChanged(id);
+        return Map.of("allowed", result);
+    }
+
     /** BR-02: submissions are refused from this moment on. */
     @PostMapping(ApiPaths.ADMIN_CONTEST_END)
     public ContestStateDto end(@PathVariable long id) {
@@ -139,6 +161,8 @@ public class AdminContestController {
         jdbcTemplate.update("DELETE FROM submission_results WHERE submission_id IN (SELECT id FROM submissions WHERE contest_id = ?)", id);
         jdbcTemplate.update("DELETE FROM submissions WHERE contest_id = ?", id);
         jdbcTemplate.update("DELETE FROM test_cases WHERE problem_id IN (SELECT id FROM problems WHERE contest_id = ?)", id);
+        // Same fk_statement_pdf_problem gap as AdminProblemController.delete().
+        jdbcTemplate.update("DELETE FROM problem_statement_pdfs WHERE problem_id IN (SELECT id FROM problems WHERE contest_id = ?)", id);
         jdbcTemplate.update("DELETE FROM problems WHERE contest_id = ?", id);
         jdbcTemplate.update("DELETE FROM contests WHERE id = ?", id);
         return ResponseEntity.noContent().build();

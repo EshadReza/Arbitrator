@@ -93,7 +93,19 @@ public class ClarificationService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Pick a problem, or say which contest the question is about");
         }
-        contestService.require(contestId);
+        // Never trust the client's own checkbox: it was read when the asker
+        // opened the dialog, and the instructor's toggle (V61) may have moved
+        // since. Silently sending a requested-private question public anyway
+        // would leave the asker unaware it was ever exposed — worse than
+        // making them notice and resend. Same reasoning as ContestService's
+        // pause/resume/freeze guards: a precondition the caller no longer
+        // agrees with is a 409, not something to quietly paper over.
+        boolean allowPrivate = contestService.require(contestId).isAllowPrivateClarifications();
+        if (!isPublic && !allowPrivate) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Private clarifications have been turned off by the instructor. "
+                            + "Uncheck \"private\" and send again.");
+        }
 
         Clarification c = new Clarification();
         c.setContestId(contestId);
@@ -153,6 +165,18 @@ public class ClarificationService {
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * Same push used after ask/answer, called by AdminContestController when
+     * the private-clarification toggle (V61) changes. Nothing about the board
+     * itself moved, but the client's ask-dialog decision (show the private
+     * checkbox or not) is cached from the same refresh() that this push
+     * triggers — without it, a toggle only reached a client the next time it
+     * happened to refresh on its own (asking a question, or restarting).
+     */
+    public void notifyBoardChanged(long contestId) {
+        broadcast(contestId);
+    }
 
     /**
      * Tells the contest its board moved. The payload is deliberately not the

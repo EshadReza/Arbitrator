@@ -13,6 +13,7 @@ public class ArbitratorApp extends Application {
 
     @Override
     public void start(Stage stage) {
+        Fonts.loadAll();       // before any scene, so the very first one is themed correctly
         SceneRouter.init(stage);
         SceneRouter.showLogin();
         stage.setTitle("Arbitrator");

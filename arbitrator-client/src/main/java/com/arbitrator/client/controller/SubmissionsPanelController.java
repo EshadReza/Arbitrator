@@ -18,13 +18,15 @@ import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
-import javafx.scene.control.TitledPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -32,11 +34,17 @@ import javafx.scene.layout.VBox;
 /**
  * FR-16 / UIF-12: the student's own submission history.
  *
- * Selecting a row loads that submission's source into a read-only editor pane
- * (UIF-12's wording) — a CodeArea rather than a TextArea, so indentation,
- * blank lines and tabs survive exactly as submitted. Only the viewer's own
- * submissions are reachable; LRR-02 forbids exposing one student's code to
- * another during a contest.
+ * The list is the whole tab; a submission's source and judgement protocol open
+ * on demand from its own row into a dialog. They used to occupy a docked pane
+ * under the table permanently, which spent half the tab on one submission's
+ * detail even while someone was scanning the history for a different one — and
+ * the detail it showed was whichever row happened to be selected, not
+ * necessarily the one being looked at.
+ *
+ * Source is a CodeArea rather than a TextArea so indentation, blank lines and
+ * tabs survive exactly as submitted. Only the viewer's own submissions are
+ * reachable; LRR-02 forbids exposing one student's code to another during a
+ * contest.
  */
 public class SubmissionsPanelController {
 
@@ -44,45 +52,15 @@ public class SubmissionsPanelController {
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
 
     @FXML private TableView<SubmissionHistoryDto> table;
-    @FXML private VBox sourceBox;
-    @FXML private Label headerLabel;
     @FXML private Label countLabel;
 
-    private static final String TESTS_TITLE = "Test cases";
-
-    private CodeArea sourceView;
-    private TitledPane testsPane;
-    private VBox testsBox;
     private final AppState state = AppState.get();
 
     @FXML
     private void initialize() {
-        sourceView = new CodeArea();
-        sourceView.setEditable(false);
-        // Same fixed-width gutter as the editor, for the same reason.
-        sourceView.setParagraphGraphicFactory(CodeAreaGutter.factory(sourceView));
-        sourceView.getStyleClass().add("code-area");
-        VBox.setVgrow(sourceView, Priority.ALWAYS);
-        sourceBox.getChildren().add(sourceView);
-
-        // Collapsed by default: the code is what you came for, the tests are
-        // what you open when the verdict surprised you.
-        testsBox = new VBox(10);
-        testsBox.setPadding(new Insets(10));
-        ScrollPane scroll = new ScrollPane(testsBox);
-        scroll.setFitToWidth(true);
-        scroll.setPrefHeight(240);
-        testsPane = new TitledPane(TESTS_TITLE, scroll);
-        testsPane.setExpanded(false);
-        sourceBox.getChildren().add(testsPane);
-
         table.setPlaceholder(new Label("You haven't submitted anything yet"));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         buildColumns();
-
-        table.getSelectionModel().selectedItemProperty().addListener(
-                (obs, old, sel) -> showSource(sel));
-
         refresh();
     }
 
@@ -140,30 +118,72 @@ public class SubmissionsPanelController {
         worker.start();
     }
 
+    // --- the detail dialog --------------------------------------------------
+
     /**
-     * Source is fetched lazily per row rather than carried in the history list,
-     * which is polled on every verdict and would otherwise ship every blob.
+     * One submission, in full: the code as submitted, then the tests it
+     * reached. Both are fetched when the dialog opens rather than carried in
+     * the history list, which is polled on every verdict and would otherwise
+     * ship every source blob to redraw a table.
      */
-    private void showSource(SubmissionHistoryDto row) {
-        if (row == null) {
-            headerLabel.setText("");
-            sourceView.replaceText("");
-            testsBox.getChildren().clear();
-            testsPane.setText(TESTS_TITLE);
-            return;
-        }
-        loadTests(row.id());
-        headerLabel.setText("#%d  ·  %s  ·  %s  ·  %s  ·  %s%s".formatted(
+    private void openDetail(SubmissionHistoryDto row) {
+        CodeArea source = new CodeArea();
+        source.setEditable(false);
+        source.setParagraphGraphicFactory(CodeAreaGutter.factory(source));
+        source.getStyleClass().add("code-area");
+        source.setPrefHeight(360);
+        source.replaceText("loading source…");
+        VBox.setVgrow(source, Priority.ALWAYS);
+
+        Label testsHeading = new Label("Judgement protocol");
+        testsHeading.getStyleClass().add("box-head");
+        testsHeading.setMaxWidth(Double.MAX_VALUE);
+
+        VBox testsBox = new VBox(10);
+        testsBox.setPadding(new Insets(10));
+        testsBox.getChildren().add(hint("loading tests…"));
+
+        ScrollPane testsScroll = new ScrollPane(testsBox);
+        testsScroll.setFitToWidth(true);
+        testsScroll.setPrefHeight(260);
+
+        Label header = new Label("#%d  ·  %s  ·  %s  ·  %s  ·  %s%s".formatted(
                 row.id(),
                 row.problemCode(),
                 row.language().display(),
                 row.verdict() == null ? "judging…" : row.verdict().label(),
                 STAMP.format(Instant.ofEpochMilli(row.submittedAtMs())),
                 row.execTimeMs() >= 0 ? "  ·  " + row.execTimeMs() + " ms" : ""));
+        header.getStyleClass().add("subtitle");
+        header.setPadding(new Insets(0, 0, 6, 0));
 
-        sourceView.replaceText("loading source…");
-        long id = row.id();
+        VBox content = new VBox(8, header, source, testsHeading, testsScroll);
+        content.setPadding(new Insets(12));
+        content.setPrefWidth(940);
 
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Submission #" + row.id());
+        dialog.setResizable(true);
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        if (table.getScene() != null) {
+            dialog.initOwner(table.getScene().getWindow());
+            // Inherit the theme, or a dark-mode user gets a white dialog.
+            dialog.getDialogPane().getStylesheets()
+                    .setAll(table.getScene().getStylesheets());
+            dialog.getDialogPane().getStyleClass().add("root");
+            if (state.darkMode()) {
+                dialog.getDialogPane().getStyleClass().add("dark");
+            }
+        }
+
+        loadSource(row.id(), source);
+        loadTests(row.id(), testsBox);
+
+        dialog.showAndWait();
+    }
+
+    private void loadSource(long id, CodeArea target) {
         Thread worker = new Thread(() -> {
             try {
                 var src = state.api().submissionSource(id);
@@ -174,17 +194,13 @@ public class SubmissionsPanelController {
                         : body + "\n\n/* ---- compiler output ----\n"
                                 + src.compilerOutput() + "\n*/";
                 Platform.runLater(() -> {
-                    // Ignore a late response for a row the user already left.
-                    var current = table.getSelectionModel().getSelectedItem();
-                    if (current != null && current.id() == id) {
-                        sourceView.replaceText(text);
-                        sourceView.moveTo(0);
-                        sourceView.requestFollowCaret();
-                    }
+                    target.replaceText(text);
+                    target.moveTo(0);
+                    target.requestFollowCaret();
                 });
             } catch (Exception e) {
                 Platform.runLater(() ->
-                        sourceView.replaceText("Could not load source: " + e.getMessage()));
+                        target.replaceText("Could not load source: " + e.getMessage()));
             }
         }, "source-io");
         worker.setDaemon(true);
@@ -198,48 +214,45 @@ public class SubmissionsPanelController {
      * test that passed plus the single one that did not — the rest of the
      * hidden set is never sent and cannot be inferred from what is.
      */
-    private void loadTests(long submissionId) {
-        testsBox.getChildren().clear();
-        testsPane.setText(TESTS_TITLE + " — loading…");
-
+    private void loadTests(long submissionId, VBox target) {
         Thread worker = new Thread(() -> {
             try {
                 SubmissionTestsDto dto = state.api().submissionTests(submissionId);
-                Platform.runLater(() -> {
-                    // A late response for a row the user already left would
-                    // otherwise show one submission's tests under another's code.
-                    var current = table.getSelectionModel().getSelectedItem();
-                    if (current == null || current.id() != submissionId) {
-                        return;
-                    }
-                    applyTests(dto);
-                });
+                Platform.runLater(() -> applyTests(dto, target));
             } catch (Exception e) {
-                Platform.runLater(() -> {
-                    testsPane.setText(TESTS_TITLE);
-                    testsBox.getChildren().setAll(hint("Could not load tests: " + e.getMessage()));
-                });
+                Platform.runLater(() -> target.getChildren()
+                        .setAll(hint("Could not load tests: " + e.getMessage())));
             }
         }, "tests-io");
         worker.setDaemon(true);
         worker.start();
     }
 
-    private void applyTests(SubmissionTestsDto dto) {
-        testsPane.setText("%s — %d of %d passed".formatted(
-                TESTS_TITLE, dto.passedCount(), dto.totalTestCases()));
+    private void applyTests(SubmissionTestsDto dto, VBox target) {
+        Label summary = new Label("%d of %d passed".formatted(
+                dto.passedCount(), dto.totalTestCases()));
+        summary.getStyleClass().add("subtitle");
 
         if (!dto.visible()) {
-            testsBox.getChildren().setAll(hint(
+            target.getChildren().setAll(summary, hint(
                     "Your instructor has not enabled test viewing for this contest."));
             return;
         }
+        // A checker-graded problem accepts more than one valid output, so the
+        // server sends a verdict sentence instead of the data (see
+        // SubmissionService.tests); showing "expected" next to "yours" there
+        // would misstate what was actually graded.
+        if (dto.checkerSummary() != null) {
+            target.getChildren().setAll(summary, hint(dto.checkerSummary()));
+            return;
+        }
         if (dto.tests().isEmpty()) {
-            testsBox.getChildren().setAll(hint(
+            target.getChildren().setAll(summary, hint(
                     "No tests ran for this submission — a compilation error stops before the first one."));
             return;
         }
-        dto.tests().forEach(t -> testsBox.getChildren().add(testCard(t)));
+        target.getChildren().setAll(summary);
+        dto.tests().forEach(t -> target.getChildren().add(testCard(t)));
     }
 
     /** One test: its verdict line, then the input and the expected output. */
@@ -328,7 +341,37 @@ public class SubmissionsPanelController {
                 c.getValue().peakMemoryKb() > 0 ? c.getValue().peakMemoryKb() + " KB" : "—"));
         mem.setPrefWidth(95);
 
-        table.getColumns().setAll(List.of(when, problem, lang, verdict, tests, time, mem));
+        TableColumn<SubmissionHistoryDto, Void> open = new TableColumn<>("");
+        open.setSortable(false);
+        open.setCellFactory(c -> new OpenCell());
+        open.setPrefWidth(110);
+        open.setMinWidth(110);
+        open.setMaxWidth(110);
+
+        table.getColumns().setAll(List.of(when, problem, lang, verdict, tests, time, mem, open));
+    }
+
+    /** The per-row entry point into {@link #openDetail}. */
+    private final class OpenCell extends TableCell<SubmissionHistoryDto, Void> {
+
+        private final Button button = new Button("View code");
+
+        OpenCell() {
+            button.getStyleClass().add("btn-small");
+            button.setOnAction(e -> {
+                SubmissionHistoryDto row = getTableRow() == null ? null : getTableRow().getItem();
+                if (row != null) {
+                    openDetail(row);
+                }
+            });
+        }
+
+        @Override
+        protected void updateItem(Void unused, boolean empty) {
+            super.updateItem(unused, empty);
+            setGraphic(empty || getTableRow() == null || getTableRow().getItem() == null
+                    ? null : button);
+        }
     }
 
     /** Same colour language as the verdict banner (UIF-10/NFR-U02). */

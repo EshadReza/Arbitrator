@@ -5,15 +5,16 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 
 import javafx.application.Platform;
+import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
+import javafx.scene.Node;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
@@ -50,6 +51,9 @@ public class ClarificationsPanelController {
 
     private final AppState state = AppState.get();
 
+    /** Cached from the last refresh(); onAsk() reads it, never blocks the FX thread for it. */
+    private volatile boolean privateAllowed = true;
+
     @FXML
     private void initialize() {
         refresh();
@@ -65,6 +69,13 @@ public class ClarificationsPanelController {
             try {
                 long contestId = state.contest() == null ? -1 : state.contest().contestId();
                 List<ClarificationDto> items = state.api().clarifications(contestId);
+                try {
+                    // A stumble here shouldn't sink the whole refresh — fall back
+                    // to whatever was last known rather than losing the list too.
+                    privateAllowed = state.api().clarificationPrivacyAllowed(contestId);
+                } catch (Exception ignored) {
+                    // keep the previous value
+                }
                 Platform.runLater(() -> apply(items));
             } catch (Exception e) {
                 Platform.runLater(() -> countLabel.setText("Could not load clarifications"));
@@ -147,49 +158,89 @@ public class ClarificationsPanelController {
 
         // Off (public) by default: that keeps the common case — everyone
         // benefits from the answer — the path that requires no extra thought.
-        CheckBox privateBox = new CheckBox("Keep this private (only you and the instructor see it)");
+        // Omitted entirely when the instructor has turned the option off for
+        // this contest (V61) — offering a choice the server will silently
+        // override would just be confusing, not merely redundant.
+        CheckBox privateBox = privateAllowed
+                ? new CheckBox("Keep this private (only you and the instructor see it)") : null;
+
+        Label status = new Label();
+        status.getStyleClass().add("error");
+        status.setWrapText(true);
+        status.setVisible(false);
+        status.setManaged(false);
 
         VBox content = new VBox(8,
                 new Label("This is about"), scope,
-                new Label("Your question"), question,
-                privateBox);
+                new Label("Your question"), question);
+        if (privateBox != null) {
+            content.getChildren().add(privateBox);
+        }
+        content.getChildren().add(status);
         content.setPadding(new Insets(12));
         content.setPrefWidth(460);
 
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Ask for clarification");
-        dialog.setHeaderText("Public questions and answers are visible to everyone, "
-                + "but never who asked. Private ones are just between you and the instructor.");
+        dialog.setHeaderText(privateAllowed
+                ? "Public questions and answers are visible to everyone, but never who asked. "
+                        + "Private ones are just between you and the instructor."
+                : "Questions and answers are visible to everyone, but never who asked.");
         dialog.getDialogPane().setContent(content);
-        dialog.getDialogPane().getButtonTypes().addAll(
-                new ButtonType("Send", ButtonBar.ButtonData.OK_DONE), ButtonType.CANCEL);
+        ButtonType sendType = new ButtonType("Send", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(sendType, ButtonType.CANCEL);
         if (listBox.getScene() != null) {
             dialog.initOwner(listBox.getScene().getWindow());
         }
 
-        Optional<ButtonType> result = dialog.showAndWait();
-        if (result.isEmpty() || result.get().getButtonData() != ButtonBar.ButtonData.OK_DONE) {
-            return;
-        }
-        String text = question.getText();
-        if (text == null || text.isBlank()) {
-            return;
-        }
-        Long problemId = ids.get(scope.getSelectionModel().getSelectedIndex());
-        send(problemId, text, !privateBox.isSelected());
+        // Send is intercepted rather than left to close the dialog on its own:
+        // the request can fail (most importantly, the instructor turning
+        // private clarifications off between opening this dialog and clicking
+        // Send — V61) and when it does, the asker needs to see why, with their
+        // question still sitting right there to fix and retry, not silently
+        // sent some other way or thrown away behind a dialog that already
+        // closed.
+        Node sendButton = dialog.getDialogPane().lookupButton(sendType);
+        sendButton.addEventFilter(ActionEvent.ACTION, event -> {
+            event.consume();
+            String text = question.getText();
+            if (text == null || text.isBlank()) {
+                showStatus(status, "Write your question before sending it.");
+                return;
+            }
+            Long problemId = ids.get(scope.getSelectionModel().getSelectedIndex());
+            boolean askPublic = privateBox == null || !privateBox.isSelected();
+            sendButton.setDisable(true);
+            status.setVisible(false);
+            status.setManaged(false);
+
+            Thread worker = new Thread(() -> {
+                try {
+                    long contestId = state.contest() == null ? -1 : state.contest().contestId();
+                    state.api().askClarification(problemId, contestId, text, askPublic);
+                    Platform.runLater(() -> {
+                        dialog.setResult(sendType);
+                        dialog.close();
+                        refresh();
+                    });
+                } catch (Exception e) {
+                    Platform.runLater(() -> {
+                        sendButton.setDisable(false);
+                        showStatus(status, e.getMessage() == null || e.getMessage().isBlank()
+                                ? "Could not send — try again." : e.getMessage());
+                    });
+                }
+            }, "clarify-ask");
+            worker.setDaemon(true);
+            worker.start();
+        });
+
+        dialog.showAndWait();
     }
 
-    private void send(Long problemId, String question, boolean isPublic) {
-        Thread worker = new Thread(() -> {
-            try {
-                long contestId = state.contest() == null ? -1 : state.contest().contestId();
-                state.api().askClarification(problemId, contestId, question, isPublic);
-                Platform.runLater(this::refresh);
-            } catch (Exception e) {
-                Platform.runLater(() -> countLabel.setText("Could not send: " + e.getMessage()));
-            }
-        }, "clarify-ask");
-        worker.setDaemon(true);
-        worker.start();
+    private static void showStatus(Label status, String text) {
+        status.setText(text);
+        status.setVisible(true);
+        status.setManaged(true);
     }
 }

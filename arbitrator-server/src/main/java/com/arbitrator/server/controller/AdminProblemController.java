@@ -154,6 +154,38 @@ public class AdminProblemController {
                                      Integer timeLimitMs, Integer memoryLimitKb) {
     }
 
+    /**
+     * Re-uploads just the PDF behind an existing problem — a correction to the
+     * statement no longer means deleting the problem and losing every
+     * submission against it, same reasoning as {@link #update}.
+     */
+    @PostMapping(ApiPaths.ADMIN_PROBLEM_STATEMENT_PDF)
+    public ProblemDetailDto replaceStatementPdf(@PathVariable long id,
+                                                @RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No file uploaded");
+        }
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read upload");
+        }
+        packageService.replaceStatementPdf(id, bytes);
+        notifyContestChanged();
+        return detail(id);
+    }
+
+    /** Drag-to-reorder in the console; codes are re-lettered to match. */
+    @PostMapping(ApiPaths.ADMIN_PROBLEM_REORDER)
+    public List<ProblemSummaryDto> reorder(@PathVariable long id, @RequestBody List<Long> problemIds) {
+        List<Problem> updated = packageService.reorder(id, problemIds);
+        notifyContestChanged();
+        return updated.stream()
+                .map(p -> new ProblemSummaryDto(p.getId(), p.getCode(), p.getTitle(), false, 0))
+                .toList();
+    }
+
     @DeleteMapping(ApiPaths.ADMIN_PROBLEM_BY_ID)
     @Transactional
     public ResponseEntity<Void> delete(@PathVariable long id) {
@@ -162,6 +194,10 @@ public class AdminProblemController {
 
         jdbcTemplate.update("DELETE FROM submission_results WHERE submission_id IN (SELECT id FROM submissions WHERE problem_id = ?)", id);
         jdbcTemplate.update("DELETE FROM submissions WHERE problem_id = ?", id);
+        // V59's fk_statement_pdf_problem: a PDF-statement problem otherwise
+        // fails this whole delete with a 500 (FK violation), latent since V59
+        // and only just started showing up once PDF problems became common.
+        jdbcTemplate.update("DELETE FROM problem_statement_pdfs WHERE problem_id = ?", id);
         testCases.deleteAll(testCases.findByProblemIdOrderByIdxAsc(id));
         problems.delete(problem);
         notifyContestChanged();

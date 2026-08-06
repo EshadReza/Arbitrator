@@ -203,6 +203,13 @@ public class ContestService {
         return contests.save(c);
     }
 
+    /** Owner: Mahir — see Contest.allowPrivateClarifications (V61). */
+    public Contest setAllowPrivateClarifications(long id, boolean allowed) {
+        Contest c = require(id);
+        c.setAllowPrivateClarifications(allowed);
+        return contests.save(c);
+    }
+
     /** Stops the clock. Remaining time is preserved, not spent (FR-06/FR-08). */
     public Contest pause(long id) {
         Contest c = require(id);

@@ -20,7 +20,10 @@
            fx:controller="com.arbitrator.client.controller.MainController"
            fx:id="rootStack">
 
-    <BorderPane>
+    <!-- fx:id so MainController can zoom the UI. Only this subtree scales;
+         toasts and verdict banners live directly on the StackPane above it and
+         stay at 100% deliberately. -->
+    <BorderPane fx:id="contentRoot">
 
         <!-- UIF-05: persistent top status bar -->
         <top>
@@ -119,6 +122,16 @@
                 <Label fx:id="layoutHint" styleClass="subtitle"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <Label text="%main.shortcuts" styleClass="subtitle"/>
+
+                <!-- Zoom readout: Ctrl +/- and Ctrl+scroll change it from
+                     anywhere, but without a number on screen there is no way
+                     to tell how far off 100% you have drifted. -->
+                <HBox alignment="CENTER" spacing="2" styleClass="zoom-bar">
+                    <Button text="−" onAction="#onZoomOut" styleClass="icon-button"/>
+                    <Label fx:id="zoomLabel" styleClass="zoom-value"
+                           onMouseClicked="#onZoomReset"/>
+                    <Button text="+" onAction="#onZoomIn" styleClass="icon-button"/>
+                </HBox>
             </HBox>
         </bottom>
 

@@ -135,6 +135,14 @@
 .button:default:hover, .submit-button:hover { -fx-background-color: derive(-c-accent, -12%); }
 .button:disabled { -fx-opacity: .45; }
 
+/* Sits inside a table row, so it must not set the row's height on its own. */
+.btn-small {
+    -fx-font-size: 11px;
+    -fx-padding: 2 9 2 9;
+    -fx-background-radius: 5px;
+    -fx-border-radius: 5px;
+}
+
 .hyperlink { -fx-text-fill: -c-accent; -fx-border-color: transparent; }
 
 /* icon-only buttons in panel headers (fullscreen, collapse) */
@@ -161,9 +169,13 @@
    and at a glance, so it is deliberately the loudest element on the bar:
    larger, heavier, wider-tracked, and sitting on its own raised chip. */
 .timer {
+    /* 900, not bold(700): JavaFX resolves a weight to the heaviest face the
+       family actually ships, so with the bundled JetBrains Mono Bold this is
+       as loud as the family goes — the point of the one element that gets
+       read from the back of the lab. */
     -fx-font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
     -fx-font-size: 31px;
-    -fx-font-weight: bold;
+    -fx-font-weight: 900;
     -fx-text-fill: -c-accent;
     -fx-alignment: CENTER;
     -fx-text-alignment: CENTER;
@@ -204,6 +216,24 @@
 
 .conn-ok   { -fx-text-fill: -c-green; -fx-font-weight: bold; }
 .conn-lost { -fx-text-fill: -c-red;   -fx-font-weight: bold; }
+
+/* Zoom readout in the status bar. Tabular-ish width so stepping 90 -> 100 ->
+   110 does not shove the +/- buttons sideways on every press. */
+.zoom-bar {
+    -fx-background-color: -c-surface;
+    -fx-background-radius: 6px;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 6px;
+    -fx-padding: 1 4 1 4;
+}
+.zoom-value {
+    -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    -fx-font-size: 11px;
+    -fx-text-fill: -c-muted;
+    -fx-min-width: 42px;
+    -fx-alignment: CENTER;
+    -fx-cursor: hand;
+}
 
 /* --- tabs ------------------------------------------------------------------ */
 
@@ -249,12 +279,61 @@
 .table-row-cell:selected { -fx-background-color: derive(-c-accent, 65%); }
 .root.dark .table-row-cell:selected { -fx-background-color: derive(-c-accent, -55%); }
 
-/* UIF-15: the viewer's own standings row */
-.table-row-cell:self { -fx-background-color: derive(-c-amber, 70%); }
-.root.dark .table-row-cell:self { -fx-background-color: derive(-c-amber, -60%); }
+/* UIF-15: the viewer's own standings row.
+   No amber fill any more — on the redesigned board every problem cell already
+   carries a meaningful colour (first solve / accepted / attempted), and a
+   whole-row wash fought them for attention and muddied the greens it sat
+   under. The row is marked by weight instead, which reads immediately without
+   spending a colour the grid is already using to mean something else. */
+.table-row-cell:self .table-cell { -fx-font-weight: bold; }
 
-.table-view .table-cell.cell-solved { -fx-text-fill: -c-green; -fx-font-weight: bold; }
-.table-view .table-cell.cell-failed { -fx-text-fill: -c-red; }
+/* --- standings grid (UIF-13) ------------------------------------------------
+   An ICPC scoreboard reads by colour before it reads by text: dark green is
+   the first solve of a problem in the whole contest, light green is anyone
+   else's accepted, pink is tried-and-still-unsolved. The fills are derived
+   from -c-green / -c-red rather than hard-coded, so the dark theme is the same
+   rules with a different palette rather than a second copy of this block.
+
+   Label colours are set explicitly per state because `.label` (top of this
+   file) paints every label -c-text — inside a filled cell that is either
+   invisible (dark theme text on a dark fill) or simply wrong. */
+
+.standings-head { -fx-padding: 2 0 2 0; }
+.standings-code { -fx-font-weight: bold; -fx-font-size: 13px; -fx-text-fill: -c-text; }
+.standings-stat { -fx-font-size: 10px; -fx-text-fill: -c-muted; -fx-font-weight: normal; }
+
+.standings-cell-box { -fx-padding: 2 0 2 0; }
+.standings-when  { -fx-font-size: 11.5px; }
+.standings-tries { -fx-font-size: 10.5px; }
+
+/* Fills span the whole cell: an inset would let the row stripe show through
+   as a frame and break the solid-block look the board depends on. */
+.table-view .table-cell.cell-first,
+.table-view .table-cell.cell-solved,
+.table-view .table-cell.cell-failed {
+    -fx-background-insets: 0;
+    -fx-padding: 1 2 1 2;
+}
+
+.table-view .table-cell.cell-first  { -fx-background-color: derive(-c-green, -28%); }
+.table-view .table-cell.cell-solved { -fx-background-color: derive(-c-green, 76%); }
+.table-view .table-cell.cell-failed { -fx-background-color: derive(-c-red, 82%); }
+
+.table-cell.cell-first .label  { -fx-text-fill: white; -fx-font-weight: bold; }
+.table-cell.cell-solved .label { -fx-text-fill: derive(-c-green, -50%); }
+.table-cell.cell-solved .standings-when { -fx-font-weight: bold; }
+.table-cell.cell-failed .label { -fx-text-fill: derive(-c-red, -35%); -fx-font-weight: bold; }
+
+/* Dark theme: the brightest green marks the first solve, so the hierarchy
+   survives inverting — light-on-dark cannot simply reuse "darker means more". */
+.root.dark .table-view .table-cell.cell-first  { -fx-background-color: -c-green; }
+.root.dark .table-view .table-cell.cell-solved { -fx-background-color: derive(-c-green, -58%); }
+.root.dark .table-view .table-cell.cell-failed { -fx-background-color: derive(-c-red, -55%); }
+
+.root.dark .table-cell.cell-first .label  { -fx-text-fill: #0e1218; -fx-font-weight: bold; }
+.root.dark .table-cell.cell-solved .label { -fx-text-fill: derive(-c-green, 45%); }
+.root.dark .table-cell.cell-failed .label { -fx-text-fill: derive(-c-red, 40%); }
+
 /* --- problem list badges (§4.2) --------------------------------------------- */
 
 .badge-solved {

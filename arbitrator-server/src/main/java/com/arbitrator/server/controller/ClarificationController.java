@@ -2,8 +2,10 @@ package com.arbitrator.server.controller;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -57,5 +59,16 @@ public class ClarificationController {
      * {@code isPublic} null means "public" — see {@link #ask}.
      */
     public record AskRequest(Long problemId, Long contestId, String question, Boolean isPublic) {
+    }
+
+    /**
+     * Whether the client should offer the private checkbox at all (V61).
+     * A student-reachable mirror of the admin toggle — the client needs this
+     * before it can render the ask dialog, unlike show-test-cases, which the
+     * client never needs to know in advance.
+     */
+    @GetMapping(ApiPaths.CONTEST_CLARIFICATION_PRIVACY)
+    public Map<String, Boolean> privacyAllowed(@PathVariable long id) {
+        return Map.of("allowed", contestService.require(id).isAllowPrivateClarifications());
     }
 }
