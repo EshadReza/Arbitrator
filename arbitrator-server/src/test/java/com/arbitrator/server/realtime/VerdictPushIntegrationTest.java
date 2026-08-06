@@ -91,6 +91,13 @@ class VerdictPushIntegrationTest {
         contest.setState(ContestState.ACTIVE);
         contest.setStartTime(Instant.now().minusSeconds(60));
         contest.setDurationMinutes(180);
+        // Contest.endTime() returns endedAt unconditionally when it is set, so
+        // if this row was ever end()-ed on a previous run (any test, or manual
+        // admin testing against this same DB) it stays permanently "ended" no
+        // matter what startTime we set above — submissions then 403 forever.
+        contest.setEndedAt(null);
+        contest.setPausedAt(null);
+        contest.setPausedMillis(0);
         contests.save(contest);
         openContestId = contest.getId();
     }
