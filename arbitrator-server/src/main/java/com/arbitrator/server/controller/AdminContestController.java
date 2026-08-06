@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -23,6 +24,7 @@ import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
 import com.arbitrator.server.service.ClarificationService;
 import com.arbitrator.server.service.ContestService;
+import com.arbitrator.server.service.ProblemPackageService;
 
 /**
  * Contest lifecycle for instructors (FR-04, FR-06, FR-08, FR-19).
@@ -38,6 +40,7 @@ public class AdminContestController {
     private final TestCaseRepository testCases;
     private final JdbcTemplate jdbcTemplate;
     private final ClarificationService clarifications;
+    private final ProblemPackageService packageService;
 
     public AdminContestController(ContestService contestService,
                                   ProblemRepository problems,
@@ -45,7 +48,8 @@ public class AdminContestController {
                                   SubmissionRepository submissions,
                                   TestCaseRepository testCases,
                                   JdbcTemplate jdbcTemplate,
-                                  ClarificationService clarifications) {
+                                  ClarificationService clarifications,
+                                  ProblemPackageService packageService) {
         this.contestService = contestService;
         this.problems = problems;
         this.statePublisher = statePublisher;
@@ -53,6 +57,7 @@ public class AdminContestController {
         this.testCases = testCases;
         this.jdbcTemplate = jdbcTemplate;
         this.clarifications = clarifications;
+        this.packageService = packageService;
     }
 
     /** Every lifecycle action pushes the new state so clients react at once. */
@@ -152,6 +157,19 @@ public class AdminContestController {
     @PostMapping(ApiPaths.ADMIN_CONTEST_END)
     public ContestStateDto end(@PathVariable long id) {
         return applied(contestService.end(id));
+    }
+
+    /**
+     * A fresh DRAFT contest with a copy of {@code id}'s problems — the
+     * replacement for re-running an ended contest, now that
+     * {@link ContestService#openLobby} refuses to reopen one.
+     */
+    @PostMapping(ApiPaths.ADMIN_CONTEST_CLONE)
+    public ContestSummaryDto clone(@PathVariable long id, @RequestBody CloneRequest req) {
+        return summarise(packageService.cloneContest(id, req.title()));
+    }
+
+    public record CloneRequest(String title) {
     }
 
     /** Destructive action: deletes contest and all associated submissions, submission_results, problems, and testcases. */

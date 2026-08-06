@@ -124,45 +124,63 @@ public class ContestService {
     /**
      * Opens the doors without starting the contest. Students can enter and
      * wait; problems stay hidden and no clock runs until {@link #start(long)}.
+     *
+     * ENDED is terminal (BR-02: submissions are permanently refused, and the
+     * lifecycle now matches that in spirit too). A previous version of this
+     * method deliberately allowed reopening an ENDED contest as a way to
+     * re-run it — that is exactly what {@link ProblemPackageService#cloneContest}
+     * exists to replace: cloning makes a fresh DRAFT contest with a copy of
+     * the problems, rather than resurrecting the one that already ended (and
+     * with it, resurrecting its old submissions/announcements/clarifications,
+     * which the clear-on-restart listeners would otherwise have to reconcile).
      */
     public Contest openLobby(long id) {
         Contest c = require(id);
-        // An ended contest is exactly what a restart begins from — the console's
-        // "Open lobby" button has always been enabled for DRAFT and ENDED alike,
-        // but this used to refuse ENDED with a 409 CONFLICT, so re-running the
-        // same contest was blocked from the one place instructors do it.
+        if (c.getState() == ContestState.ENDED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This contest has ended and cannot be reopened. Clone it to run a fresh copy.");
+        }
         c.setState(ContestState.LOBBY);
         c.setStartTime(null);          // no clock yet
         c.setPausedAt(null);
         c.setPausedMillis(0);
-        c.setEndedAt(null);            // reopening clears the previous run's end
-        // A lobby countdown from the PREVIOUS run is almost always in the past
-        // by the time a contest is reopened — it already fired once to start
-        // that run. Left in place, the very next 1 s tick of
+        // A lobby countdown from a PREVIOUS open-lobby is almost always in the
+        // past by the time this runs again — it already fired once. Left in
+        // place, the very next 1 s tick of
         // LeaderboardBroadcaster.checkScheduledLobbies() (and stateOf()'s own
         // copy of the same check) sees a LOBBY contest whose scheduledStartAt
-        // is already due and calls start() immediately — so "Open lobby" after
-        // an END appeared to skip the lobby and jump straight to ACTIVE.
+        // is already due and calls start() immediately — so "Open lobby"
+        // would appear to skip the lobby and jump straight to ACTIVE.
         c.setScheduledStartAt(null);
         return contests.save(c);
     }
 
     /**
-     * Starts (or restarts) a contest. Several contests may run at once — the
-     * student picks which to join, and a submission's contest is derived from
-     * its problem, so there is no ambiguous "current contest" to get wrong.
+     * Starts a contest. Several contests may run at once — the student picks
+     * which to join, and a submission's contest is derived from its problem,
+     * so there is no ambiguous "current contest" to get wrong.
+     *
+     * Rejects ENDED for the same reason {@link #openLobby} does — see its
+     * comment. In practice this also means a contest can only ever reach here
+     * once per lifetime (DRAFT or LOBBY are the only states start() accepts,
+     * and nothing leads back to either of those after ACTIVE except the now-
+     * removed ENDED path), so {@link #onStarted}'s hooks — which archive the
+     * previous run's submissions/announcements/clarifications — fire against
+     * an always-empty previous run. Left in place rather than removed: it is
+     * harmless, and it is exactly the safety net a future lifecycle change
+     * would need.
      */
     public Contest start(long id) {
         Contest c = require(id);
+        if (c.getState() == ContestState.ENDED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This contest has ended and cannot be started again. Clone it to run a fresh copy.");
+        }
         c.setState(ContestState.ACTIVE);
         c.setStartTime(Instant.now());
         c.setPausedAt(null);
-        c.setPausedMillis(0);          // a restart resets the clock entirely
-        c.setEndedAt(null);            // ...including any early end from last time
+        c.setPausedMillis(0);
         Contest saved = contests.save(c);
-        // A restart is a fresh contest: last run's submissions must not leave
-        // problems pre-solved or carry penalty into the new standings. They are
-        // flagged inactive rather than deleted — DBR-04 keeps the record.
         onStarted.forEach(hook -> hook.accept(saved.getId()));
         return saved;
     }

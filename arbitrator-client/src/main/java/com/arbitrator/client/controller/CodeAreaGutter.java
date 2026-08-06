@@ -6,6 +6,8 @@ import org.fxmisc.richtext.CodeArea;
 import org.fxmisc.richtext.LineNumberFactory;
 
 import javafx.scene.Node;
+import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.Label;
 import javafx.scene.layout.Region;
 
 /**
@@ -24,6 +26,21 @@ import javafx.scene.layout.Region;
  * same literal pixel value removes the measurement from the equation
  * entirely: every row reports the identical width because it was told to,
  * not because JavaFX happened to measure it that way.
+ *
+ * That pinned width later made every number invisible. {@code CodeArea}
+ * extends {@code StyleClassedTextArea}, so {@code LineNumberFactory} always
+ * gives the label a code-folding indicator as a right-hand {@code graphic}
+ * (RichTextFX's own source: {@code lineNo.setContentDisplay(RIGHT);
+ * lineNo.setGraphic(foldIndicator)}) — a feature nothing in this app ever
+ * turns on (grep the client for {@code "collapse"}: nothing adds it, so the
+ * indicator is permanently one blank space). {@link Label} lays out text and
+ * graphic side by side plus a gap; at a hard-pinned 46px that trio does not
+ * fit, and the graphic — being the thing with a fixed size — won the space,
+ * squeezing the number's own text down to zero width. Not a colour or
+ * contrast bug: the digits were being laid out at zero pixels wide, called
+ * a JavaFX-internals investigation to find rather than anything visible in
+ * this project's own CSS. Dropping the never-used graphic gives the number
+ * the whole 46px back.
  */
 final class CodeAreaGutter {
 
@@ -38,6 +55,10 @@ final class CodeAreaGutter {
                 LineNumberFactory.get(codeArea, digits -> "%" + Math.max(3, digits) + "d");
         return line -> {
             Node node = numbers.apply(line);
+            if (node instanceof Label label) {
+                label.setGraphic(null);
+                label.setContentDisplay(ContentDisplay.TEXT_ONLY);
+            }
             if (node instanceof Region region) {
                 region.setMinWidth(WIDTH_PX);
                 region.setPrefWidth(WIDTH_PX);

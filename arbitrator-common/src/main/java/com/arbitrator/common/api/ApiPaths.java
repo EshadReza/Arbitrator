@@ -38,6 +38,8 @@ public final class ApiPaths {
     public static final String ADMIN_API_PREFIX = "/api/admin";
     public static final String ADMIN_CONTESTS = "/api/admin/contests";
     public static final String ADMIN_CONTEST_BY_ID = "/api/admin/contests/{id}"; // DELETE
+    /** A fresh DRAFT contest with a copy of {id}'s problems; POST body is the new title. */
+    public static final String ADMIN_CONTEST_CLONE = "/api/admin/contests/{id}/clone";
     public static final String ADMIN_CONTEST_OPEN = "/api/admin/contests/{id}/open";
     public static final String ADMIN_CONTEST_START = "/api/admin/contests/{id}/start";
     public static final String ADMIN_CONTEST_END = "/api/admin/contests/{id}/end";

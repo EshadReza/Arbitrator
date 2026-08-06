@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.arbitrator.common.dto.ProblemPackageResultDto;
 import com.arbitrator.common.enums.CheckerType;
+import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.TestCase;
 import com.arbitrator.server.judge.CheckerCompilationException;
@@ -332,6 +333,64 @@ public class ProblemPackageService {
 
     private static boolean looksLikePdf(byte[] bytes) {
         return bytes.length >= 4 && bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D' && bytes[3] == 'F';
+    }
+
+    /**
+     * Clones a contest: a fresh DRAFT contest under a new title, with a copy
+     * of every problem (statement, PDF bytes if any, limits, checker, and
+     * test cases). Nothing else — no submissions, standings, marks,
+     * announcements or clarifications, and no participants. Those belong to
+     * one run of a contest; a clone is a new contest that happens to start
+     * from the same problem set, the same way re-running an ended contest
+     * used to work before that was replaced by cloning (see
+     * {@link ContestService#openLobby}).
+     *
+     * Problem codes are copied as-is rather than re-lettered: the clone's
+     * problems are inserted in the source's order into an otherwise-empty
+     * contest, so the same codes are already unique there.
+     */
+    @Transactional
+    public Contest cloneContest(long sourceContestId, String newTitle) {
+        if (newTitle == null || newTitle.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Give the clone a title");
+        }
+        Contest source = contestService.require(sourceContestId);
+        Contest clone = contestService.create(newTitle.trim(), source.getDurationMinutes());
+
+        for (Problem p : problems.findByContestIdOrderByOrderingAscCodeAsc(sourceContestId)) {
+            Problem copy = new Problem();
+            copy.setContestId(clone.getId());
+            copy.setCode(p.getCode());
+            copy.setTitle(p.getTitle());
+            copy.setStatementHtml(p.getStatementHtml());
+            copy.setStatementIsPdf(p.isStatementIsPdf());
+            copy.setTimeLimitMs(p.getTimeLimitMs());
+            copy.setMemoryLimitKb(p.getMemoryLimitKb());
+            copy.setOrdering(p.getOrdering());
+            copy.setCheckerType(p.getCheckerType());
+            copy.setCheckerSource(p.getCheckerSource());
+            problems.save(copy);
+
+            if (p.isStatementIsPdf()) {
+                List<byte[]> pdf = jdbc.query(
+                        "SELECT data FROM problem_statement_pdfs WHERE problem_id = ?",
+                        (rs, i) -> rs.getBytes("data"), p.getId());
+                if (!pdf.isEmpty()) {
+                    jdbc.update("INSERT INTO problem_statement_pdfs (problem_id, data) VALUES (?, ?)",
+                            copy.getId(), pdf.get(0));
+                }
+            }
+
+            for (TestCase t : testCases.findByProblemIdOrderByIdxAsc(p.getId())) {
+                TestCase tc = new TestCase();
+                tc.setProblemId(copy.getId());
+                tc.setIdx(t.getIdx());
+                tc.setInputData(t.getInputData());
+                tc.setExpectedOutput(t.getExpectedOutput());
+                testCases.save(tc);
+            }
+        }
+        return clone;
     }
 
     // ------------------------------------------------------------------

@@ -239,9 +239,11 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
           </div>
           <p class="hint" style="margin-top:12px">
             <b>Open lobby</b> lets students enter and wait — no problems shown, no clock.
-            <b>Start contest</b> releases the problems, starts the clock, and clears the previous run's
-            submissions. <b>Pause</b> stops the clock and blocks submissions; the remaining time is kept.
-            <b>Freeze</b> keeps judging but holds the public standings. <b>End</b> closes it for good.
+            <b>Start contest</b> releases the problems and starts the clock. <b>Pause</b> stops the
+            clock and blocks submissions; the remaining time is kept. <b>Freeze</b> keeps judging but
+            holds the public standings. <b>End</b> closes it for good — an ended contest cannot be
+            reopened or started again; use <b>Clone</b> on the All contests page to run it again as a
+            fresh draft.
           </p>
         </div>
       </div>
@@ -456,7 +458,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
         <div class="body" style="padding:0">
           <table id="cTable"><thead><tr><th style="width:44px"></th><th>Title</th>
             <th style="width:96px">State</th><th style="width:86px">Problems</th>
-            <th style="width:92px">Duration</th><th style="width:96px"></th></tr></thead><tbody></tbody></table>
+            <th style="width:92px">Duration</th><th style="width:180px"></th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="card">
@@ -481,6 +483,24 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
       <div class="row" style="justify-content:flex-end;gap:8px">
         <button class="btn sm" onclick="resolveConfirm(false)">Cancel</button>
         <button class="btn sm danger" onclick="resolveConfirm(true)">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Same reasoning as confirmModal: window.prompt() is a native dialog and
+     Chrome auto-suppresses those after a few in a row, silently returning
+     null — this can't be, since it's ordinary DOM the page already draws. -->
+<div class="modal hide" id="promptModal">
+  <div class="card">
+    <header><span id="promptTitle">Name it</span></header>
+    <div class="body">
+      <p id="promptMessage" style="margin:0 0 10px 0"></p>
+      <input type="text" id="promptInput" style="width:100%" placeholder="">
+      <p class="hint err hide" id="promptError" style="margin-top:8px"></p>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn sm" onclick="resolvePrompt(null)">Cancel</button>
+        <button class="btn sm primary" onclick="submitPrompt()">OK</button>
       </div>
     </div>
   </div>
@@ -675,7 +695,10 @@ async function loadContests(){
       <td><b>${esc(c.title)}</b></td>
       <td><span class="badge b-${c.state}">${c.state}</span></td>
       <td>${c.problemCount}</td><td>${c.durationMinutes} min</td>
-      <td><button class="btn sm danger" onclick="event.stopPropagation();deleteContest(${c.id},'${esc(c.title)}')">Delete</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" onclick="event.stopPropagation();cloneContest(${c.id},'${esc(c.title)}')">Clone</button>
+        <button class="btn sm danger" onclick="event.stopPropagation();deleteContest(${c.id},'${esc(c.title)}')">Delete</button>
+      </td>
     </tr>`).join('') : '<tr><td colspan="6" class="empty">No contests yet — create one below.</td></tr>';
 
   if(selected==null && body.length){
@@ -699,6 +722,26 @@ async function deleteContest(id,title){
   }
 }
 
+/** Only the problems copy over — a fresh DRAFT, not a re-run of the old one. */
+async function cloneContest(id,title){
+  const newTitle=await showPrompt(
+    `Clone "${title}" as a new draft. Its problems copy over; submissions, standings, `
+      +'clarifications and announcements do not.',
+    'New contest title', title+' (copy)');
+  if(newTitle==null) return;
+  const res=await fetch(`/api/admin/contests/${id}/clone`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+    body:JSON.stringify({title:newTitle})});
+  const body=await res.json().catch(()=>({}));
+  if(res.ok){
+    log(201,`Cloned "${title}" as "${newTitle}" (${body.problemCount} problem(s))`);
+    await loadContests();
+  } else {
+    log(res.status, body.message||'Clone failed');
+  }
+}
+
 async function refreshSelected(){
   if(selected==null) return;
   const {status,body}=await api('GET','/api/contests/'+selected);
@@ -708,8 +751,11 @@ async function refreshSelected(){
   $('cState').textContent=body.state; $('cState').className='badge b-'+body.state;
 
   const s=body.state;
-  $('bOpen').disabled     = !(s==='DRAFT'||s==='ENDED');
-  $('bStart').disabled    = !(s==='DRAFT'||s==='LOBBY'||s==='ENDED');
+  // ENDED is terminal (server-enforced too — see ContestService.openLobby /
+  // start): neither button reopens or restarts a contest that has ended.
+  // Clone it from the All contests page to run it again as a fresh draft.
+  $('bOpen').disabled     = s!=='DRAFT';
+  $('bStart').disabled    = !(s==='DRAFT'||s==='LOBBY');
   $('bPause').disabled    = !(s==='ACTIVE'||s==='FROZEN');
   $('bResume').disabled   = s!=='PAUSED';
   $('bFreeze').disabled   = s!=='ACTIVE';
@@ -1533,6 +1579,7 @@ MODALS.forEach(id=>{
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape') return;
   if(!$('confirmModal').classList.contains('hide')){ resolveConfirm(false); return; }
+  if(!$('promptModal').classList.contains('hide')){ resolvePrompt(null); return; }
   MODALS.forEach(closeModal);
 });
 
@@ -1557,6 +1604,37 @@ function resolveConfirm(result){
 }
 $('confirmModal').addEventListener('click',e=>{
   if(e.target===$('confirmModal')) resolveConfirm(false);
+});
+
+/** In-page replacement for window.prompt() — same fragility as confirm(). */
+let promptResolver=null;
+function showPrompt(message,placeholder,defaultValue){
+  $('promptMessage').textContent=message;
+  $('promptInput').placeholder=placeholder||'';
+  $('promptInput').value=defaultValue||'';
+  $('promptError').classList.add('hide');
+  openModal('promptModal');
+  $('promptInput').focus();
+  return new Promise(resolve=>{ promptResolver=resolve; });
+}
+function submitPrompt(){
+  const value=$('promptInput').value.trim();
+  if(!value){
+    $('promptError').textContent='This cannot be empty.';
+    $('promptError').classList.remove('hide');
+    return;
+  }
+  resolvePrompt(value);
+}
+function resolvePrompt(result){
+  closeModal('promptModal');
+  if(promptResolver){ const r=promptResolver; promptResolver=null; r(result); }
+}
+$('promptModal').addEventListener('click',e=>{
+  if(e.target===$('promptModal')) resolvePrompt(null);
+});
+$('promptInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter') submitPrompt();
 });
 
 async function viewSource(id){
