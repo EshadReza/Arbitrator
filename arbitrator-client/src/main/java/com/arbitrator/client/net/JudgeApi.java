@@ -3,6 +3,8 @@ package com.arbitrator.client.net;
 import java.util.List;
 import java.util.function.Consumer;
 
+import com.arbitrator.common.dto.AnnouncementDto;
+import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.CustomRunRequest;
 import com.arbitrator.common.dto.CustomRunResultDto;
@@ -48,6 +50,23 @@ public interface JudgeApi extends AutoCloseable {
 
     ProblemDetailDto problem(long id) throws ApiException;
 
+    /** Raw PDF bytes for a problem whose {@code pdfStatement} flag is set. */
+    byte[] problemStatementPdf(long id) throws ApiException;
+
+    /** FR-07: every announcement in this contest, newest first. */
+    List<AnnouncementDto> announcements(long contestId) throws ApiException;
+
+    /** The public clarification board; the asker's name is never included. */
+    List<ClarificationDto> clarifications(long contestId) throws ApiException;
+
+    /**
+     * @param problemId null when the question is about the contest itself
+     * @param isPublic  true to join the public board everyone reads; false to
+     *                  keep it between the asker and the instructor
+     */
+    ClarificationDto askClarification(Long problemId, long contestId, String question,
+                                      boolean isPublic) throws ApiException;
+
     SubmitAckDto submit(SubmitRequest request) throws ApiException;
 
     /** Run against custom input without submitting — never judged or stored. */
@@ -80,6 +99,17 @@ public interface JudgeApi extends AutoCloseable {
      */
     void connectContestState(long contestId, Consumer<ContestStateDto> onState) throws ApiException;
 
+    /** FR-07: a new announcement, which the client pops up immediately. */
+    void connectAnnouncements(long contestId, Consumer<AnnouncementDto> onAnnouncement)
+            throws ApiException;
+
+    /**
+     * The clarification board changed. The payload carries no content on
+     * purpose — what an admin may see differs from what a contestant may — so
+     * the callback simply re-reads the board it is entitled to.
+     */
+    void connectClarifications(long contestId, Runnable onChanged) throws ApiException;
+
     /** Quick reachability probe for the login screen's status dot (UIF-01). */
     boolean ping();
 
@@ -89,6 +119,13 @@ public interface JudgeApi extends AutoCloseable {
      * the app merely looks idle.
      */
     boolean isLive();
+
+    /**
+     * Abandons the current push channel so the next connect starts over. Used
+     * when the server address changes mid-session: without it the client keeps
+     * trying to reach the machine it can no longer see.
+     */
+    void dropConnection();
 
     @Override
     void close();

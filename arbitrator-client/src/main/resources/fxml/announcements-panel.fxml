@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.layout.VBox?>
+
+<!-- FR-07: every announcement in this contest, newest first. The popup is
+     transient; this is where an announcement stays readable. -->
+<VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.arbitrator.client.controller.AnnouncementsPanelController"
+      styleClass="box">
+
+    <Label text="%announcements.title" styleClass="box-head" maxWidth="Infinity"/>
+    <Label fx:id="countLabel" styleClass="subtitle">
+        <padding><Insets top="6" right="10" bottom="6" left="10"/></padding>
+    </Label>
+
+    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS">
+        <VBox fx:id="listBox" spacing="10">
+            <padding><Insets top="4" right="10" bottom="10" left="10"/></padding>
+        </VBox>
+    </ScrollPane>
+</VBox>

@@ -39,6 +39,9 @@ public class JudgeWorker {
 
     private static final int COMPILER_OUTPUT_LIMIT = 4096;   // FR-20
 
+    /** Per-test cap on the contestant output kept for the test-case view. */
+    private static final int STORED_OUTPUT_LIMIT = 4096;
+
     private final SubmissionRepository submissions;
     private final ProblemRepository problems;
     private final TestCaseRepository testCases;
@@ -205,9 +208,22 @@ public class JudgeWorker {
     private void saveTestResult(long submissionId, int testIndex, Verdict v, ExecutionResult r) {
         jdbc.update("""
                 INSERT INTO submission_results
-                    (submission_id, test_index, verdict, exec_time_ms, peak_memory_kb)
-                VALUES (?, ?, ?, ?, ?)
-                """, submissionId, testIndex, v.name(), r.wallTimeMs(), r.peakMemoryKb());
+                    (submission_id, test_index, verdict, exec_time_ms, peak_memory_kb, actual_output)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, submissionId, testIndex, v.name(), r.wallTimeMs(), r.peakMemoryKb(),
+                clipOutput(r.stdout()));
+    }
+
+    /**
+     * What the program printed, kept only in the quantity a person would read.
+     * The sandbox already caps capture at 10 MiB; storing that per test, per
+     * submission, would grow the table faster than the submissions themselves.
+     */
+    private static String clipOutput(String out) {
+        if (out == null) {
+            return null;
+        }
+        return out.length() <= STORED_OUTPUT_LIMIT ? out : out.substring(0, STORED_OUTPUT_LIMIT);
     }
 
     /** Fills {src} {exe} {dir} into a whitespace-separated command template. */

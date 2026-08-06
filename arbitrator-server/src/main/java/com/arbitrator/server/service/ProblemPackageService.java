@@ -12,6 +12,7 @@ import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,6 +53,9 @@ public class ProblemPackageService {
     private static final long MAX_TOTAL_UNCOMPRESSED = 256L * 1024 * 1024;   // 256 MiB
     private static final long MAX_SINGLE_FILE = 32L * 1024 * 1024;           // 32 MiB
 
+    /** A statement is a few pages; anything larger is a mistake, not a problem. */
+    private static final long MAX_STATEMENT_PDF_BYTES = 16L * 1024 * 1024;
+
     private static final int MIN_TIME_LIMIT_MS = 100;
     private static final int MAX_TIME_LIMIT_MS = 30_000;
     private static final int MIN_MEMORY_KB = 1024;            // 1 MiB
@@ -61,23 +65,21 @@ public class ProblemPackageService {
     private final TestCaseRepository testCases;
     private final ContestService contestService;
     private final CheckerRunner checkerRunner;
+    /** Only for the statement-PDF side table; everything else goes through JPA. */
+    private final JdbcTemplate jdbc;
     private final ObjectMapper json = new ObjectMapper();
 
     public ProblemPackageService(ProblemRepository problems,
                                  TestCaseRepository testCases,
                                  ContestService contestService,
-                                 CheckerRunner checkerRunner) {
+                                 CheckerRunner checkerRunner,
+                                 JdbcTemplate jdbc) {
         this.problems = problems;
         this.testCases = testCases;
         this.contestService = contestService;
         this.checkerRunner = checkerRunner;
+        this.jdbc = jdbc;
     }
-//
-//    public ProblemPackageService(ProblemRepository problems,
-//                                 TestCaseRepository testCases,
-//                                 ContestService contestService) {
-//        this(problems, testCases, contestService, null);
-//    }
 
     @Transactional
     public ProblemPackageResultDto importPackage(byte[] zipBytes) {
@@ -136,8 +138,13 @@ public class ProblemPackageService {
                     + MIN_MEMORY_KB + " and " + MAX_MEMORY_KB);
         }
 
-        // --- statement ---
+        // --- statement (HTML preferred; PDF supported since V59) ---
         String statementHtml = findStatement(files, errors);
+        byte[] statementPdf = findStatementPdf(files);
+        if (statementPdf != null && statementPdf.length > MAX_STATEMENT_PDF_BYTES) {
+            errors.add("The PDF statement is larger than "
+                    + (MAX_STATEMENT_PDF_BYTES / 1024 / 1024) + " MB");
+        }
 
         // --- checker (optional custom checker, FR-14) ---
         CheckerType checkerType = CheckerType.EXACT;
@@ -203,13 +210,24 @@ public class ProblemPackageService {
         problem.setContestId(contestId);
         problem.setCode(code.trim());
         problem.setTitle(title.trim());
-        problem.setStatementHtml(statementHtml);
+        // HTML wins when a package ships both; a PDF-only package gets the
+        // placeholder, because statement_html is NOT NULL.
+        boolean usingPdf = statementHtml == null && statementPdf != null;
+        problem.setStatementHtml(usingPdf
+                ? pdfPlaceholder(code.trim(), title.trim()) : statementHtml);
+        problem.setStatementIsPdf(usingPdf);
         problem.setTimeLimitMs(timeLimitMs);
         problem.setMemoryLimitKb(memoryLimitKb);
         problem.setOrdering(problems.findByContestIdOrderByOrderingAscCodeAsc(contestId).size() + 1);
         problem.setCheckerType(checkerType);
         problem.setCheckerSource(checkerSource);
         problems.save(problem);
+
+        if (usingPdf) {
+            // Side table, so Problem stays cheap to load everywhere else (V59).
+            jdbc.update("INSERT INTO problem_statement_pdfs (problem_id, data) VALUES (?, ?)",
+                    problem.getId(), statementPdf);
+        }
 
         int idx = 1;
         for (Map.Entry<String, String> in : inputs.entrySet()) {
@@ -320,7 +338,6 @@ public class ProblemPackageService {
      */
     private static String findStatement(Map<String, byte[]> files, List<String> errors) {
         String found = null;
-        boolean sawPdf = false;
         for (Map.Entry<String, byte[]> e : files.entrySet()) {
             String path = e.getKey().toLowerCase();
             if (!path.startsWith("statement/")) {
@@ -333,19 +350,37 @@ public class ProblemPackageService {
                 found = "<pre class=\"statement-text\">"
                         + escapeHtml(new String(e.getValue(), StandardCharsets.UTF_8))
                         + "</pre>";
-            } else if (path.endsWith(".pdf")) {
-                sawPdf = true;
             }
         }
-        if (found == null) {
-            if (sawPdf) {
-                errors.add("statement/ contains only a PDF — PDF statements are not supported yet; "
-                        + "export it as HTML (see STATUS.md known gaps)");
-            } else {
-                errors.add("No statement found — statement/ must contain an .html, .txt or .md file");
-            }
+        // A PDF is handled by the caller, which stores the bytes; reaching here
+        // with neither means the package genuinely has no statement.
+        if (found == null && findStatementPdf(files) == null) {
+            errors.add("No statement found — statement/ must contain "
+                    + "an .html, .txt, .md or .pdf file");
         }
         return found;
+    }
+
+    /**
+     * The PDF statement, if the package ships one (FR-05).
+     *
+     * HTML still wins when both are present: it themes properly, reflows, and
+     * is searchable, so a package offering both is offering a preference.
+     */
+    private static byte[] findStatementPdf(Map<String, byte[]> files) {
+        for (Map.Entry<String, byte[]> e : files.entrySet()) {
+            String path = e.getKey().toLowerCase();
+            if (path.startsWith("statement/") && path.endsWith(".pdf")) {
+                return e.getValue();
+            }
+        }
+        return null;
+    }
+
+    /** A PDF statement needs something in the NOT NULL statement_html column. */
+    private static String pdfPlaceholder(String code, String title) {
+        return "<p class=\"statement-text\">The statement for " + escapeHtml(code)
+                + ". " + escapeHtml(title) + " is a PDF.</p>";
     }
 
     private static String escapeHtml(String s) {

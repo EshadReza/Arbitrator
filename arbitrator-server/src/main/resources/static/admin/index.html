@@ -105,6 +105,10 @@ tr.sel{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .v-none{color:var(--muted)}
 
 .hint{color:var(--muted);font-size:12px;line-height:1.55}
+/* Unanswered-question count on the sidebar, so a waiting participant is
+   visible from whichever section the instructor happens to be in. */
+.pill{background:var(--red);color:#fff;border-radius:999px;padding:1px 7px;
+      font-size:10.5px;font-weight:700;margin-left:auto}
 .hint b{color:var(--ink)}
 pre.code{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:13px;
          overflow:auto;max-height:360px;white-space:pre;tab-size:4;
@@ -122,6 +126,8 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
 .modal{position:fixed;inset:0;background:rgba(10,14,20,.55);display:grid;place-items:center;
        padding:20px;z-index:50}
 .modal>.card{width:min(560px,100%);margin:0;max-height:88vh;overflow:auto}
+/* Code and statements need room; a 560px column makes both unreadable. */
+.modal>.card.wide{width:min(1080px,100%)}
 .opt{display:flex;align-items:flex-start;gap:9px;padding:6px 0;cursor:pointer}
 .opt input{margin-top:4px;flex:none}
 .opt .d{display:block;color:var(--muted);font-size:12px;font-weight:400}
@@ -174,6 +180,9 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
     <button class="nav"    data-sec="people"   onclick="go('people')"><span class="ic">👥</span>Participants</button>
     <button class="nav"    data-sec="feed"     onclick="go('feed')"><span class="ic">📊</span>Submissions</button>
     <button class="nav" data-sec="standings" onclick="go('standings')"><span class="ic">📝</span>Standings & Marks</button>
+    <button class="nav" data-sec="announce" onclick="go('announce')"><span class="ic">📢</span>Announcements</button>
+    <button class="nav" data-sec="clarify"  onclick="go('clarify')"><span class="ic">❓</span>Clarifications
+      <span class="pill hide" id="clarifyBadge">0</span></button>
     <button class="nav"    data-sec="contests" onclick="go('contests')"><span class="ic">🗂</span>All contests</button>
     <div class="side-foot">
       <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
@@ -349,26 +358,6 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
           </tr></thead><tbody></tbody></table>
         </div>
       </div>
-      <div class="card hide" id="sourceCard">
-        <header>
-          <span id="sourceTitle">Source</span>
-          <span class="spacer"></span>
-          <select id="sourceOverrideSelect" onchange="overrideCurrentSourceVerdict(this.value)" style="font-size:12px;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2)">
-            <option value="" disabled selected>Override verdict...</option>
-            <option value="AC">Set AC (Accepted)</option>
-            <option value="WA">Set WA (Wrong Answer)</option>
-            <option value="TLE">Set TLE (Time Limit Exceeded)</option>
-            <option value="MLE">Set MLE (Memory Limit Exceeded)</option>
-            <option value="RE">Set RE (Runtime Error)</option>
-            <option value="CE">Set CE (Compile Error)</option>
-          </select>
-          <button class="btn sm" onclick="document.getElementById('sourceCard').classList.add('hide')">Close</button>
-        </header>
-        <div class="body">
-          <pre class="code" id="sourceCode"></pre>
-          <div id="sourceTests" style="margin-top:14px"></div>
-        </div>
-      </div>
     </section>
 
     <section id="sec-standings" class="hide">
@@ -386,10 +375,54 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
           </tr></thead><tbody></tbody></table>
         </div>
       </div>
-      <div class="card hide" id="bestSourceCard">
-        <header><span id="bestSourceTitle">Best Submissions</span><span class="spacer"></span>
-          <button class="btn sm" onclick="document.getElementById('bestSourceCard').classList.add('hide')">Close</button></header>
-        <div class="body" id="bestSourceContainer"></div>
+    </section>
+
+    <section id="sec-announce" class="hide">
+      <h1>Announcements</h1>
+      <div class="lede">Published to every connected participant at once, as a popup they must acknowledge.</div>
+
+      <div class="card">
+        <header>Write an announcement</header>
+        <div class="body">
+          <textarea id="annBody" spellcheck="false" placeholder="e.g. In problem B, assume 1 &le; n &le; 10&lt;sup&gt;5&lt;/sup&gt;."
+                    oninput="renderAnnouncementPreview()"
+                    style="width:100%;height:120px;padding:11px;border:1px solid var(--border);
+                           border-radius:8px;background:var(--surface2);resize:vertical;
+                           font:13px/1.5 ui-monospace,Menlo,monospace"></textarea>
+          <p class="hint" style="margin-top:8px">
+            Written as HTML, which is what makes mathematics possible offline — no formula engine
+            to install. Use <code>&lt;sup&gt;</code> for powers, <code>&lt;sub&gt;</code> for
+            indices, and entities such as <code>&amp;le;</code> &le; <code>&amp;ge;</code> &ge;
+            <code>&amp;ne;</code> &ne; <code>&amp;sum;</code> &sum; <code>&amp;radic;</code> &radic;
+            <code>&amp;infin;</code> &infin; <code>&amp;alpha;</code> &alpha;.
+          </p>
+          <div class="hint" style="margin-top:10px;font-weight:600">Preview</div>
+          <div id="annPreview" style="border:1px solid var(--border);border-radius:8px;
+                                      padding:11px;background:var(--surface);min-height:44px"></div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" id="annPublish" onclick="publishAnnouncement()">Publish to everyone</button>
+            <span class="hint" id="annStatus"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <header>Published <span class="spacer"></span>
+          <button class="btn sm" onclick="loadAnnouncements()">⟳</button></header>
+        <div class="body" id="annList" style="padding:16px"></div>
+      </div>
+    </section>
+
+    <section id="sec-clarify" class="hide">
+      <h1>Clarifications</h1>
+      <div class="lede">
+        Questions from participants. Answers are public — everyone sees them, which is the point.
+        <b>You</b> see who asked; participants do not.
+      </div>
+      <div class="card">
+        <header>Queue <span class="spacer"></span>
+          <button class="btn sm" onclick="loadClarifications()">⟳</button></header>
+        <div class="body" id="clarifyList" style="padding:16px"></div>
       </div>
     </section>
 
@@ -416,6 +449,71 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
 
     <div class="card"><header>Activity</header><div class="body"><div id="log">—</div></div></div>
   </main>
+</div>
+
+<div class="modal hide" id="sourceModal">
+  <div class="card wide">
+    <header>
+      <span id="sourceTitle">Source</span>
+      <span class="spacer"></span>
+      <select id="sourceOverrideSelect" onchange="overrideCurrentSourceVerdict(this.value)"
+              style="font-size:12px;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2)">
+        <option value="" disabled selected>Override verdict...</option>
+        <option value="AC">Set AC (Accepted)</option>
+        <option value="WA">Set WA (Wrong Answer)</option>
+        <option value="TLE">Set TLE (Time Limit Exceeded)</option>
+        <option value="MLE">Set MLE (Memory Limit Exceeded)</option>
+        <option value="RE">Set RE (Runtime Error)</option>
+        <option value="CE">Set CE (Compile Error)</option>
+      </select>
+      <button class="btn sm" onclick="closeModal('sourceModal')">Close</button>
+    </header>
+    <div class="body">
+      <pre class="code" id="sourceCode"></pre>
+      <div id="sourceTests" style="margin-top:14px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hide" id="bestSourceModal">
+  <div class="card wide">
+    <header><span id="bestSourceTitle">Best Submissions</span><span class="spacer"></span>
+      <button class="btn sm" onclick="closeModal('bestSourceModal')">Close</button></header>
+    <div class="body" id="bestSourceContainer"></div>
+  </div>
+</div>
+
+<div class="modal hide" id="problemModal">
+  <div class="card wide">
+    <header><span id="problemEditTitle">Edit problem</span><span class="spacer"></span>
+      <button class="btn sm" onclick="closeModal('problemModal')">Close</button></header>
+    <div class="body">
+      <div class="row" style="margin-bottom:10px">
+        <label class="hint" style="width:72px">Title</label>
+        <input type="text" id="peTitle" style="flex:1;min-width:240px">
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <label class="hint" style="width:72px">Limits</label>
+        <input type="number" id="peTime" min="100" step="100" style="width:110px" title="time limit (ms)">
+        <span class="hint">ms</span>
+        <input type="number" id="peMem" min="1024" step="1024" style="width:130px" title="memory limit (KB)">
+        <span class="hint">KB</span>
+      </div>
+      <div class="hint" style="margin-bottom:5px">Statement (HTML — exactly what the client renders)</div>
+      <textarea id="peStatement" spellcheck="false"
+                style="width:100%;height:340px;padding:11px;border:1px solid var(--border);
+                       border-radius:8px;background:var(--surface2);resize:vertical;
+                       font:12px/1.5 ui-monospace,Menlo,monospace;tab-size:2"></textarea>
+      <p class="hint" style="margin-top:10px">
+        Test data is not touched here — only the wording and the limits. Saving reaches every
+        connected client at once, so a correction mid-contest does not need anyone to sign out.
+      </p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" id="peSave" onclick="saveProblem()">Save changes</button>
+        <span class="hint" id="peStatus"></span>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="modal hide" id="exportModal">
@@ -462,7 +560,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
 
 <script>
 let token=null, selected=null, state=null, tick=null, monitorTick=null, serverInfo=null;
-let currentSourceId=null, testVisibility=false;
+let currentSourceId=null, testVisibility=false, stateTick=null, polling=false;
 const $=id=>document.getElementById(id);
 const two=n=>String(n).padStart(2,'0');
 const clock=ms=>{ if(ms==null||ms<0) return '—';
@@ -488,13 +586,15 @@ async function api(method,path,params,quiet){
 }
 
 function go(sec){
-  ['control','problems','people','feed','standings','contests']
+  ['control','problems','people','feed','standings','announce','clarify','contests']
     .forEach(s=>$('sec-'+s).classList.toggle('hide',s!==sec));
   document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('on',n.dataset.sec===sec));
   if(sec==='problems') listProblems();
   if(sec==='people')   loadMonitor();
   if(sec==='feed')     loadFeed();
   if(sec==='standings') loadStandings();
+  if(sec==='announce') loadAnnouncements();
+  if(sec==='clarify')  loadClarifications();
   if(sec==='contests') loadContests();
 }
 
@@ -510,6 +610,7 @@ async function login(){
   await loadServerInfo();
   await loadContests();
   if(!tick) tick=setInterval(paintClocks,1000);
+  if(!stateTick) stateTick=setInterval(pollContestState,3000);
   if(!monitorTick) monitorTick=setInterval(()=>{
     if($('autoRefresh').checked && selected!=null && !$('sec-people').classList.contains('hide')) loadMonitor();
   },5000);
@@ -573,6 +674,33 @@ async function refreshSelected(){
   paintClocks();
 }
 
+/* The console is static HTML with no STOMP client, so it never hears the pushes
+   the JavaFX clients get. A scheduled lobby that starts on its own — the server
+   flips it to ACTIVE from a timer, not from a click here — therefore left this
+   screen showing LOBBY until somebody pressed refresh. Polling the state is the
+   cheapest way to make the console notice things it did not itself do. */
+async function pollContestState(){
+  if(selected==null||!token||polling) return;
+  polling=true;
+  try{
+    const {status,body}=await api('GET','/api/contests/'+selected,null,true);
+    if(status>=300||!body) return;
+    const moved = !state
+        || state.state!==body.state
+        || state.startTimeMs!==body.startTimeMs
+        || state.endTimeMs!==body.endTimeMs;
+    if(moved){
+      // loadContests() repaints the contest table and calls refreshSelected(),
+      // which re-derives the buttons, the clocks and the visibility checkbox.
+      await loadContests();
+      log(200,'Contest is now '+body.state);
+    }
+    // A question can arrive while the instructor is on any other section, so
+    // the waiting count is refreshed regardless of which one is showing.
+    await loadClarifications();
+  } finally { polling=false; }
+}
+
 /* Ticks off the server-clock offset so it never drifts (FMEA-06). */
 function paintClocks(){
   if(!state) return;
@@ -632,9 +760,53 @@ async function listProblems(){
   $('pTable').querySelector('tbody').innerHTML =
     Array.isArray(body)&&body.length ? body.map(p=>`<tr>
         <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
-        <td><button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn sm" onclick="editProblem(${p.id})">Edit</button>
+          <button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
       </tr>`).join('')
     : '<tr><td colspan="3" class="empty">No problems yet — upload a package below.</td></tr>';
+}
+
+/* Editing a statement used to mean deleting the problem and re-uploading the
+   package — which also destroyed every submission made against it. */
+let editingProblemId=null;
+
+async function editProblem(id){
+  const {status,body}=await api('GET','/api/admin/problems/'+id);
+  if(status>=300||!body) return;
+  editingProblemId=id;
+  $('problemEditTitle').textContent=`Edit problem ${body.code}`;
+  $('peTitle').value=body.title||'';
+  $('peTime').value=body.timeLimitMs||'';
+  $('peMem').value=body.memoryLimitKb||'';
+  $('peStatement').value=body.statementHtml||'';
+  $('peStatus').textContent='';
+  openModal('problemModal');
+}
+
+async function saveProblem(){
+  if(editingProblemId==null) return;
+  const title=$('peTitle').value.trim(), statement=$('peStatement').value;
+  if(!title){ $('peStatus').textContent='A title is required.'; return; }
+  if(!statement.trim()){ $('peStatus').textContent='The statement cannot be empty.'; return; }
+
+  const btn=$('peSave'); btn.disabled=true; $('peStatus').textContent='Saving…';
+  const res=await fetch('/api/admin/problems/'+editingProblemId,{
+    method:'PUT',
+    headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+    body:JSON.stringify({ title, statementHtml:statement,
+                          timeLimitMs:parseInt($('peTime').value,10)||null,
+                          memoryLimitKb:parseInt($('peMem').value,10)||null })});
+  btn.disabled=false;
+  if(!res.ok){
+    const err=await res.json().catch(()=>({}));
+    $('peStatus').textContent=err.message||('Save failed (HTTP '+res.status+')');
+    log(res.status,err.message||'Save failed');
+    return;
+  }
+  $('peStatus').textContent='Saved — clients updated.';
+  log(200,'Problem updated; every connected client was told');
+  await listProblems();
 }
 
 async function delProblem(id,code){
@@ -861,7 +1033,7 @@ async function viewParticipantCodes(username, displayName){
       </div>
     `).join('');
   }
-  $('bestSourceCard').classList.remove('hide');
+  openModal('bestSourceModal');
 }
 
 /* \u2500\u2500 the address students type into their client \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
@@ -892,17 +1064,172 @@ async function copyAddress(){
   }
 }
 
+/* \u2500\u2500 announcements (FR-07) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+
+/* The preview is the whole safety net for HTML-as-math: the instructor sees
+   exactly what the room will see before it is published and cannot be recalled. */
+function renderAnnouncementPreview(){
+  $('annPreview').innerHTML = $('annBody').value || '<span class="hint">Nothing yet.</span>';
+}
+
+async function publishAnnouncement(){
+  if(selected==null){ log(400,'Select a contest first'); return; }
+  const body=$('annBody').value.trim();
+  if(!body){ $('annStatus').textContent='Write something first.'; return; }
+  if(!confirm('Publish this to every participant? It pops up on their screen immediately.')) return;
+
+  const btn=$('annPublish'); btn.disabled=true; $('annStatus').textContent='Publishing\u2026';
+  const res=await fetch(`/api/admin/contests/${selected}/announcements`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+    body:JSON.stringify({body})});
+  btn.disabled=false;
+  if(!res.ok){
+    const err=await res.json().catch(()=>({}));
+    $('annStatus').textContent=err.message||('Failed (HTTP '+res.status+')');
+    return;
+  }
+  $('annStatus').textContent='Published.';
+  $('annBody').value=''; renderAnnouncementPreview();
+  log(200,'Announcement published to every connected client');
+  await loadAnnouncements();
+}
+
+async function loadAnnouncements(){
+  if(selected==null) return;
+  const {status,body}=await api('GET',`/api/admin/contests/${selected}/announcements`,null,true);
+  if(status>=300||!Array.isArray(body)) return;
+  $('annList').innerHTML = body.length ? body.map(a=>`
+    <div style="border:1px solid var(--border);border-radius:8px;padding:11px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:6px">
+        <span class="hint">${esc(new Date(a.createdAtMs).toLocaleString())}</span>
+        <span class="spacer"></span>
+        <button class="btn sm danger" onclick="deleteAnnouncement(${a.id})">Delete</button>
+      </div>
+      <div>${a.body}</div>
+    </div>`).join('') : '<div class="empty">Nothing published yet.</div>';
+}
+
+async function deleteAnnouncement(id){
+  if(!confirm('Delete this announcement? Participants who already saw it keep what they read.')) return;
+  const {status}=await api('DELETE','/api/admin/announcements/'+id);
+  if(status<300) await loadAnnouncements();
+}
+
+/* \u2500\u2500 clarifications \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+
+/* The poll ticks every 3 s and used to rebuild #clarifyList unconditionally —
+   including the <input> the instructor might be mid-sentence typing an answer
+   into. A fresh innerHTML() on every tick destroys that node outright, so
+   whatever was typed vanished a second or two after the instructor started.
+   Two guards fix it: skip the DOM rebuild entirely when the fetched data is
+   byte-for-byte the same as last time (the overwhelmingly common case, since
+   most ticks find nothing new), and on the rare tick that DOES rebuild because
+   something genuinely changed, save the currently-focused input's draft first
+   and restore it into the new DOM afterward. */
+let lastClarifySignature=null;
+
+async function loadClarifications(){
+  if(selected==null) return;
+  const {status,body}=await api('GET',`/api/admin/contests/${selected}/clarifications`,null,true);
+  if(status>=300||!Array.isArray(body)) return;
+
+  const waiting=body.filter(c=>!c.answer).length;
+  const badge=$('clarifyBadge');
+  badge.textContent=waiting;
+  badge.classList.toggle('hide',waiting===0);
+
+  const signature=JSON.stringify(body);
+  if(signature===lastClarifySignature) return;   // nothing actually changed
+  lastClarifySignature=signature;
+
+  // Preserve an in-progress answer draft across the rebuild it would otherwise
+  // be destroyed by — this is what stops the instructor's own typing from
+  // being wiped out mid-sentence when a genuinely new question arrives.
+  const active=document.activeElement;
+  const draftId=(active&&active.tagName==='INPUT'&&active.id.startsWith('ans-'))?active.id:null;
+  const draftValue=draftId?active.value:null;
+  const draftSelection=draftId?[active.selectionStart,active.selectionEnd]:null;
+
+  $('clarifyList').innerHTML = body.length ? body.map(c=>{
+    const scope=c.problemCode ? `${esc(c.problemCode)}. ${esc(c.problemTitle||'')}` : 'General';
+    const answerReach=c.isPublic ? 'everyone will see it' : 'private \u2014 only the asker will see it';
+    return `
+    <div style="border:1px solid var(--border);border-left:3px solid ${c.isPublic?'var(--border)':'var(--purple)'};
+                border-radius:8px;padding:11px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:6px;gap:10px">
+        <b>${scope}</b>
+        ${c.isPublic ? '' : '<span class="badge" style="background:var(--purple)">PRIVATE</span>'}
+        <span class="hint">asked by <b>${esc(c.askedBy||'unknown')}</b></span>
+        <span class="hint">${esc(new Date(c.askedAtMs).toLocaleString())}</span>
+        <span class="spacer"></span>
+        ${c.answer ? '<span class="v-AC">answered</span>' : '<span class="v-TLE">waiting</span>'}
+      </div>
+      <div style="margin-bottom:8px">${esc(c.question)}</div>
+      ${c.answer
+        ? `<div style="border-left:3px solid var(--green);padding-left:10px">
+             <div class="hint">Answer \u00b7 ${esc(new Date(c.answeredAtMs).toLocaleString())}</div>
+             <div>${esc(c.answer)}</div>
+           </div>
+           <div class="row" style="margin-top:8px">
+             <button class="btn sm" onclick="answerClarification(${c.id},true)">Revise answer</button>
+           </div>`
+        : `<div class="row">
+             <input type="text" id="ans-${c.id}" placeholder="Your answer \u2014 ${answerReach}"
+                    style="flex:1;min-width:240px"
+                    onkeydown="if(event.key==='Enter')answerClarification(${c.id})">
+             <button class="btn primary sm" onclick="answerClarification(${c.id})">Answer</button>
+           </div>`}
+    </div>`;
+  }).join('') : '<div class="empty">No questions yet.</div>';
+
+  if(draftId){
+    const restored=$(draftId);
+    if(restored){
+      restored.value=draftValue;
+      restored.focus();
+      restored.setSelectionRange(draftSelection[0], draftSelection[1]);
+    }
+  }
+}
+
+async function answerClarification(id, revise){
+  let answer;
+  if(revise){
+    answer=prompt('Revised answer (everyone sees this):');
+    if(answer===null) return;
+  } else {
+    const field=$('ans-'+id);
+    answer=field ? field.value : '';
+  }
+  if(!answer||!answer.trim()){ log(400,'Write an answer first'); return; }
+  const res=await fetch(`/api/admin/clarifications/${id}/answer`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+    body:JSON.stringify({answer})});
+  if(!res.ok){
+    const err=await res.json().catch(()=>({}));
+    log(res.status, err.message||'Could not answer');
+    return;
+  }
+  log(200,'Answered \u2014 the board updated for everyone');
+  await loadClarifications();
+}
+
 /* \u2500\u2500 export \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
 
 const csvCell=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
 const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'contest';
 
+function openModal(id){ $(id).classList.remove('hide'); }
+function closeModal(id){ $(id).classList.add('hide'); }
+
 function openExport(){
   if(selected==null){ log(400,'Select a contest first'); return; }
   $('exStatus').textContent='';
-  $('exportModal').classList.remove('hide');
+  openModal('exportModal');
 }
-function closeExport(){ $('exportModal').classList.add('hide'); }
+function closeExport(){ closeModal('exportModal'); }
 
 async function runExport(){
   const o={ summary:$('exSummary').checked, problems:$('exProblems').checked,
@@ -1062,8 +1389,14 @@ function download(filename,text,mime){
   URL.revokeObjectURL(url);
 }
 
-$('exportModal').addEventListener('click',e=>{ if(e.target===$('exportModal')) closeExport(); });
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeExport(); });
+/* Backdrop click and Escape dismiss whichever dialog is open. There are four
+   now, and one that traps you until you find its Close button feels broken. */
+const MODALS=['exportModal','sourceModal','bestSourceModal','problemModal'];
+MODALS.forEach(id=>{
+  const el=$(id);
+  if(el) el.addEventListener('click',e=>{ if(e.target===el) closeModal(id); });
+});
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') MODALS.forEach(closeModal); });
 
 async function viewSource(id){
   const {status,body}=await api('GET','/api/admin/submissions/'+id+'/source');
@@ -1074,7 +1407,9 @@ async function viewSource(id){
   $('sourceCode').textContent=(body.sourceCode||'')+
     (body.compilerOutput?'\n\n--- compiler output ---\n'+body.compilerOutput:'');
   $('sourceOverrideSelect').selectedIndex=0;
-  $('sourceCard').classList.remove('hide');
+  // A popup, not a panel below the table: the feed can be long, and scrolling
+  // to the bottom to read every submission is the wrong way round.
+  openModal('sourceModal');
   loadSourceTests(id);
 }
 
@@ -1110,9 +1445,13 @@ async function loadSourceTests(id){
           <span class="hint">${t.execTimeMs>=0?t.execTimeMs+' ms':''}</span>
           ${t.truncated?'<span class="hint">(truncated)</span>':''}
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
           <div><div class="hint">Input</div><pre class="code">${esc(t.input||'')}</pre></div>
           <div><div class="hint">Expected output</div><pre class="code">${esc(t.expectedOutput||'')}</pre></div>
+          <div><div class="hint">Their output</div><pre class="code">${
+            t.actualOutput==null
+              ? '<span class="hint">not recorded for this submission</span>'
+              : esc(t.actualOutput)}</pre></div>
         </div>
       </div>`).join('');
 }

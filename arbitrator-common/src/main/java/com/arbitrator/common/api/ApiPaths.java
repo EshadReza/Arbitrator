@@ -20,6 +20,12 @@ public final class ApiPaths {
     public static final String CONTEST_BY_ID = "/api/contests/{id}";       // GET one contest's state
     public static final String PROBLEMS = "/api/problems";                 // GET list
     public static final String PROBLEM_BY_ID = "/api/problems/{id}";       // GET detail
+    /** Raw PDF bytes, when the problem's statement is a PDF (FR-05). */
+    public static final String PROBLEM_STATEMENT_PDF = "/api/problems/{id}/statement.pdf";
+    /** FR-07: announcements for the contest the caller is in. */
+    public static final String ANNOUNCEMENTS = "/api/announcements";
+    /** Public clarification board: GET to read it, POST to ask. */
+    public static final String CLARIFICATIONS = "/api/clarifications";
     public static final String SUBMISSIONS = "/api/submissions";           // POST
     public static final String SUBMISSIONS_MINE = "/api/submissions/mine"; // GET history
     public static final String RUN_CUSTOM = "/api/run";                    // POST, not judged
@@ -42,7 +48,8 @@ public final class ApiPaths {
     public static final String ADMIN_CONTEST_UNFREEZE = "/api/admin/contests/{id}/unfreeze";
     public static final String ADMIN_PROBLEMS = "/api/admin/problems";              // GET list
     public static final String ADMIN_PROBLEM_UPLOAD = "/api/admin/problems/upload"; // POST multipart
-    public static final String ADMIN_PROBLEM_BY_ID = "/api/admin/problems/{id}";    // DELETE
+    /** GET the full problem for editing, PUT the edits back, DELETE to remove. */
+    public static final String ADMIN_PROBLEM_BY_ID = "/api/admin/problems/{id}";
     public static final String ADMIN_PARTICIPANTS = "/api/admin/contests/{id}/participants";
     public static final String ADMIN_CONTEST_SUBMISSIONS = "/api/admin/contests/{id}/submissions";
     public static final String ADMIN_SUBMISSION_SOURCE = "/api/admin/submissions/{id}/source";
@@ -60,6 +67,12 @@ public final class ApiPaths {
     public static final String ADMIN_SUBMISSION_TESTS = "/api/admin/submissions/{id}/tests";
     /** This machine's LAN addresses — what the instructor reads out to the room. */
     public static final String ADMIN_SERVER_INFO = "/api/admin/server";
+    /** FR-07: compose and list announcements for a contest. */
+    public static final String ADMIN_ANNOUNCEMENTS = "/api/admin/contests/{id}/announcements";
+    public static final String ADMIN_ANNOUNCEMENT_BY_ID = "/api/admin/announcements/{id}";
+    /** The clarification queue, with the asker's name attached. */
+    public static final String ADMIN_CLARIFICATIONS = "/api/admin/contests/{id}/clarifications";
+    public static final String ADMIN_CLARIFICATION_ANSWER = "/api/admin/clarifications/{id}/answer";
 
     // --- static admin panel, loopback only ---
     public static final String ADMIN_PANEL_PREFIX = "/admin";

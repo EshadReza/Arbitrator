@@ -14,7 +14,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.fxmisc.richtext.CodeArea;
-import org.fxmisc.richtext.LineNumberFactory;
 import org.fxmisc.richtext.model.StyleSpans;
 import org.fxmisc.richtext.model.StyleSpansBuilder;
 
@@ -114,7 +113,7 @@ public class EditorController {
     @FXML
     private void initialize() {
         codeArea = new CodeArea();
-        codeArea.setParagraphGraphicFactory(LineNumberFactory.get(codeArea));
+        codeArea.setParagraphGraphicFactory(CodeAreaGutter.factory(codeArea));
         codeArea.getStyleClass().add("code-area");
         VBox.setVgrow(codeArea, javafx.scene.layout.Priority.ALWAYS);
         editorBox.getChildren().add(1, codeArea);   // between toolbar and status bar

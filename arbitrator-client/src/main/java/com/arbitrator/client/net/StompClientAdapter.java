@@ -18,6 +18,7 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 
 import com.arbitrator.client.app.ServerConfig;
 import com.arbitrator.common.api.StompDestinations;
+import com.arbitrator.common.dto.AnnouncementDto;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.VerdictEventDto;
@@ -72,6 +73,35 @@ public class StompClientAdapter implements AutoCloseable {
                 // Surfaced through the connection banner in S3-C7; log for now.
                 System.err.println("STOMP error: " + ex.getMessage());
             }
+
+            /**
+             * The gap STATUS.md's known issue #8 describes: this callback is the
+             * ONLY notification a dropped WebSocket sends — a heartbeat timeout,
+             * a killed server, a network blip. StompSessionHandlerAdapter's
+             * default implementation is a no-op, so without this override
+             * nothing ever learned the transport had died: {@code session} kept
+             * pointing at a dead object, isConnected() kept answering from
+             * whatever Spring's internal flag happened to hold, and every
+             * subscription on it — verdicts, announcements, clarifications,
+             * leaderboard, contest state — went silently dark with no visible
+             * symptom until the participant restarted the app. Proven live: a
+             * transport error was reproduced and the announcement published
+             * afterward was never delivered while nothing here reacted.
+             *
+             * Clearing the field is the whole fix: isConnected() (below) starts
+             * answering false immediately, and MainController's existing 3 s
+             * watchdog already calls connectLive() again the moment isLive()
+             * goes false — which redials and resubscribes everything at once.
+             */
+            @Override
+            public void handleTransportError(StompSession s, Throwable ex) {
+                System.err.println("STOMP transport lost: " + ex.getMessage());
+                synchronized (StompClientAdapter.this) {
+                    if (session == s) {
+                        session = null;
+                    }
+                }
+            }
         };
 
         try {
@@ -95,6 +125,24 @@ public class StompClientAdapter implements AutoCloseable {
     public void subscribeContestState(long contestId, Consumer<ContestStateDto> onState)
             throws JudgeApi.ApiException {
         subscribe(StompDestinations.contestState(contestId), ContestStateDto.class, onState);
+    }
+
+    /** FR-07: a new announcement for this contest. */
+    public void subscribeAnnouncements(long contestId, Consumer<AnnouncementDto> onAnnouncement)
+            throws JudgeApi.ApiException {
+        subscribe(StompDestinations.contestAnnouncements(contestId),
+                AnnouncementDto.class, onAnnouncement);
+    }
+
+    /**
+     * The clarification board moved. The frame carries only a timestamp, so the
+     * payload type is a Map and the callback takes nothing — each side re-reads
+     * the view it is allowed to see.
+     */
+    public void subscribeClarifications(long contestId, Runnable onChanged)
+            throws JudgeApi.ApiException {
+        subscribe(StompDestinations.contestClarifications(contestId),
+                java.util.Map.class, ignored -> onChanged.run());
     }
 
     /** FR-17: contest-wide standings broadcast. */
@@ -127,6 +175,25 @@ public class StompClientAdapter implements AutoCloseable {
     public boolean isConnected() {
         StompSession s = session;
         return s != null && s.isConnected();
+    }
+
+    /**
+     * Drops the session without stopping the underlying client, so the next
+     * connect() dials afresh — and, crucially, re-reads the server address.
+     * close() cannot be used for this: it stops the WebSocketStompClient, and a
+     * stopped client cannot be reconnected. Needed when the user points the
+     * app at a different server mid-session.
+     */
+    public synchronized void disconnect() {
+        StompSession s = session;
+        session = null;
+        if (s != null && s.isConnected()) {
+            try {
+                s.disconnect();
+            } catch (RuntimeException ignored) {
+                // Already gone; nulling the reference is what matters.
+            }
+        }
     }
 
     @Override

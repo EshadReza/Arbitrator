@@ -6,7 +6,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import org.fxmisc.richtext.CodeArea;
-import org.fxmisc.richtext.LineNumberFactory;
 
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
@@ -60,7 +59,8 @@ public class SubmissionsPanelController {
     private void initialize() {
         sourceView = new CodeArea();
         sourceView.setEditable(false);
-        sourceView.setParagraphGraphicFactory(LineNumberFactory.get(sourceView));
+        // Same fixed-width gutter as the editor, for the same reason.
+        sourceView.setParagraphGraphicFactory(CodeAreaGutter.factory(sourceView));
         sourceView.getStyleClass().add("code-area");
         VBox.setVgrow(sourceView, Priority.ALWAYS);
         sourceBox.getChildren().add(sourceView);
@@ -255,8 +255,14 @@ public class SubmissionsPanelController {
 
         HBox head = new HBox(10, title, verdict, timing);
 
+        // Your output beside the expected one: a WA is only informative when you
+        // can see the two side by side.
         VBox card = new VBox(6, head,
-                new HBox(8, labelled("Input", t.input()), labelled("Expected output", t.expectedOutput())));
+                new HBox(8,
+                        labelled("Input", t.input()),
+                        labelled("Expected output", t.expectedOutput()),
+                        labelled("Your output", t.actualOutput() == null
+                                ? "(not recorded for this submission)" : t.actualOutput())));
         card.getStyleClass().add("box");
         card.setPadding(new Insets(10));
         if (t.truncated()) {

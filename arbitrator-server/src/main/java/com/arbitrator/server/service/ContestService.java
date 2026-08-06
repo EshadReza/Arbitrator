@@ -127,15 +127,23 @@ public class ContestService {
      */
     public Contest openLobby(long id) {
         Contest c = require(id);
-        if (c.getState() == ContestState.ENDED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "This contest has already ended");
-        }
+        // An ended contest is exactly what a restart begins from — the console's
+        // "Open lobby" button has always been enabled for DRAFT and ENDED alike,
+        // but this used to refuse ENDED with a 409 CONFLICT, so re-running the
+        // same contest was blocked from the one place instructors do it.
         c.setState(ContestState.LOBBY);
         c.setStartTime(null);          // no clock yet
         c.setPausedAt(null);
         c.setPausedMillis(0);
         c.setEndedAt(null);            // reopening clears the previous run's end
+        // A lobby countdown from the PREVIOUS run is almost always in the past
+        // by the time a contest is reopened — it already fired once to start
+        // that run. Left in place, the very next 1 s tick of
+        // LeaderboardBroadcaster.checkScheduledLobbies() (and stateOf()'s own
+        // copy of the same check) sees a LOBBY contest whose scheduledStartAt
+        // is already due and calls start() immediately — so "Open lobby" after
+        // an END appeared to skip the lobby and jump straight to ACTIVE.
+        c.setScheduledStartAt(null);
         return contests.save(c);
     }
 

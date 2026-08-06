@@ -3,6 +3,8 @@ package com.arbitrator.server.controller;
 import java.security.Principal;
 import java.util.List;
 
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -40,5 +42,19 @@ public class ProblemController {
     @GetMapping(ApiPaths.PROBLEM_BY_ID)
     public ProblemDetailDto detail(@PathVariable long id) {
         return problemService.detail(id);
+    }
+
+    /**
+     * FR-05: the PDF statement itself. Served as bytes over the authenticated
+     * REST channel rather than as a browsable URL, because the client renders
+     * it into the statement pane and every other request already carries a JWT.
+     */
+    @GetMapping(value = ApiPaths.PROBLEM_STATEMENT_PDF, produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> statementPdf(@PathVariable long id) {
+        byte[] pdf = problemService.statementPdf(id);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(pdf.length)
+                .body(pdf);
     }
 }

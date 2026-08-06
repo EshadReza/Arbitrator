@@ -157,18 +157,28 @@
 
 .contest-title { -fx-font-weight: bold; }
 
+/* The clock is the one thing everyone in the room looks at, from a distance
+   and at a glance, so it is deliberately the loudest element on the bar:
+   larger, heavier, wider-tracked, and sitting on its own raised chip. */
 .timer {
     -fx-font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
-    -fx-font-size: 24px;
-    -fx-font-weight: 900;
+    -fx-font-size: 31px;
+    -fx-font-weight: bold;
     -fx-text-fill: -c-accent;
     -fx-alignment: CENTER;
     -fx-text-alignment: CENTER;
-    -fx-padding: 3 14 3 14;
-    -fx-background-color: derive(-c-surface, 5%);
-    -fx-background-radius: 6px;
-    -fx-border-color: -c-border;
-    -fx-border-radius: 6px;
+    -fx-letter-spacing: 1.5px;
+    -fx-padding: 4 20 4 20;
+    -fx-background-color: derive(-c-surface-2, 4%);
+    -fx-background-radius: 9px;
+    -fx-border-color: derive(-c-accent, 55%);
+    -fx-border-width: 1.5;
+    -fx-border-radius: 9px;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.18), 6, 0, 0, 1);
+}
+.root.dark .timer {
+    -fx-border-color: derive(-c-accent, -35%);
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.45), 8, 0, 0, 1);
 }
 
 /* PAUSED / Contest Ended read as words, not a clock — same size, letter-spaced */
@@ -282,11 +292,42 @@
     -fx-background-color: -c-surface;
 }
 
+/* !important on every line is not decoration — RichTextFX's LineNumberFactory
+   calls label.setFont(...) / setTextFill(...) / setBackground(...) directly in
+   Java for every line-number label it creates. A value set via a property's
+   own setter outranks a plain CSS rule for that same property, so without
+   !important none of this block took effect at all: the numbers rendered in
+   RichTextFX's own default (a logical "monospace" font, ITALIC, #666-on-#ddd),
+   whatever that resolves to on the host, regardless of theme.
+   This alone does NOT fix 10/11/12-style drift, even with equal-length padded
+   strings in a real monospace font: RichTextFX's ParagraphBox measures each
+   visible row's gutter Label's prefWidth(-1) independently — there is no
+   single shared column width, just one measurement per row — so sub-pixel
+   variance between rows still shows up as that row's numbers and code
+   drifting against its neighbours. CodeAreaGutter (EditorController /
+   SubmissionsPanelController) pins every row's gutter Region to the same
+   literal min/pref/maxWidth in Java, which is what actually stops the drift;
+   this stylesheet block only keeps the font upright and legible. */
 .code-area .lineno {
-    -fx-background-color: -c-surface-2;
-    -fx-text-fill: -c-muted;
-    -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    -fx-background-color: -c-surface-2 !important;
+    -fx-text-fill: -c-muted !important;
+    -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace !important;
+    -fx-font-style: normal !important;
+    -fx-font-size: 13px !important;
+    -fx-padding: 0 8 0 6 !important;
 }
+
+/* Offered beside the "offline" indicator, so it reads as the remedy. */
+.btn-warn {
+    -fx-background-color: -c-amber;
+    -fx-text-fill: #3a2f00;
+    -fx-font-weight: bold;
+    -fx-background-radius: 6px;
+    -fx-border-color: transparent;
+    -fx-padding: 4 10 4 10;
+    -fx-cursor: hand;
+}
+.btn-warn:hover { -fx-background-color: derive(-c-amber, -10%); }
 
 .code-area .text { -fx-fill: -c-text; }
 
@@ -384,3 +425,49 @@
 .split-pane > .split-pane-divider { -fx-background-color: -c-bg; -fx-padding: 0 2 0 2; }
 .scroll-pane, .scroll-pane .viewport { -fx-background-color: transparent; }
 .web-view { -fx-background-color: -c-surface; }
+
+/* ── announcements (FR-07) ───────────────────────────────────────────────── */
+
+/* The scrim is what makes "closes only on OK" true rather than merely asked
+   for: it covers the whole app and swallows every click aimed past it. */
+.announce-scrim {
+    -fx-background-color: rgba(10, 14, 20, 0.55);
+}
+.announce-panel {
+    -fx-background-color: -c-surface-2;
+    -fx-background-radius: 0 0 12px 12px;
+    -fx-border-color: -c-accent;
+    -fx-border-width: 0 2 2 2;
+    -fx-border-radius: 0 0 12px 12px;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.45), 18, 0, 0, 4);
+}
+.announce-title {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -c-accent;
+}
+.announce-time { -fx-text-fill: -c-muted; -fx-font-size: 12px; }
+.announce-ok {
+    -fx-background-color: -c-accent;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-padding: 6 26 6 26;
+    -fx-background-radius: 7px;
+    -fx-cursor: hand;
+}
+.announce-ok:hover { -fx-background-color: derive(-c-accent, -12%); }
+
+/* ── clarifications ──────────────────────────────────────────────────────── */
+.clarify-question { -fx-text-fill: -c-text; -fx-font-size: 13.5px; }
+.clarify-answer-label {
+    -fx-text-fill: -c-green;
+    -fx-font-weight: bold;
+    -fx-font-size: 12px;
+}
+.clarify-answer { -fx-text-fill: -c-text; -fx-font-size: 13.5px; }
+.clarify-pending { -fx-text-fill: -c-amber; -fx-font-size: 12px; -fx-font-style: italic; }
+.clarify-private-badge {
+    -fx-text-fill: -c-purple;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+}

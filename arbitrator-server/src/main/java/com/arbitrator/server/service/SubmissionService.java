@@ -177,7 +177,7 @@ public class SubmissionService {
         Map<Integer, TestCaseResultDto> byIndex = new LinkedHashMap<>();
         jdbc.query("""
                 SELECT r.test_index, r.verdict, r.exec_time_ms, r.peak_memory_kb,
-                       t.input_data, t.expected_output
+                       r.actual_output, t.input_data, t.expected_output
                   FROM submission_results r
                   JOIN test_cases t ON t.problem_id = ? AND t.idx = r.test_index
                  WHERE r.submission_id = ?
@@ -185,15 +185,21 @@ public class SubmissionService {
                 """, rs -> {
             String input = rs.getString("input_data");
             String expected = rs.getString("expected_output");
+            String actual = rs.getString("actual_output");
             boolean truncated = length(input) > MAX_TEST_DATA_CHARS
-                    || length(expected) > MAX_TEST_DATA_CHARS;
+                    || length(expected) > MAX_TEST_DATA_CHARS
+                    || length(actual) > MAX_TEST_DATA_CHARS;
             int index = rs.getInt("test_index");
             byIndex.put(index, new TestCaseResultDto(
                     index,
                     parseVerdict(rs.getString("verdict")),
                     rs.getLong("exec_time_ms"),
                     rs.getLong("peak_memory_kb"),
-                    clip(input), clip(expected), truncated));
+                    clip(input), clip(expected),
+                    // Null, not "", for a run judged before V56: the view must
+                    // say "not recorded" rather than claim it printed nothing.
+                    actual == null ? null : clip(actual),
+                    truncated));
         }, s.getProblemId(), submissionId);
 
         return new SubmissionTestsDto(submissionId, true, passed, total,

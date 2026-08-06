@@ -51,6 +51,22 @@ public class Problem {
     @Column(name = "checker_source", columnDefinition = "MEDIUMTEXT")
     private String checkerSource;
 
+    /**
+     * True when the real statement is a PDF held in problem_statement_pdfs and
+     * statementHtml is only a placeholder. The bytes deliberately do not live
+     * on this entity — see V59.
+     */
+    @Column(name = "statement_is_pdf", nullable = false)
+    private boolean statementIsPdf = false;
+
+    public boolean isStatementIsPdf() {
+        return statementIsPdf;
+    }
+
+    public void setStatementIsPdf(boolean statementIsPdf) {
+        this.statementIsPdf = statementIsPdf;
+    }
+
     public Long getId() {
         return id;
     }

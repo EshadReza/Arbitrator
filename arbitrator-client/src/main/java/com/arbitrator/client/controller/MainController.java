@@ -6,6 +6,7 @@ import java.util.Map;
 
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.client.app.DraftStore;
+import com.arbitrator.client.app.PdfStatementRenderer;
 import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
@@ -29,6 +30,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.SplitPane;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.TabPane;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
@@ -57,6 +59,7 @@ public class MainController {
     @FXML private Label timerLabel;
     @FXML private Label userLabel;
     @FXML private Label connLabel;
+    @FXML private Button changeServerButton;
     @FXML private Button themeButton;
 
     @FXML private SplitPane workspaceSplit;
@@ -73,6 +76,8 @@ public class MainController {
     @FXML private EditorController editorPanelController;
     @FXML private LeaderboardPanelController leaderboardPanelController;
     @FXML private SubmissionsPanelController submissionsPanelController;
+    @FXML private AnnouncementsPanelController announcementsPanelController;
+    @FXML private ClarificationsPanelController clarificationsPanelController;
 
     private final AppState state = AppState.get();
     private Timeline timer;
@@ -89,6 +94,9 @@ public class MainController {
      */
     private final Map<Long, Draft> drafts = new HashMap<>();
     private long currentProblemId = -1;
+
+    /** Problem id + statement currently painted, so identical HTML is not reloaded. */
+    private String loadedStatementKey;
 
     private record Draft(String code, Language language) { }
 
@@ -128,6 +136,10 @@ public class MainController {
         editorPanelController.setSubmitHandler(this::submit);
         editorPanelController.setFullscreenHandler(this::toggleEditorFullscreen);
         editorPanelController.setRunHandler(this::runCustom);
+        // The board asks what to offer in its problem picker; it must never
+        // keep its own copy, or it will drift from what is actually released.
+        clarificationsPanelController.setProblemSupplier(
+                () -> List.copyOf(problemList.getItems()));
         themeButton.setText(state.darkMode() ? "☀" : "🌙");
 
         startTimer();
@@ -361,15 +373,40 @@ public class MainController {
         async(() -> {
             try {
                 ProblemDetailDto detail = state.api().problem(id);
+
+                // A PDF statement is fetched and rasterised here, off the FX
+                // thread: PDFBox rendering several pages is far too slow to do
+                // on it, and this method already runs in the background.
+                String pdfHtml = null;
+                if (detail.pdfStatement()) {
+                    pdfHtml = PdfStatementRenderer.toHtml(
+                            state.api().problemStatementPdf(id), state.darkMode());
+                }
+                final String rendered = pdfHtml;
+
                 Platform.runLater(() -> {
                     problemHeader.setText(detail.code() + ". " + detail.title()
                             + "   —   " + detail.timeLimitMs() + " ms / "
                             + detail.memoryLimitKb() / 1024 + " MB");
-                    statementView.getEngine().loadContent(wrapStatement(detail.statementHtml()));
+                    // Reloading identical HTML would reset the scroll position
+                    // on every 10 s state push, so only repaint on a real edit.
+                    // The theme is part of the key because a PDF is rasterised
+                    // per theme: toggling must force the repaint that unchanged
+                    // content would otherwise skip.
+                    String key = id + " " + state.darkMode() + " "
+                            + (rendered != null ? "pdf:" + rendered.length()
+                                                : detail.statementHtml());
+                    if (!key.equals(loadedStatementKey)) {
+                        loadedStatementKey = key;
+                        statementView.getEngine().loadContent(rendered != null
+                                ? rendered : wrapStatement(detail.statementHtml()));
+                    }
                 });
             } catch (Exception e) {
-                Platform.runLater(() ->
-                        statementView.getEngine().loadContent("<p>Problem unavailable</p>"));
+                Platform.runLater(() -> {
+                    loadedStatementKey = null;
+                    statementView.getEngine().loadContent("<p>Problem unavailable</p>");
+                });
             }
         });
     }
@@ -437,14 +474,14 @@ public class MainController {
         // Also to disk: the in-memory map dies with this screen, and signing
         // out or switching contest rebuilds it — which is how code that had
         // already been written, and even submitted, was being thrown away.
-        DraftStore.save(username(), problemId, language, code);
+        DraftStore.save(username(), contestId(), problemId, language, code);
     }
 
     private void restoreDraft(long problemId) {
         Draft draft = drafts.get(problemId);
         if (draft == null) {
             // Nothing this session — fall back to what a previous session left.
-            var stored = DraftStore.load(username(), problemId);
+            var stored = DraftStore.load(username(), contestId(), problemId);
             if (stored.isPresent()) {
                 draft = new Draft(stored.get().code(), stored.get().language());
                 drafts.put(problemId, draft);
@@ -458,6 +495,25 @@ public class MainController {
 
     private String username() {
         return state.session() == null ? null : state.session().username();
+    }
+
+    private long contestId() {
+        return state.contest() == null ? -1 : state.contest().contestId();
+    }
+
+    /**
+     * A restart is a new run: last run's code must not be sitting in the editor.
+     *
+     * The server already archives the previous run's submissions when a contest
+     * starts, so carrying drafts across would contradict standings that begin
+     * empty. A changed start instant is the signal — it is the only thing that
+     * moves when a contest is restarted.
+     */
+    private void discardDraftsForNewRun() {
+        drafts.clear();
+        DraftStore.clearContest(username(), contestId());
+        currentProblemId = -1;
+        editorPanelController.setCode("");
     }
 
     // --- submit (FR-09, UIF-08/09) -------------------------------------------
@@ -474,7 +530,7 @@ public class MainController {
         editorPanelController.setSubmitEnabled(false);
         // Submitted code is the last thing anyone can afford to lose, so it is
         // written out at the moment it is sent rather than at the next switch.
-        DraftStore.save(username(), problem.id(), language, source);
+        DraftStore.save(username(), contestId(), problem.id(), language, source);
         async(() -> {
             try {
                 SubmitAckDto ack = state.api().submit(
@@ -542,6 +598,14 @@ public class MainController {
                     submissionsPanelController.refresh(); // FR-16 history stays live
                 }));
                 long contestId = state.contest().contestId();
+                // FR-07: an announcement pops immediately and lands in its tab.
+                state.api().connectAnnouncements(contestId, a -> Platform.runLater(() -> {
+                    AnnouncementPopup.show(rootStack, a, state.darkMode());
+                    announcementsPanelController.refresh();
+                }));
+                // The board moved — re-read whichever view we are entitled to.
+                state.api().connectClarifications(contestId,
+                        () -> clarificationsPanelController.refresh());
                 state.api().connectLeaderboard(contestId,
                         board -> leaderboardPanelController.update(board));
                 // FR-06: the server owns the clock and tells us when it changes.
@@ -560,8 +624,17 @@ public class MainController {
     private void onContestState(com.arbitrator.common.dto.ContestStateDto contestState) {
         Platform.runLater(() -> {
             ContestState previous = state.contest() == null ? null : state.contest().state();
+            long previousStart = state.contest() == null ? -1 : state.contest().startTimeMs();
             state.setContest(contestState);
             contestTitleLabel.setText(contestState.title());
+
+            // A different start instant means the contest was restarted, so
+            // whatever is in the editor belongs to a run that no longer counts.
+            if (previousStart > 0 && contestState.startTimeMs() > 0
+                    && contestState.startTimeMs() != previousStart) {
+                discardDraftsForNewRun();
+                toast("Contest restarted — the editor has been cleared for the new run");
+            }
 
             boolean released = contestState.state().releasesProblems();
             boolean transitioned = previous != contestState.state();
@@ -571,6 +644,13 @@ public class MainController {
             // meant one missed push left the screen stale until sign-out.
             if (released) {
                 refreshProblems(transitioned);
+                // An instructor can edit a statement mid-contest, and the fix
+                // is worthless if it only reaches people who re-select the
+                // problem. loadProblem() no-ops when the text is unchanged, so
+                // this costs one small request and never flickers the view.
+                if (currentProblemId != -1) {
+                    loadProblem(currentProblemId);
+                }
             } else {
                 problemList.getItems().clear();
                 problemHeader.setText("");
@@ -607,6 +687,39 @@ public class MainController {
     private void setConnected(boolean live) {
         connLabel.setText(live ? "● live" : "● offline — reconnecting");
         connLabel.getStyleClass().setAll(live ? "conn-ok" : "conn-lost");
+        // Only offered while offline: pointing a healthy client at a new server
+        // mid-contest is not something to invite by leaving the button there.
+        changeServerButton.setVisible(!live);
+        changeServerButton.setManaged(!live);
+    }
+
+    /**
+     * Repoint the client at a different server without restarting it.
+     *
+     * In a lab the usual reason nothing arrives is that the instructor's
+     * machine has a different address than the one configured — a DHCP lease
+     * moved, or the wrong number was read out. Making that fixable from the
+     * screen already showing "offline" saves a restart and a re-login.
+     */
+    @FXML
+    private void onChangeServer() {
+        TextInputDialog dialog = new TextInputDialog(state.serverConfig().hostPort());
+        dialog.setTitle("Change server address");
+        dialog.setHeaderText("Address of the machine running Arbitrator");
+        dialog.setContentText("host:port");
+        dialog.initOwner(rootStack.getScene().getWindow());
+
+        dialog.showAndWait().map(String::trim).filter(s -> !s.isEmpty()).ifPresent(address -> {
+            state.serverConfig().updateHostPort(address);
+            // Drop the old socket explicitly. It may still claim to be
+            // connected — a killed peer is not always noticed — and the
+            // watchdog would then never dial the new address.
+            state.api().dropConnection();
+            setConnected(false);
+            toast("Now trying " + state.serverConfig().hostPort());
+            reconnecting = true;
+            connectLive();
+        });
     }
 
     /** Opens the Submissions tab and selects one run. */

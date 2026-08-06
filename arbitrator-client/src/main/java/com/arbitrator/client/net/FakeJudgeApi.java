@@ -8,6 +8,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
+import com.arbitrator.common.dto.AnnouncementDto;
+import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.dto.CustomRunRequest;
@@ -52,6 +54,9 @@ public class FakeJudgeApi implements JudgeApi {
     private int cycleAt = 0;
 
     private volatile Consumer<VerdictEventDto> onVerdict;
+    private volatile Runnable onClarifications;
+    private final List<AnnouncementDto> fakeAnnouncements = new ArrayList<>();
+    private final List<ClarificationDto> fakeClarifications = new ArrayList<>();
 
     @Override
     public LoginResponse login(String username, String password) {
@@ -112,7 +117,7 @@ public class FakeJudgeApi implements JudgeApi {
                 output
                 5</pre>
                 """,
-                2000, 262144);
+                2000, 262144, false);
     }
 
     @Override
@@ -165,10 +170,10 @@ public class FakeJudgeApi implements JudgeApi {
         // Mock mode shows the feature switched on, with the fail-fast shape:
         // everything up to the failure, then the test that caused it.
         return new SubmissionTestsDto(submissionId, true, 2, 5, List.of(
-                new TestCaseResultDto(1, Verdict.AC, 12, 2048, "2 3\n", "5\n", false),
-                new TestCaseResultDto(2, Verdict.AC, 11, 2048, "-5 5\n", "0\n", false),
+                new TestCaseResultDto(1, Verdict.AC, 12, 2048, "2 3\n", "5\n", "5\n", false),
+                new TestCaseResultDto(2, Verdict.AC, 11, 2048, "-5 5\n", "0\n", "0\n", false),
                 new TestCaseResultDto(3, Verdict.WA, 14, 2048,
-                        "1000000000 1000000000\n", "2000000000\n", false)));
+                        "1000000000 1000000000\n", "2000000000\n", "-294967296\n", false)));
     }
 
     @Override
@@ -224,6 +229,68 @@ public class FakeJudgeApi implements JudgeApi {
     @Override
     public boolean isLive() {
         return true;
+    }
+
+    @Override
+    public void dropConnection() {
+        // Mock mode has no socket to drop; it is always "connected".
+    }
+
+    @Override
+    public byte[] problemStatementPdf(long id) throws ApiException {
+        // Mock problems are HTML, so nothing should ever ask for this.
+        throw new ApiException(404, "No PDF statement in mock mode");
+    }
+
+    @Override
+    public List<AnnouncementDto> announcements(long contestId) {
+        return List.copyOf(fakeAnnouncements);
+    }
+
+    @Override
+    public List<ClarificationDto> clarifications(long contestId) {
+        return List.copyOf(fakeClarifications);
+    }
+
+    @Override
+    public ClarificationDto askClarification(Long problemId, long contestId, String question,
+                                             boolean isPublic) {
+        ClarificationDto asked = new ClarificationDto(
+                ids.incrementAndGet(),
+                problemId == null ? null : "A", problemId == null ? null : "Two Sum",
+                question, null, System.currentTimeMillis(), -1, null, isPublic);
+        fakeClarifications.add(0, asked);
+        // Answer it on a timer so the "answered" path is demoable without a server.
+        timer.schedule(() -> {
+            fakeClarifications.remove(asked);
+            fakeClarifications.add(0, new ClarificationDto(
+                    asked.id(), asked.problemCode(), asked.problemTitle(), asked.question(),
+                    "(mock) Yes — read the constraints again.",
+                    asked.askedAtMs(), System.currentTimeMillis(), null, asked.isPublic()));
+            Runnable r = onClarifications;
+            if (r != null) {
+                r.run();
+            }
+        }, 4, TimeUnit.SECONDS);
+        return asked;
+    }
+
+    @Override
+    public void connectAnnouncements(long contestId, Consumer<AnnouncementDto> onAnnouncement) {
+        // Fire one shortly after connecting so the popup can be eyeballed.
+        timer.schedule(() -> {
+            AnnouncementDto a = new AnnouncementDto(ids.incrementAndGet(), contestId,
+                    "Clarification for everyone: in problem B, assume "
+                            + "1 &le; <i>n</i> &le; 10<sup>5</sup>.",
+                    System.currentTimeMillis());
+            fakeAnnouncements.add(0, a);
+            onAnnouncement.accept(a);
+        }, 6, TimeUnit.SECONDS);
+    }
+
+    @Override
+    public void connectClarifications(long contestId, Runnable onChanged) {
+        this.onClarifications = onChanged;
     }
 
     @Override

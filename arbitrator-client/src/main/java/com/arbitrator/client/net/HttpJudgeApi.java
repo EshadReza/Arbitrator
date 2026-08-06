@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.arbitrator.client.app.ServerConfig;
 import com.arbitrator.common.api.ApiPaths;
+import com.arbitrator.common.dto.AnnouncementDto;
+import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.CustomRunRequest;
 import com.arbitrator.common.dto.CustomRunResultDto;
@@ -92,6 +94,45 @@ public class HttpJudgeApi implements JudgeApi {
     }
 
     @Override
+    public byte[] problemStatementPdf(long id) throws ApiException {
+        try {
+            HttpResponse<byte[]> res = http.send(
+                    builder(ApiPaths.PROBLEMS + "/" + id + "/statement.pdf").GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            if (res.statusCode() >= 400) {
+                throw new ApiException(res.statusCode(), "Could not load the PDF statement");
+            }
+            return res.body();
+        } catch (IOException e) {
+            throw new ApiException("Server unreachable — check the LAN connection", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ApiException("Request interrupted", e);
+        }
+    }
+
+    @Override
+    public List<AnnouncementDto> announcements(long contestId) throws ApiException {
+        return getList(ApiPaths.ANNOUNCEMENTS + "?contestId=" + contestId, AnnouncementDto.class);
+    }
+
+    @Override
+    public List<ClarificationDto> clarifications(long contestId) throws ApiException {
+        return getList(ApiPaths.CLARIFICATIONS + "?contestId=" + contestId, ClarificationDto.class);
+    }
+
+    @Override
+    public ClarificationDto askClarification(Long problemId, long contestId, String question,
+                                             boolean isPublic) throws ApiException {
+        return post(ApiPaths.CLARIFICATIONS,
+                new AskClarification(problemId, contestId, question, isPublic), ClarificationDto.class);
+    }
+
+    /** Mirrors ClarificationController.AskRequest. */
+    private record AskClarification(Long problemId, Long contestId, String question, Boolean isPublic) {
+    }
+
+    @Override
     public SubmitAckDto submit(SubmitRequest request) throws ApiException {
         return post(ApiPaths.SUBMISSIONS, request, SubmitAckDto.class);
     }
@@ -143,6 +184,19 @@ public class HttpJudgeApi implements JudgeApi {
         stomp.subscribeContestState(contestId, onState);
     }
 
+    @Override
+    public void connectAnnouncements(long contestId, Consumer<AnnouncementDto> onAnnouncement)
+            throws ApiException {
+        requireSocket();
+        stomp.subscribeAnnouncements(contestId, onAnnouncement);
+    }
+
+    @Override
+    public void connectClarifications(long contestId, Runnable onChanged) throws ApiException {
+        requireSocket();
+        stomp.subscribeClarifications(contestId, onChanged);
+    }
+
     private void requireSocket() throws ApiException {
         if (token == null) {
             throw new ApiException(-1, "Not logged in");
@@ -170,6 +224,11 @@ public class HttpJudgeApi implements JudgeApi {
     @Override
     public boolean isLive() {
         return stomp.isConnected();
+    }
+
+    @Override
+    public void dropConnection() {
+        stomp.disconnect();
     }
 
     @Override

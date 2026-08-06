@@ -11,12 +11,15 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.api.ApiPaths;
+import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemPackageResultDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.server.entity.Problem;
@@ -94,6 +97,61 @@ public class AdminProblemController {
         return problems.findByContestIdOrderByOrderingAscCodeAsc(targetId).stream()
                 .map(p -> new ProblemSummaryDto(p.getId(), p.getCode(), p.getTitle(), false, 0))
                 .toList();
+    }
+
+    /**
+     * The full problem, for the console's editor. The list endpoint carries
+     * only code and title; editing needs the statement itself.
+     */
+    @GetMapping(ApiPaths.ADMIN_PROBLEM_BY_ID)
+    public ProblemDetailDto detail(@PathVariable long id) {
+        Problem p = problems.findById(id).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
+        return new ProblemDetailDto(p.getId(), p.getCode(), p.getTitle(),
+                p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb(),
+                p.isStatementIsPdf());
+    }
+
+    /**
+     * Edit a problem in place (FR-05 follow-up): a typo in a statement, or a
+     * clarification mid-contest, previously meant deleting the problem and
+     * re-uploading the whole package — which also destroyed every submission
+     * against it. Test data is untouched here; only the wording and limits.
+     *
+     * Clients are told immediately, so a correction reaches the room without
+     * anyone signing out.
+     */
+    @PutMapping(ApiPaths.ADMIN_PROBLEM_BY_ID)
+    @Transactional
+    public ProblemDetailDto update(@PathVariable long id,
+                                   @RequestBody ProblemEditRequest edit) {
+        Problem p = problems.findById(id).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
+
+        if (edit.title() != null && !edit.title().isBlank()) {
+            p.setTitle(edit.title().trim());
+        }
+        if (edit.statementHtml() != null && !edit.statementHtml().isBlank()) {
+            p.setStatementHtml(edit.statementHtml());
+        }
+        // Limits are optional in the payload; 0 or negative means "leave alone"
+        // rather than "set to zero", which would make the problem unjudgeable.
+        if (edit.timeLimitMs() != null && edit.timeLimitMs() > 0) {
+            p.setTimeLimitMs(edit.timeLimitMs());
+        }
+        if (edit.memoryLimitKb() != null && edit.memoryLimitKb() > 0) {
+            p.setMemoryLimitKb(edit.memoryLimitKb());
+        }
+        problems.save(p);
+        notifyContestChanged();
+        return new ProblemDetailDto(p.getId(), p.getCode(), p.getTitle(),
+                p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb(),
+                p.isStatementIsPdf());
+    }
+
+    /** Every field optional: the console sends only what the instructor changed. */
+    public record ProblemEditRequest(String title, String statementHtml,
+                                     Integer timeLimitMs, Integer memoryLimitKb) {
     }
 
     @DeleteMapping(ApiPaths.ADMIN_PROBLEM_BY_ID)

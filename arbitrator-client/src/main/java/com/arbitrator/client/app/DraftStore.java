@@ -39,12 +39,13 @@ public final class DraftStore {
     public record Draft(Language language, String code) {
     }
 
-    public static void save(String username, long problemId, Language language, String code) {
+    public static void save(String username, long contestId, long problemId,
+                            Language language, String code) {
         if (username == null || problemId < 0) {
             return;
         }
         try {
-            Path file = fileFor(username, problemId);
+            Path file = fileFor(username, contestId, problemId);
             Files.createDirectories(file.getParent());
             String header = HEADER + (language == null ? "" : language.name()) + "\n";
             Files.writeString(file, header + (code == null ? "" : code), StandardCharsets.UTF_8);
@@ -53,12 +54,12 @@ public final class DraftStore {
         }
     }
 
-    public static Optional<Draft> load(String username, long problemId) {
+    public static Optional<Draft> load(String username, long contestId, long problemId) {
         if (username == null || problemId < 0) {
             return Optional.empty();
         }
         try {
-            Path file = fileFor(username, problemId);
+            Path file = fileFor(username, contestId, problemId);
             if (!Files.exists(file)) {
                 return Optional.empty();
             }
@@ -83,9 +84,37 @@ public final class DraftStore {
         }
     }
 
-    private static Path fileFor(String username, long problemId) {
+    /**
+     * Throws away every draft for one contest.
+     *
+     * Restarting a contest is a fresh run — the server already archives the
+     * previous run's submissions, so leaving last run's code sitting in the
+     * editor contradicted that and let work carry across a boundary the
+     * standings treat as absolute. Drafts are filed per contest precisely so
+     * this can be done without touching any other contest's work.
+     */
+    public static void clearContest(String username, long contestId) {
+        if (username == null) {
+            return;
+        }
+        Path dir = contestDir(username, contestId);
+        try (var entries = Files.list(dir)) {
+            for (Path p : entries.toList()) {
+                Files.deleteIfExists(p);
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // Nothing stored for this contest yet, or unreadable — either way
+            // there is nothing to carry over.
+        }
+    }
+
+    private static Path contestDir(String username, long contestId) {
         return Path.of(System.getProperty("user.home"), ".arbitrator", "drafts",
-                sanitize(username), problemId + ".txt");
+                sanitize(username), "contest-" + contestId);
+    }
+
+    private static Path fileFor(String username, long contestId, long problemId) {
+        return contestDir(username, contestId).resolve(problemId + ".txt");
     }
 
     /** A username reaches the filesystem here, so it may not contain a path. */

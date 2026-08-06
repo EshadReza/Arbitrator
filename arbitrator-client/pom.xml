@@ -47,6 +47,12 @@
       <groupId>org.fxmisc.richtext</groupId>
       <artifactId>richtextfx</artifactId>
     </dependency>
+    <!-- PDF problem statements (FR-05): rendered to images and shown in the
+         same WebView as HTML statements, so one theme path covers both. -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+    </dependency>
 
     <!-- REST: java.net.http + Jackson -->
     <dependency>

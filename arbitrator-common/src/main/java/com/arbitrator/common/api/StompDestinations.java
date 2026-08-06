@@ -34,4 +34,9 @@ public final class StompDestinations {
     public static String contestAnnouncements(long contestId) {
         return TOPIC_PREFIX + "/contest/" + contestId + "/announcements";
     }
+
+    /** Clarification board changed — asked, or answered (FR-07 sibling). */
+    public static String contestClarifications(long contestId) {
+        return TOPIC_PREFIX + "/contest/" + contestId + "/clarifications";
+    }
 }

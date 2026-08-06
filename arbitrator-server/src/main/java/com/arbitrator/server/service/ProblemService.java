@@ -3,6 +3,7 @@ package com.arbitrator.server.service;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -19,10 +20,14 @@ public class ProblemService {
 
     private final ProblemRepository problems;
     private final SubmissionRepository submissions;
+    /** Only for the statement-PDF side table; everything else goes through JPA. */
+    private final JdbcTemplate jdbc;
 
-    public ProblemService(ProblemRepository problems, SubmissionRepository submissions) {
+    public ProblemService(ProblemRepository problems, SubmissionRepository submissions,
+                          JdbcTemplate jdbc) {
         this.problems = problems;
         this.submissions = submissions;
+        this.jdbc = jdbc;
     }
 
     /**
@@ -61,7 +66,28 @@ public class ProblemService {
     public ProblemDetailDto detail(long problemId) {
         Problem p = require(problemId);
         return new ProblemDetailDto(p.getId(), p.getCode(), p.getTitle(),
-                p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb());
+                p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb(),
+                p.isStatementIsPdf());
+    }
+
+    /**
+     * The PDF statement's bytes (FR-05). Read straight from the side table
+     * rather than through the entity — see V59 for why they live apart.
+     */
+    public byte[] statementPdf(long problemId) {
+        Problem p = require(problemId);
+        if (!p.isStatementIsPdf()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "This problem's statement is not a PDF");
+        }
+        List<byte[]> rows = jdbc.query(
+                "SELECT data FROM problem_statement_pdfs WHERE problem_id = ?",
+                (rs, n) -> rs.getBytes("data"), problemId);
+        if (rows.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "The PDF statement is missing — re-upload the package");
+        }
+        return rows.get(0);
     }
 
     public Problem require(long problemId) {

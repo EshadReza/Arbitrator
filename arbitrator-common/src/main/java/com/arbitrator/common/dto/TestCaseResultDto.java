@@ -20,6 +20,9 @@ public record TestCaseResultDto(
         long peakMemoryKb,
         String input,
         String expectedOutput,
+        /** What the contestant's program printed. Null for runs judged before
+            V56 added the column — show it as unavailable, not as empty output. */
+        String actualOutput,
         boolean truncated
 ) {
 }

@@ -37,6 +37,9 @@ import com.arbitrator.server.repo.TestCaseRepository;
 class ProblemPackageServiceTest {
 
     private ProblemPackageService service;
+    /** Same fakes, but with a JdbcTemplate — the PDF path needs one. */
+    private ProblemPackageService pdfService;
+    private RecordingJdbc recordingJdbc;
     private List<TestCase> savedTests;
     private List<Problem> existingProblems;
 
@@ -75,7 +78,10 @@ class ProblemPackageServiceTest {
             }
         };
 
-        service = new ProblemPackageService(problems, testCases, contestService, null);
+        service = new ProblemPackageService(problems, testCases, contestService, null, null);
+        recordingJdbc = new RecordingJdbc();
+        pdfService = new ProblemPackageService(problems, testCases, contestService,
+                null, recordingJdbc);
     }
 
     // --- happy path ----------------------------------------------------
@@ -182,15 +188,46 @@ class ProblemPackageServiceTest {
         assertTrue(r.errors().stream().anyMatch(e -> e.contains("No statement")));
     }
 
+    /**
+     * PDF statements used to be rejected outright (FR-05 allowed them all
+     * along); V59 added storage and this asserts the new behaviour. The bytes
+     * go to a side table via JdbcTemplate, so the fake below records that
+     * insert instead of reaching a database.
+     */
     @Test
-    void pdfOnlyStatementGivesAnActionableError() {
+    void pdfOnlyStatementIsAccepted() {
         Map<String, String> files = baseFiles();
         files.put("statement/statement.pdf", "%PDF-1.4 fake");
         files.remove("statement/statement.html");
 
+        ProblemPackageResultDto r = pdfService.importPackage(zip(files));
+        assertTrue(r.accepted(), () -> "rejected: " + r.errors());
+        assertEquals(1, recordingJdbc.inserts, "the PDF bytes must be stored");
+    }
+
+    /** A package with neither an HTML nor a PDF statement is still rejected. */
+    @Test
+    void statementlessPackageIsStillRejected() {
+        Map<String, String> files = baseFiles();
+        files.remove("statement/statement.html");
+
         ProblemPackageResultDto r = service.importPackage(zip(files));
         assertFalse(r.accepted());
-        assertTrue(r.errors().stream().anyMatch(e -> e.contains("PDF")));
+        assertTrue(r.errors().stream().anyMatch(e -> e.contains("No statement")));
+    }
+
+    /**
+     * Concrete class, so an anonymous subclass rather than a Proxy — the
+     * project's Mockito-free convention (see the class comment).
+     */
+    private static final class RecordingJdbc extends org.springframework.jdbc.core.JdbcTemplate {
+        int inserts;
+
+        @Override
+        public int update(String sql, Object... args) {
+            inserts++;
+            return 1;
+        }
     }
 
     @Test
