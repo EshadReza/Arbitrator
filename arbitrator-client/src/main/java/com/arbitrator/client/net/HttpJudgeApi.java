@@ -150,8 +150,8 @@ public class HttpJudgeApi implements JudgeApi {
     }
 
     @Override
-    public List<SubmissionHistoryDto> mySubmissions() throws ApiException {
-        return getList(ApiPaths.SUBMISSIONS_MINE, SubmissionHistoryDto.class);
+    public List<SubmissionHistoryDto> mySubmissions(long contestId) throws ApiException {
+        return getList(ApiPaths.SUBMISSIONS_MINE + "?contestId=" + contestId, SubmissionHistoryDto.class);
     }
 
     @Override

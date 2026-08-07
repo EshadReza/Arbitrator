@@ -112,6 +112,18 @@ public class LeaderboardPanelController {
 
         // UIF-15: the viewer's own row is highlighted for quick self-identification.
         table.setRowFactory(t -> new TableRow<>() {
+            {
+                // This grid is read-only — a click just marks "I looked here,"
+                // not a real selection — so clicking the blank area below the
+                // last row (an empty virtualized row) drops it, the same as
+                // clearSelection() does on tab switch (see MainController).
+                setOnMouseClicked(e -> {
+                    if (isEmpty()) {
+                        getTableView().getSelectionModel().clearSelection();
+                    }
+                });
+            }
+
             @Override
             protected void updateItem(LeaderboardRowDto row, boolean empty) {
                 super.updateItem(row, empty);
@@ -159,6 +171,11 @@ public class LeaderboardPanelController {
 
     private static double clamp(double min, double value, double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    /** Drops the row highlight — called when the Standings tab loses focus. */
+    public void clearSelection() {
+        table.getSelectionModel().clearSelection();
     }
 
     /** Safe to call from any thread. */

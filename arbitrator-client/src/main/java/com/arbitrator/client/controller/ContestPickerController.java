@@ -18,6 +18,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -82,10 +84,31 @@ public class ContestPickerController {
         contestList.sceneProperty().addListener((obs, old, scene) -> {
             if (scene == null) {
                 stopPolling();
+            } else {
+                installEnterToJoin(scene);
             }
         });
 
         load();
+    }
+
+    /**
+     * Enter must join the selected contest, full stop — not whatever control
+     * happens to hold keyboard focus. {@code enterButton} is {@code
+     * defaultButton="true"}, but that only fires when nothing else claims the
+     * key first, and a focused {@code Button} (theme toggle, refresh) always
+     * consumes Enter for its own action before the scene's default-button
+     * fallback ever runs. An event FILTER on the scene intercepts it during
+     * the capturing phase, ahead of any button's own handling, so this wins
+     * regardless of focus.
+     */
+    private void installEnterToJoin(javafx.scene.Scene scene) {
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.ENTER && selected() != null) {
+                onEnter();
+                e.consume();
+            }
+        });
     }
 
     @FXML

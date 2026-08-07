@@ -147,6 +147,14 @@ public class MainController {
                 () -> List.copyOf(problemList.getItems()));
         themeButton.setText(state.darkMode() ? "☀" : "🌙");
 
+        // Submissions/Standings selection is just "I clicked here," not a real
+        // selection with any downstream effect — it must not survive leaving
+        // the tab, or the next visit shows a stale highlight nobody chose.
+        tabs.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> {
+            submissionsPanelController.clearSelection();
+            leaderboardPanelController.clearSelection();
+        });
+
         startTimer();
         connectLive();
         startConnectionWatchdog();

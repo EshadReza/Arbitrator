@@ -25,10 +25,16 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 /**
@@ -51,6 +57,13 @@ public class SubmissionsPanelController {
     private static final DateTimeFormatter STAMP =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
 
+    /** Default Modena row height (24px) * 1.75 — rows were too cramped to scan quickly. */
+    private static final double ROW_HEIGHT = 42;
+
+    /** Same ladder as MainController's window zoom, reused for the code viewer's font size. */
+    private static final int[] CODE_ZOOM_LEVELS = { 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 };
+    private static final double BASE_CODE_FONT_PX = 13;
+
     @FXML private TableView<SubmissionHistoryDto> table;
     @FXML private Label countLabel;
 
@@ -60,15 +73,36 @@ public class SubmissionsPanelController {
     private void initialize() {
         table.setPlaceholder(new Label("You haven't submitted anything yet"));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.setFixedCellSize(ROW_HEIGHT);
+        table.setRowFactory(tv -> {
+            TableRow<SubmissionHistoryDto> row = new TableRow<>();
+            row.setOnMouseClicked(e -> {
+                // This history list is read-only — a click just marks "I
+                // looked here" — so the blank area below the last row (an
+                // empty virtualized row) drops the highlight instead of
+                // leaving it stuck on whatever was clicked last.
+                if (row.isEmpty()) {
+                    table.getSelectionModel().clearSelection();
+                } else if (e.getClickCount() == 2) {
+                    openDetail(row.getItem());
+                }
+            });
+            return row;
+        });
         buildColumns();
         refresh();
+    }
+
+    /** Drops the row highlight — called when the Submissions tab loses focus. */
+    public void clearSelection() {
+        table.getSelectionModel().clearSelection();
     }
 
     /** Safe from any thread; called after every verdict so the list stays live. */
     public void refresh() {
         Thread worker = new Thread(() -> {
             try {
-                List<SubmissionHistoryDto> rows = state.api().mySubmissions();
+                List<SubmissionHistoryDto> rows = state.api().mySubmissions(state.contest().contestId());
                 Platform.runLater(() -> {
                     var selected = table.getSelectionModel().getSelectedItem();
                     table.setItems(FXCollections.observableArrayList(rows));
@@ -101,7 +135,7 @@ public class SubmissionsPanelController {
         }
         Thread worker = new Thread(() -> {
             try {
-                List<SubmissionHistoryDto> rows = state.api().mySubmissions();
+                List<SubmissionHistoryDto> rows = state.api().mySubmissions(state.contest().contestId());
                 Platform.runLater(() -> {
                     table.setItems(FXCollections.observableArrayList(rows));
                     rows.stream().filter(r -> r.id() == submissionId).findFirst()
@@ -157,7 +191,41 @@ public class SubmissionsPanelController {
         header.getStyleClass().add("subtitle");
         header.setPadding(new Insets(0, 0, 6, 0));
 
-        VBox content = new VBox(8, header, source, testsHeading, testsScroll);
+        // Zoom the source view only — mirrors MainController's window zoom bar,
+        // scoped to this dialog's CodeArea via font size instead of a scale
+        // transform (a Dialog has no equivalent of the main window's contentRoot).
+        int[] zoomIndex = { 5 };
+        Label zoomLabel = new Label("100%");
+        zoomLabel.getStyleClass().add("zoom-value");
+        Button zoomOutBtn = new Button("−");
+        zoomOutBtn.getStyleClass().add("icon-button");
+        Button zoomInBtn = new Button("+");
+        zoomInBtn.getStyleClass().add("icon-button");
+        Runnable applyCodeZoom = () -> {
+            double px = BASE_CODE_FONT_PX * CODE_ZOOM_LEVELS[zoomIndex[0]] / 100.0;
+            source.setStyle("-fx-font-size: " + px + "px;");
+            zoomLabel.setText(CODE_ZOOM_LEVELS[zoomIndex[0]] + "%");
+        };
+        zoomOutBtn.setOnAction(e -> {
+            zoomIndex[0] = Math.max(0, zoomIndex[0] - 1);
+            applyCodeZoom.run();
+        });
+        zoomInBtn.setOnAction(e -> {
+            zoomIndex[0] = Math.min(CODE_ZOOM_LEVELS.length - 1, zoomIndex[0] + 1);
+            applyCodeZoom.run();
+        });
+        zoomLabel.setOnMouseClicked(e -> {
+            zoomIndex[0] = 5;
+            applyCodeZoom.run();
+        });
+        HBox zoomBar = new HBox(2, zoomOutBtn, zoomLabel, zoomInBtn);
+        zoomBar.getStyleClass().add("zoom-bar");
+
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        HBox headerRow = new HBox(8, header, headerSpacer, zoomBar);
+
+        VBox content = new VBox(8, headerRow, source, testsHeading, testsScroll);
         content.setPadding(new Insets(12));
         content.setPrefWidth(940);
 
@@ -176,6 +244,35 @@ public class SubmissionsPanelController {
                 dialog.getDialogPane().getStyleClass().add("dark");
             }
         }
+        dialog.setOnShown(e -> {
+            var scene = dialog.getDialogPane().getScene();
+            scene.getAccelerators().put(
+                    new KeyCodeCombination(KeyCode.EQUALS, KeyCombination.CONTROL_DOWN), zoomInBtn::fire);
+            scene.getAccelerators().put(
+                    new KeyCodeCombination(KeyCode.ADD, KeyCombination.CONTROL_DOWN), zoomInBtn::fire);
+            scene.getAccelerators().put(
+                    new KeyCodeCombination(KeyCode.MINUS, KeyCombination.CONTROL_DOWN), zoomOutBtn::fire);
+            scene.getAccelerators().put(
+                    new KeyCodeCombination(KeyCode.SUBTRACT, KeyCombination.CONTROL_DOWN), zoomOutBtn::fire);
+            scene.getAccelerators().put(
+                    new KeyCodeCombination(KeyCode.DIGIT0, KeyCombination.CONTROL_DOWN), () -> {
+                        zoomIndex[0] = 5;
+                        applyCodeZoom.run();
+                    });
+            // A filter, not setOnScroll: the CodeArea's own virtualized scroll
+            // pane consumes the event on its way up before a scene-level
+            // handler would ever see it.
+            scene.addEventFilter(ScrollEvent.SCROLL, se -> {
+                if (se.isControlDown()) {
+                    if (se.getDeltaY() > 0) {
+                        zoomInBtn.fire();
+                    } else if (se.getDeltaY() < 0) {
+                        zoomOutBtn.fire();
+                    }
+                    se.consume();
+                }
+            });
+        });
 
         loadSource(row.id(), source);
         loadTests(row.id(), testsBox);

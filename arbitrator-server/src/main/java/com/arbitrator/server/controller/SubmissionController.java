@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.arbitrator.common.api.ApiPaths;
@@ -72,9 +73,14 @@ public class SubmissionController {
         return submissionService.tests(principal.getName(), id, false);
     }
 
-    /** FR-16. */
+    /**
+     * FR-16. contestId defaults to whichever contest is current so a
+     * single-contest lab needs no parameter — same convention as
+     * {@code ApiPaths.ANNOUNCEMENTS} and {@code ApiPaths.CLARIFICATIONS}.
+     */
     @GetMapping(ApiPaths.SUBMISSIONS_MINE)
-    public List<SubmissionHistoryDto> mine(Principal principal) {
-        return submissionService.history(principal.getName());
+    public List<SubmissionHistoryDto> mine(Principal principal,
+            @RequestParam(value = "contestId", required = false) Long contestId) {
+        return submissionService.history(principal.getName(), contestId);
     }
 }

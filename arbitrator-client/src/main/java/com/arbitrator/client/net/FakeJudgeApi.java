@@ -152,7 +152,7 @@ public class FakeJudgeApi implements JudgeApi {
     }
 
     @Override
-    public List<SubmissionHistoryDto> mySubmissions() {
+    public List<SubmissionHistoryDto> mySubmissions(long contestId) {
         return List.copyOf(history);
     }
 

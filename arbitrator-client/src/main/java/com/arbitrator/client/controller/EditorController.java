@@ -27,9 +27,11 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TitledPane;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.ScrollEvent;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
@@ -84,6 +86,8 @@ public class EditorController {
                     """
     );
     @FXML private VBox editorBox;
+    @FXML private VBox codeHost;
+    @FXML private TitledPane customPane;
     @FXML private ComboBox<Language> languageBox;
     @FXML private Button uploadButton;
     @FXML private Button submitButton;
@@ -116,7 +120,14 @@ public class EditorController {
         codeArea.setParagraphGraphicFactory(CodeAreaGutter.factory(codeArea));
         codeArea.getStyleClass().add("code-area");
         VBox.setVgrow(codeArea, javafx.scene.layout.Priority.ALWAYS);
-        editorBox.getChildren().add(1, codeArea);   // between toolbar and status bar
+        codeHost.getChildren().add(codeArea);
+
+        // A collapsed TitledPane must only claim its header row, or the outer
+        // SplitPane's last-dragged divider position leaves it stretched with
+        // dead space below the header once the student collapses it again.
+        customPane.setMaxHeight(Region.USE_PREF_SIZE);
+        customPane.expandedProperty().addListener((obs, was, expanded) ->
+                customPane.setMaxHeight(expanded ? Double.MAX_VALUE : Region.USE_PREF_SIZE));
 
         languageBox.setItems(FXCollections.observableArrayList(Language.values()));
         languageBox.getSelectionModel().select(Language.CPP17);

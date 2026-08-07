@@ -244,14 +244,21 @@ public class SubmissionService {
         return s.length() <= MAX_TEST_DATA_CHARS ? s : s.substring(0, MAX_TEST_DATA_CHARS);
     }
 
-    /** FR-16: personal history, newest first. */
-    public List<SubmissionHistoryDto> history(String username) {
+    /**
+     * FR-16: personal history, newest first, scoped to one contest — several
+     * contests can run (or have run) for the same student, and a clone starts
+     * with brand-new problem rows but the same student, so without this scope
+     * "my submissions" for a fresh clone showed every run from the contest it
+     * was cloned from too.
+     */
+    public List<SubmissionHistoryDto> history(String username, Long contestId) {
         User user = userService.requireByUsername(username);
+        long target = contestId != null ? contestId : contestService.requireCurrent().getId();
         Map<Long, Problem> problemMap = problems.findAll().stream()
                 .collect(Collectors.toMap(Problem::getId, p -> p));
         Map<Long, Integer> totalTestMap = new ConcurrentHashMap<>();
 
-        return submissions.findByUserIdAndActiveTrueOrderByQueuedAtDesc(user.getId()).stream()
+        return submissions.findByUserIdAndContestIdAndActiveTrueOrderByQueuedAtDesc(user.getId(), target).stream()
                 .map(s -> {
                     Problem p = problemMap.get(s.getProblemId());
                     int total = totalTestMap.computeIfAbsent(s.getProblemId(),

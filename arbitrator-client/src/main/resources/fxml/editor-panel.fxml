@@ -4,14 +4,15 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.SplitPane?>
 <?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TitledPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
-<!-- Right panel (§4.2). The CodeArea is inserted programmatically at index 0
-     by EditorController (RichTextFX controls are not FXML-friendly). -->
+<!-- Right panel (§4.2). The CodeArea is inserted programmatically into
+     codeHost by EditorController (RichTextFX controls are not FXML-friendly). -->
 <VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.arbitrator.client.controller.EditorController"
       fx:id="editorBox" spacing="0" styleClass="box">
@@ -29,24 +30,42 @@
                 styleClass="icon-button"/>
     </HBox>
 
-    <!-- CodeArea is inserted here at runtime (index 1: below the toolbar,
-         above the status bar) — see EditorController.initialize -->
-
-    <!-- Custom input / output: run without submitting -->
-    <TitledPane fx:id="customPane" text="%editor.custom" expanded="false" animated="false">
-        <VBox spacing="6">
-            <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
-            <HBox spacing="8" alignment="CENTER_LEFT">
-                <Button fx:id="runButton" text="%editor.run" onAction="#onRunCustom"/>
-                <Label fx:id="runStatus" styleClass="subtitle"/>
-            </HBox>
-            <Label text="%editor.customInput" styleClass="subtitle"/>
-            <TextArea fx:id="customInput" prefRowCount="3" styleClass="compiler-log"/>
-            <Label text="%editor.customOutput" styleClass="subtitle"/>
-            <TextArea fx:id="customOutput" prefRowCount="4" editable="false"
-                      styleClass="compiler-log"/>
+    <!-- The code editor and the whole custom-test section share this second
+         divider, so expanding the TitledPane below no longer just eats into
+         the editor's space uncontrollably — the student can drag back
+         whatever room the editor needs. EditorController toggles customPane's
+         max height with its expanded state, so a *collapsed* pane still only
+         claims its header row instead of the divider's last dragged split. -->
+    <SplitPane fx:id="outerSplit" orientation="VERTICAL" dividerPositions="0.75" VBox.vgrow="ALWAYS">
+        <VBox fx:id="codeHost" VBox.vgrow="ALWAYS">
+            <!-- CodeArea is inserted here at runtime — see EditorController.initialize -->
         </VBox>
-    </TitledPane>
+
+        <!-- Custom input / output: run without submitting -->
+        <TitledPane fx:id="customPane" text="%editor.custom" expanded="false" animated="false">
+            <VBox spacing="6">
+                <padding><Insets top="8" right="8" bottom="8" left="8"/></padding>
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Button fx:id="runButton" text="%editor.run" onAction="#onRunCustom"/>
+                    <Label fx:id="runStatus" styleClass="subtitle"/>
+                </HBox>
+                <!-- SplitPane instead of a plain stack: bigger test cases need more
+                     input/output room than the fixed row counts used to allow, and
+                     the divider lets the student trade space between the two. -->
+                <SplitPane fx:id="customSplit" orientation="VERTICAL" prefHeight="220" VBox.vgrow="ALWAYS">
+                    <VBox spacing="4">
+                        <Label text="%editor.customInput" styleClass="subtitle"/>
+                        <TextArea fx:id="customInput" styleClass="compiler-log" VBox.vgrow="ALWAYS"/>
+                    </VBox>
+                    <VBox spacing="4">
+                        <Label text="%editor.customOutput" styleClass="subtitle"/>
+                        <TextArea fx:id="customOutput" editable="false"
+                                  styleClass="compiler-log" VBox.vgrow="ALWAYS"/>
+                    </VBox>
+                </SplitPane>
+            </VBox>
+        </TitledPane>
+    </SplitPane>
 
     <HBox alignment="CENTER_RIGHT" styleClass="editor-statusbar">
         <padding><Insets top="3" right="8" bottom="3" left="8"/></padding>

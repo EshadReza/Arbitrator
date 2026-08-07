@@ -16,7 +16,10 @@
 
     <HBox alignment="CENTER_RIGHT" maxWidth="Infinity">
         <padding><Insets top="12" right="16" bottom="0" left="16"/></padding>
-        <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button" text="🌙" />
+        <!-- Not focus-traversable — see contest-picker.fxml's themeButton comment;
+             same fix, same reason: it must not eat the register form's Enter key. -->
+        <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button" text="🌙"
+                focusTraversable="false" />
     </HBox>
 
     <VBox alignment="CENTER" spacing="12" VBox.vgrow="ALWAYS">
