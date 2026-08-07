@@ -436,6 +436,19 @@ public class MainController {
 
     /** Applies a problem list, keeping the current selection where possible. */
     private void applyProblems(List<ProblemSummaryDto> items, boolean selectFirst) {
+        // onContestState() calls this on EVERY push (every 10s by default),
+        // not just when something actually changed. items.setAll() clears
+        // and repopulates the ListView unconditionally, which drops the
+        // selection for a frame and re-lays-out every cell — visible as the
+        // list flashing/looking briefly empty on a steady 10s cadence, even
+        // though nothing about it changed. ProblemSummaryDto is a record, so
+        // List.equals() is a real content comparison, not identity — skip
+        // the whole update when it would be a no-op. selectFirst still forces
+        // through: a genuine state change (e.g. LOBBY -> ACTIVE re-releasing
+        // problems after the list was just cleared) must always apply.
+        if (!selectFirst && items.equals(problemList.getItems())) {
+            return;
+        }
         var selected = problemList.getSelectionModel().getSelectedItem();
         problemList.getItems().setAll(items);
         if (items.isEmpty()) {

@@ -46,6 +46,11 @@
 
 .label, .text { -fx-text-fill: -c-text; }
 
+/* CheckBox's own -fx-text-fill isn't covered by the rule above (its label
+   text isn't a .label/.text node) and was never themed, so it kept Modena's
+   fixed dark default — invisible against a dark .box-head background. */
+.check-box { -fx-text-fill: -c-text; }
+
 /* --- cards ---------------------------------------------------------------- */
 
 .box {
