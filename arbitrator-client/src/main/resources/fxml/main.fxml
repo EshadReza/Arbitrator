@@ -36,6 +36,11 @@
                     <HBox alignment="CENTER_LEFT" spacing="12">
                         <Label text="%app.title" styleClass="logo-small"/>
                         <Label fx:id="contestTitleLabel" styleClass="contest-title"/>
+                        <!-- The contest's number, small: with the Submissions
+                             tab now able to show rows from several contests at
+                             once (see SubmissionsPanelController), the student
+                             needs to know which number THIS contest is too. -->
+                        <Label fx:id="contestNumberLabel" styleClass="contest-number"/>
                     </HBox>
                 </left>
 

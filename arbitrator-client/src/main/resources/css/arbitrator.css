@@ -143,6 +143,22 @@
     -fx-border-radius: 5px;
 }
 
+/* "View code" in the Submissions table — the row is 42px tall (ROW_HEIGHT,
+   1.75x default), so this can be a real accent button instead of the
+   cramped .btn-small chip it used to share with tighter rows. */
+.view-code-button {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-padding: 6 18 6 18;
+    -fx-background-color: -c-accent;
+    -fx-text-fill: -c-accent-fg;
+    -fx-border-color: -c-accent;
+    -fx-background-radius: 6px;
+    -fx-border-radius: 6px;
+    -fx-cursor: hand;
+}
+.view-code-button:hover { -fx-background-color: derive(-c-accent, -12%); }
+
 .hyperlink { -fx-text-fill: -c-accent; -fx-border-color: transparent; }
 
 /* icon-only buttons in panel headers (fullscreen, collapse) */
@@ -164,6 +180,10 @@
 }
 
 .contest-title { -fx-font-weight: bold; }
+
+/* Small on purpose — a quiet "which contest is this" next to the bold title,
+   not competing with it. */
+.contest-number { -fx-text-fill: -c-muted; -fx-font-size: 10.5px; }
 
 /* The clock is the one thing everyone in the room looks at, from a distance
    and at a glance, so it is deliberately the loudest element on the bar:
@@ -241,11 +261,13 @@
 
 .tab-pane .tab {
     -fx-background-color: transparent;
-    -fx-padding: 6 16 6 16;
+    /* Original was 6/16 — 1.5x (9/24) read oversized once actually seen, so
+       this settles between the two. */
+    -fx-padding: 7 19 7 19;
 }
 
 .tab-pane .tab:selected { -fx-background-color: -c-surface; }
-.tab-pane .tab .tab-label { -fx-text-fill: -c-muted; }
+.tab-pane .tab .tab-label { -fx-text-fill: -c-muted; -fx-font-size: 15.5px; }
 .tab-pane .tab:selected .tab-label { -fx-text-fill: -c-accent; -fx-font-weight: bold; }
 .tab-pane > .tab-header-area > .headers-region > .tab:selected .focus-indicator { -fx-border-color: transparent; }
 
@@ -324,15 +346,20 @@
 .table-cell.cell-solved .standings-when { -fx-font-weight: bold; }
 .table-cell.cell-failed .label { -fx-text-fill: derive(-c-red, -35%); -fx-font-weight: bold; }
 
-/* Dark theme: the brightest green marks the first solve, so the hierarchy
-   survives inverting — light-on-dark cannot simply reuse "darker means more". */
-.root.dark .table-view .table-cell.cell-first  { -fx-background-color: -c-green; }
-.root.dark .table-view .table-cell.cell-solved { -fx-background-color: derive(-c-green, -58%); }
-.root.dark .table-view .table-cell.cell-failed { -fx-background-color: derive(-c-red, -55%); }
+/* Dark theme keeps the SAME relationship as light theme — first solve is
+   always the darker/more saturated fill, every other accepted solve is
+   always the lighter one — instead of the brightness-inverted scheme this
+   used previously, which read as backwards (first looked lighter than the
+   rest). Percentages are recalibrated off the dark palette's own -c-green/
+   -c-red base (already brighter than light theme's), not copied from the
+   light-theme block above. */
+.root.dark .table-view .table-cell.cell-first  { -fx-background-color: derive(-c-green, -35%); }
+.root.dark .table-view .table-cell.cell-solved { -fx-background-color: derive(-c-green, 15%); }
+.root.dark .table-view .table-cell.cell-failed { -fx-background-color: derive(-c-red, -30%); }
 
-.root.dark .table-cell.cell-first .label  { -fx-text-fill: #0e1218; -fx-font-weight: bold; }
-.root.dark .table-cell.cell-solved .label { -fx-text-fill: derive(-c-green, 45%); }
-.root.dark .table-cell.cell-failed .label { -fx-text-fill: derive(-c-red, 40%); }
+.root.dark .table-cell.cell-first .label  { -fx-text-fill: white; -fx-font-weight: bold; }
+.root.dark .table-cell.cell-solved .label { -fx-text-fill: derive(-c-green, -55%); }
+.root.dark .table-cell.cell-failed .label { -fx-text-fill: derive(-c-red, 45%); -fx-font-weight: bold; }
 
 /* --- problem list badges (§4.2) --------------------------------------------- */
 

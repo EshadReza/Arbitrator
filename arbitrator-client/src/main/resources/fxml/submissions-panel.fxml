@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TableView?>
+<?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
 <!-- FR-16 / UIF-12: personal submission history.
@@ -15,7 +17,19 @@
       fx:controller="com.arbitrator.client.controller.SubmissionsPanelController"
       styleClass="box">
 
-    <Label text="%submissions.title" styleClass="box-head" maxWidth="Infinity"/>
+    <!-- box-head moved from the Label onto this HBox: the class carries the
+         header's background/corner-radius/padding, and a Label alone only
+         padded itself — the CheckBox sat outside that padding entirely and
+         touched the panel's right edge. One shared header bar fixes it. -->
+    <HBox alignment="CENTER_LEFT" spacing="10" styleClass="box-head">
+        <Label text="%submissions.title" maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
+        <!-- Ticked (default): only this contest's runs. Unticked: every
+             submission this account has ever made, across every contest —
+             see SubmissionsPanelController#onToggleCurrentContestOnly. -->
+        <CheckBox fx:id="currentContestOnly" text="%submissions.currentContest"
+                  selected="true" onAction="#onToggleCurrentContestOnly"
+                  style="-fx-font-weight: normal;"/>
+    </HBox>
     <TableView fx:id="table" VBox.vgrow="ALWAYS"/>
     <Label fx:id="countLabel" styleClass="subtitle">
         <padding><Insets top="5" right="10" bottom="5" left="10"/></padding>

@@ -25,12 +25,12 @@ public class ContestService {
     /**
      * The one contest students are working in.
      *
-     * A live contest (ACTIVE or FROZEN) always wins over a finished one.
-     * Picking purely by highest id was fragile: creating a second contest and
-     * starting it silently orphaned every existing problem, and submissions
-     * then failed with a misleading "not part of the current contest" 403.
-     * {@link #start(long)} keeps at most one contest live, so this is
-     * unambiguous in practice.
+     * {@link #openLobby} and {@link #start} refuse to make a second contest
+     * live while one is already LOBBY/ACTIVE/PAUSED/FROZEN (see
+     * {@link #assertNoOtherContestLive}), so there is at most one candidate
+     * here — the state filter plus id-desc ordering is defensive, not load-
+     * bearing, for the case where none is currently live and the caller wants
+     * whatever contest is "current" for display purposes anyway.
      */
     public void checkExpiredContests() {
         List<Contest> live = contests.findAll().stream()
@@ -122,6 +122,25 @@ public class ContestService {
     }
 
     /**
+     * Only one contest may be LOBBY/ACTIVE/PAUSED/FROZEN at a time — a lab has
+     * one room, and letting two run together made it ambiguous which contest
+     * a client landed in and left standings/clarifications/announcements
+     * split across two audiences without anyone choosing that on purpose.
+     * {@link ContestState#isJoinable()} is exactly this set of states.
+     */
+    private void assertNoOtherContestLive(long excludeId) {
+        contests.findAll().stream()
+                .filter(c -> c.getId() != excludeId)
+                .filter(c -> c.getState().isJoinable())
+                .findFirst()
+                .ifPresent(other -> {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "\"" + other.getTitle() + "\" is already " + other.getState()
+                                    + " — end it before starting another contest.");
+                });
+    }
+
+    /**
      * Opens the doors without starting the contest. Students can enter and
      * wait; problems stay hidden and no clock runs until {@link #start(long)}.
      *
@@ -140,6 +159,7 @@ public class ContestService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This contest has ended and cannot be reopened. Clone it to run a fresh copy.");
         }
+        assertNoOtherContestLive(id);
         c.setState(ContestState.LOBBY);
         c.setStartTime(null);          // no clock yet
         c.setPausedAt(null);
@@ -156,9 +176,10 @@ public class ContestService {
     }
 
     /**
-     * Starts a contest. Several contests may run at once — the student picks
-     * which to join, and a submission's contest is derived from its problem,
-     * so there is no ambiguous "current contest" to get wrong.
+     * Starts a contest. Only one contest may be live at a time (see
+     * {@link #assertNoOtherContestLive}) — a lab has one room and one clock on
+     * the wall, and running two at once made it unclear which one a freshly
+     * opened client would land in.
      *
      * Rejects ENDED for the same reason {@link #openLobby} does — see its
      * comment. In practice this also means a contest can only ever reach here
@@ -176,6 +197,7 @@ public class ContestService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This contest has ended and cannot be started again. Clone it to run a fresh copy.");
         }
+        assertNoOtherContestLive(id);
         c.setState(ContestState.ACTIVE);
         c.setStartTime(Instant.now());
         c.setPausedAt(null);

@@ -245,20 +245,32 @@ public class SubmissionService {
     }
 
     /**
-     * FR-16: personal history, newest first, scoped to one contest — several
-     * contests can run (or have run) for the same student, and a clone starts
-     * with brand-new problem rows but the same student, so without this scope
-     * "my submissions" for a fresh clone showed every run from the contest it
-     * was cloned from too.
+     * FR-16: personal history, newest first.
+     *
+     * {@code all=false} (the client's "Current Contest" tick) scopes to one
+     * contest — several contests can run (or have run) for the same student,
+     * and a clone starts with brand-new problem rows but the same student, so
+     * without this scope "my submissions" for a fresh clone showed every run
+     * from the contest it was cloned from too. {@code all=true} is the
+     * deliberate escape hatch: every submission this account has ever made,
+     * across every contest, for when the student wants their whole history
+     * rather than just what is in front of them right now.
      */
-    public List<SubmissionHistoryDto> history(String username, Long contestId) {
+    public List<SubmissionHistoryDto> history(String username, Long contestId, boolean all) {
         User user = userService.requireByUsername(username);
-        long target = contestId != null ? contestId : contestService.requireCurrent().getId();
         Map<Long, Problem> problemMap = problems.findAll().stream()
                 .collect(Collectors.toMap(Problem::getId, p -> p));
         Map<Long, Integer> totalTestMap = new ConcurrentHashMap<>();
 
-        return submissions.findByUserIdAndContestIdAndActiveTrueOrderByQueuedAtDesc(user.getId(), target).stream()
+        List<Submission> mine;
+        if (all) {
+            mine = submissions.findByUserIdAndActiveTrueOrderByQueuedAtDesc(user.getId());
+        } else {
+            long target = contestId != null ? contestId : contestService.requireCurrent().getId();
+            mine = submissions.findByUserIdAndContestIdAndActiveTrueOrderByQueuedAtDesc(user.getId(), target);
+        }
+
+        return mine.stream()
                 .map(s -> {
                     Problem p = problemMap.get(s.getProblemId());
                     int total = totalTestMap.computeIfAbsent(s.getProblemId(),
@@ -266,6 +278,7 @@ public class SubmissionService {
                     int passed = (s.getVerdict() == com.arbitrator.common.enums.Verdict.AC) ? total : Math.max(0, s.getFailedTestIndex() - 1);
                     return new SubmissionHistoryDto(
                             s.getId(),
+                            s.getContestId(),
                             p != null ? p.getCode() : "?",
                             s.getLanguage(),
                             s.getVerdict(),

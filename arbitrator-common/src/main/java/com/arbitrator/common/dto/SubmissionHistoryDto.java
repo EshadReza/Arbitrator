@@ -6,6 +6,7 @@ import com.arbitrator.common.enums.Verdict;
 /** One row of the personal submission history table (FR-16, UIF-12). */
 public record SubmissionHistoryDto(
         long id,
+        long contestId,
         String problemCode,
         Language language,
         Verdict verdict,        // null while still queued/judging

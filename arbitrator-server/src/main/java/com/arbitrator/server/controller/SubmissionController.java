@@ -77,10 +77,13 @@ public class SubmissionController {
      * FR-16. contestId defaults to whichever contest is current so a
      * single-contest lab needs no parameter — same convention as
      * {@code ApiPaths.ANNOUNCEMENTS} and {@code ApiPaths.CLARIFICATIONS}.
+     * {@code all=true} is the client's "Current Contest" tick turned off:
+     * every submission this account has ever made, ignoring contestId.
      */
     @GetMapping(ApiPaths.SUBMISSIONS_MINE)
     public List<SubmissionHistoryDto> mine(Principal principal,
-            @RequestParam(value = "contestId", required = false) Long contestId) {
-        return submissionService.history(principal.getName(), contestId);
+            @RequestParam(value = "contestId", required = false) Long contestId,
+            @RequestParam(value = "all", defaultValue = "false") boolean all) {
+        return submissionService.history(principal.getName(), contestId, all);
     }
 }

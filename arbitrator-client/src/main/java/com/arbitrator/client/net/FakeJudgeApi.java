@@ -126,7 +126,7 @@ public class FakeJudgeApi implements JudgeApi {
         String src = request.sourceCode().replace(" ", "");
         Verdict verdict = src.contains("a+b") ? Verdict.AC : cycle[cycleAt++ % cycle.length];
 
-        history.add(0, new SubmissionHistoryDto(id, "A", request.language(), null,
+        history.add(0, new SubmissionHistoryDto(id, 1, "A", request.language(), null,
                 -1, -1, System.currentTimeMillis(), 0, 10));
 
         timer.schedule(() -> {
@@ -152,7 +152,7 @@ public class FakeJudgeApi implements JudgeApi {
     }
 
     @Override
-    public List<SubmissionHistoryDto> mySubmissions(long contestId) {
+    public List<SubmissionHistoryDto> mySubmissions(long contestId, boolean all) {
         return List.copyOf(history);
     }
 

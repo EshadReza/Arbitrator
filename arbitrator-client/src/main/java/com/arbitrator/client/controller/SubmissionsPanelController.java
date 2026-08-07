@@ -18,11 +18,14 @@ import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
@@ -66,6 +69,7 @@ public class SubmissionsPanelController {
 
     @FXML private TableView<SubmissionHistoryDto> table;
     @FXML private Label countLabel;
+    @FXML private CheckBox currentContestOnly;
 
     private final AppState state = AppState.get();
 
@@ -98,11 +102,22 @@ public class SubmissionsPanelController {
         table.getSelectionModel().clearSelection();
     }
 
+    @FXML
+    private void onToggleCurrentContestOnly() {
+        refresh();
+    }
+
+    /** True when the tick is off — every contest, not just this one. */
+    private boolean showAllContests() {
+        return !currentContestOnly.isSelected();
+    }
+
     /** Safe from any thread; called after every verdict so the list stays live. */
     public void refresh() {
         Thread worker = new Thread(() -> {
             try {
-                List<SubmissionHistoryDto> rows = state.api().mySubmissions(state.contest().contestId());
+                List<SubmissionHistoryDto> rows =
+                        state.api().mySubmissions(state.contest().contestId(), showAllContests());
                 Platform.runLater(() -> {
                     var selected = table.getSelectionModel().getSelectedItem();
                     table.setItems(FXCollections.observableArrayList(rows));
@@ -135,7 +150,8 @@ public class SubmissionsPanelController {
         }
         Thread worker = new Thread(() -> {
             try {
-                List<SubmissionHistoryDto> rows = state.api().mySubmissions(state.contest().contestId());
+                List<SubmissionHistoryDto> rows =
+                        state.api().mySubmissions(state.contest().contestId(), showAllContests());
                 Platform.runLater(() -> {
                     table.setItems(FXCollections.observableArrayList(rows));
                     rows.stream().filter(r -> r.id() == submissionId).findFirst()
@@ -166,8 +182,8 @@ public class SubmissionsPanelController {
         source.setParagraphGraphicFactory(CodeAreaGutter.factory(source));
         source.getStyleClass().add("code-area");
         source.setPrefHeight(360);
+        source.setMinHeight(120);
         source.replaceText("loading source…");
-        VBox.setVgrow(source, Priority.ALWAYS);
 
         Label testsHeading = new Label("Judgement protocol");
         testsHeading.getStyleClass().add("box-head");
@@ -179,7 +195,18 @@ public class SubmissionsPanelController {
 
         ScrollPane testsScroll = new ScrollPane(testsBox);
         testsScroll.setFitToWidth(true);
-        testsScroll.setPrefHeight(260);
+        VBox.setVgrow(testsScroll, Priority.ALWAYS);
+
+        // Source and protocol share a resize handle instead of two fixed
+        // heights — a long solution or a big test case used to fight the
+        // other for the space a prefHeight guessed wrong.
+        VBox testsSection = new VBox(6, testsHeading, testsScroll);
+        testsSection.setMinHeight(120);
+
+        SplitPane detailSplit = new SplitPane(source, testsSection);
+        detailSplit.setOrientation(Orientation.VERTICAL);
+        detailSplit.setDividerPositions(0.58);
+        VBox.setVgrow(detailSplit, Priority.ALWAYS);
 
         Label header = new Label("#%d  ·  %s  ·  %s  ·  %s  ·  %s%s".formatted(
                 row.id(),
@@ -225,9 +252,10 @@ public class SubmissionsPanelController {
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
         HBox headerRow = new HBox(8, header, headerSpacer, zoomBar);
 
-        VBox content = new VBox(8, headerRow, source, testsHeading, testsScroll);
+        VBox content = new VBox(8, headerRow, detailSplit);
         content.setPadding(new Insets(12));
         content.setPrefWidth(940);
+        content.setPrefHeight(640);
 
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Submission #" + row.id());
@@ -409,9 +437,15 @@ public class SubmissionsPanelController {
                 STAMP.format(Instant.ofEpochMilli(c.getValue().submittedAtMs()))));
         when.setPrefWidth(90);
 
+        // "<contestId> - <code>", not just the bare code: with "Current Contest"
+        // unticked, this table can hold rows from several contests at once, and
+        // problem codes are only unique WITHIN a contest — two different
+        // contests each have their own "A". Without the contest number, a
+        // student comparing two "A" rows has no way to tell them apart.
         TableColumn<SubmissionHistoryDto, String> problem = new TableColumn<>("Problem");
-        problem.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(c.getValue().problemCode()));
-        problem.setPrefWidth(80);
+        problem.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(
+                c.getValue().contestId() + " - " + c.getValue().problemCode()));
+        problem.setPrefWidth(100);
 
         TableColumn<SubmissionHistoryDto, String> lang = new TableColumn<>("Language");
         lang.setCellValueFactory(c ->
@@ -441,9 +475,9 @@ public class SubmissionsPanelController {
         TableColumn<SubmissionHistoryDto, Void> open = new TableColumn<>("");
         open.setSortable(false);
         open.setCellFactory(c -> new OpenCell());
-        open.setPrefWidth(110);
-        open.setMinWidth(110);
-        open.setMaxWidth(110);
+        open.setPrefWidth(140);
+        open.setMinWidth(140);
+        open.setMaxWidth(140);
 
         table.getColumns().setAll(List.of(when, problem, lang, verdict, tests, time, mem, open));
     }
@@ -454,7 +488,7 @@ public class SubmissionsPanelController {
         private final Button button = new Button("View code");
 
         OpenCell() {
-            button.getStyleClass().add("btn-small");
+            button.getStyleClass().add("view-code-button");
             button.setOnAction(e -> {
                 SubmissionHistoryDto row = getTableRow() == null ? null : getTableRow().getItem();
                 if (row != null) {

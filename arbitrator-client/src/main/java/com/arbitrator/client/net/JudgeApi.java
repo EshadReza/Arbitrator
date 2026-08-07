@@ -75,8 +75,12 @@ public interface JudgeApi extends AutoCloseable {
     /** Run against custom input without submitting — never judged or stored. */
     CustomRunResultDto runCustom(CustomRunRequest request) throws ApiException;
 
-    /** FR-16, scoped to one contest — a clone starts with none of its own. */
-    List<SubmissionHistoryDto> mySubmissions(long contestId) throws ApiException;
+    /**
+     * FR-16. {@code all=false} scopes to {@code contestId} (a clone starts
+     * with none of its own); {@code all=true} is every submission this
+     * account has ever made, across every contest, ignoring contestId.
+     */
+    List<SubmissionHistoryDto> mySubmissions(long contestId, boolean all) throws ApiException;
 
     /** UIF-12: the code behind one of my submissions. */
     SubmissionSourceDto submissionSource(long submissionId) throws ApiException;

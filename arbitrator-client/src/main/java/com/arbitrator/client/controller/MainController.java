@@ -61,6 +61,7 @@ public class MainController {
     @FXML private Label zoomLabel;
     @FXML private TabPane tabs;
     @FXML private Label contestTitleLabel;
+    @FXML private Label contestNumberLabel;
     @FXML private Label timerLabel;
     @FXML private Label userLabel;
     @FXML private Label connLabel;
@@ -113,6 +114,7 @@ public class MainController {
     @FXML
     private void initialize() {
         contestTitleLabel.setText(state.contest().title());
+        contestNumberLabel.setText("#" + state.contest().contestId());
         userLabel.setText(state.session().displayName());
         workspacePanes = List.copyOf(workspaceSplit.getItems());
 
@@ -713,6 +715,7 @@ public class MainController {
             long previousStart = state.contest() == null ? -1 : state.contest().startTimeMs();
             state.setContest(contestState);
             contestTitleLabel.setText(contestState.title());
+            contestNumberLabel.setText("#" + contestState.contestId());
 
             // A different start instant means the contest was restarted, so
             // whatever is in the editor belongs to a run that no longer counts.

@@ -155,6 +155,7 @@ public class AdminMonitorController {
                     String codeStr = (p != null ? p.getCode() : "?") + " · " + userNames.getOrDefault(s.getUserId(), "?");
                     return new SubmissionHistoryDto(
                             s.getId(),
+                            s.getContestId(),
                             codeStr,
                             s.getLanguage(),
                             s.getVerdict(),
@@ -253,6 +254,7 @@ public class AdminMonitorController {
                 String codeStr = p != null ? "Problem " + p.getCode() + " — " + p.getTitle() : "?";
                 history.add(new SubmissionHistoryDto(
                         s.getId(),
+                        s.getContestId(),
                         codeStr,
                         s.getLanguage(),
                         s.getVerdict(),
