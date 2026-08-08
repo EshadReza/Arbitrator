@@ -17,6 +17,7 @@ import org.fxmisc.richtext.CodeArea;
 import org.fxmisc.richtext.model.StyleSpans;
 import org.fxmisc.richtext.model.StyleSpansBuilder;
 
+import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.enums.Language;
 
 import javafx.collections.FXCollections;
@@ -474,6 +475,7 @@ public class EditorController {
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
+        SceneRouter.styleDialog(alert.getDialogPane());
         alert.showAndWait();
     }
 

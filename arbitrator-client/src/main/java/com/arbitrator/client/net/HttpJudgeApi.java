@@ -80,8 +80,12 @@ public class HttpJudgeApi implements JudgeApi {
     }
 
     @Override
-    public ContestStateDto contest(long id) throws ApiException {
-        return get(ApiPaths.CONTESTS + "/" + id, ContestStateDto.class);
+    public ContestStateDto contest(long id, String password) throws ApiException {
+        String path = ApiPaths.CONTESTS + "/" + id;
+        if (password != null && !password.isEmpty()) {
+            path += "?password=" + java.net.URLEncoder.encode(password, java.nio.charset.StandardCharsets.UTF_8);
+        }
+        return get(path, ContestStateDto.class);
     }
 
     @Override

@@ -1,6 +1,7 @@
 package com.arbitrator.client.controller;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.client.app.SceneRouter;
@@ -13,11 +14,16 @@ import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.PasswordField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
@@ -168,6 +174,15 @@ public class ContestPickerController {
         }
         errorLabel.setVisible(false);
 
+        // ContestSummaryDto is a record, so List.equals() is a real
+        // structural comparison — every poll (every 3s) landing here with an
+        // unchanged list would otherwise still call setItems(), which clears
+        // and repopulates the ListView (and drops the selection for a frame)
+        // even though nothing actually changed. That's the blank flash.
+        if (contests.equals(contestList.getItems())) {
+            return;
+        }
+
         ContestSummaryDto previous = selected();
         // Always show the list, even with one contest: it is also the "which
         // contest am I in?" screen, and skipping it made switching contests
@@ -183,9 +198,61 @@ public class ContestPickerController {
     @FXML
     private void onEnter() {
         ContestSummaryDto sel = selected();
-        if (sel != null) {
-            enter(sel);
+        if (sel == null) {
+            return;
         }
+        if (sel.passwordProtected()) {
+            promptPassword(sel.title()).ifPresent(pw -> enter(sel, pw));
+        } else {
+            enter(sel, "");
+        }
+    }
+
+    /**
+     * Blocking (showAndWait) password prompt for a protected contest. Empty
+     * when the student cancels — the caller just does nothing in that case,
+     * leaving them on the picker.
+     */
+    private Optional<String> promptPassword(String contestTitle) {
+        Dialog<String> dialog = new Dialog<>();
+        dialog.setTitle(SceneRouter.bundle().getString("picker.password.title"));
+
+        Label lock = new Label("🔒");
+        lock.setStyle("-fx-font-size: 30px;");
+        Label titleLabel = new Label(contestTitle);
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 700;");
+        Label hint = new Label(SceneRouter.bundle().getString("picker.password.hint"));
+        hint.setWrapText(true);
+        hint.setStyle("-fx-opacity: .75;");
+
+        PasswordField field = new PasswordField();
+        field.setPromptText(SceneRouter.bundle().getString("picker.password.prompt"));
+        field.setPrefWidth(280);
+        field.setStyle("-fx-font-size: 13px; -fx-padding: 10 12 10 12;");
+
+        VBox header = new VBox(4, lock, titleLabel);
+        header.setAlignment(Pos.CENTER);
+        header.setPadding(new Insets(4, 4, 12, 4));
+
+        VBox content = new VBox(14, header, hint, field);
+        content.setAlignment(Pos.CENTER);
+        content.setPadding(new Insets(6, 18, 10, 18));
+        content.setPrefWidth(320);
+        dialog.getDialogPane().setContent(content);
+
+        ButtonType enterType = new ButtonType(
+                SceneRouter.bundle().getString("picker.enter"), ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(enterType, ButtonType.CANCEL);
+        SceneRouter.styleDialog(dialog.getDialogPane());
+        if (contestList.getScene() != null) {
+            dialog.initOwner(contestList.getScene().getWindow());
+        }
+        // Enter in the field submits, matching every other password field in the app.
+        field.setOnAction(e -> ((Button) dialog.getDialogPane().lookupButton(enterType)).fire());
+        dialog.setResultConverter(bt -> bt == enterType ? field.getText() : null);
+        Platform.runLater(field::requestFocus);
+
+        return dialog.showAndWait();
     }
 
     @FXML
@@ -195,12 +262,16 @@ public class ContestPickerController {
         SceneRouter.showLogin();
     }
 
-    private void enter(ContestSummaryDto contest) {
+    private void enter(ContestSummaryDto contest, String password) {
         stopPolling();
         enterButton.setDisable(true);
         Thread worker = new Thread(() -> {
             try {
-                state.setContest(state.api().contest(contest.id()));
+                var contestState = state.api().contest(contest.id(), password);
+                state.setContest(contestState);
+                // Remembered so MainController's own refresh of this same
+                // endpoint doesn't have to re-prompt — see AppState.contestPassword().
+                state.setContestPassword(password);
                 Platform.runLater(SceneRouter::showMain);
             } catch (Exception e) {
                 Platform.runLater(() -> {
@@ -236,7 +307,7 @@ public class ContestPickerController {
                 setText(null);
                 return;
             }
-            Label title = new Label(item.title());
+            Label title = new Label((item.passwordProtected() ? "🔒 " : "") + item.title());
             title.getStyleClass().add("contest-title");
 
             Label meta = new Label(item.problemCount() + " problems  ·  "

@@ -173,6 +173,27 @@ public class Contest {
         this.allowPrivateClarifications = allowPrivateClarifications;
     }
 
+    /**
+     * Bcrypt hash of the join password, or null when this contest needs
+     * none (the default — most contests in a closed LAN lab don't need one).
+     * Never the raw password; verified through the same PasswordEncoder bean
+     * user auth already uses.
+     */
+    @Column(name = "password_hash")
+    private String passwordHash;
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
+    public boolean hasPassword() {
+        return passwordHash != null && !passwordHash.isBlank();
+    }
+
     public Instant getFrozenAt() {
         return frozenAt;
     }

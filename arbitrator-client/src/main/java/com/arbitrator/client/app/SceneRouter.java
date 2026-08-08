@@ -7,6 +7,7 @@ import javafx.animation.FadeTransition;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.DialogPane;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
@@ -51,6 +52,22 @@ public final class SceneRouter {
 
     public static ResourceBundle bundle() {
         return BUNDLE;
+    }
+
+    /**
+     * Alert/TextInputDialog/Dialog each open in their own Scene, which does
+     * NOT inherit the main window's stylesheet — left alone they render in
+     * plain default JavaFX styling regardless of app theme, the one place
+     * the old-Windows-dialog look still showed through. Call this on every
+     * dialog the app creates, right after building its DialogPane.
+     */
+    public static void styleDialog(DialogPane pane) {
+        pane.getStylesheets().add(
+                SceneRouter.class.getResource("/css/arbitrator.css").toExternalForm());
+        pane.getStyleClass().add("root");
+        if (AppState.get().darkMode()) {
+            pane.getStyleClass().add("dark");
+        }
     }
 
     private static Parent load(String fxml) {

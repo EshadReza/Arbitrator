@@ -71,7 +71,8 @@ class ProblemPackageServiceTest {
         contest.setTitle("Test Contest");
         setId(contest, 1L);
         // Concrete class, so a plain anonymous subclass stands in for it.
-        ContestService contestService = new ContestService(null) {
+        // Neither fake dependency is used by the overridden methods below.
+        ContestService contestService = new ContestService(null, null) {
             @Override
             public Contest requireCurrent() {
                 return contest;

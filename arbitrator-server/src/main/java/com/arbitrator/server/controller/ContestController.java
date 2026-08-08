@@ -2,9 +2,13 @@ package com.arbitrator.server.controller;
 
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ContestStateDto;
@@ -36,10 +40,31 @@ public class ContestController {
         return contestService.currentState();
     }
 
-    /** The chosen contest's live state — drives the client countdown (FR-06). */
+    /**
+     * The chosen contest's live state — drives the client countdown (FR-06).
+     *
+     * {@code password} is required, and checked against the stored hash,
+     * whenever the contest has one — never trust the client's own
+     * {@code passwordProtected} flag, that's just what tells it to prompt.
+     *
+     * ADMIN callers skip this check: this same endpoint is what the admin
+     * console polls every few seconds to paint Contest Control (clocks,
+     * lifecycle, state badge), and an admin's own ADMIN JWT is already a
+     * stronger credential than the contest's join password — without this
+     * exemption a password-protected contest was unmanageable from its own
+     * control page, repeatedly 403ing on every poll.
+     */
     @GetMapping(ApiPaths.CONTEST_BY_ID)
-    public ContestStateDto byId(@PathVariable long id) {
-        return contestService.stateOf(contestService.require(id));
+    public ContestStateDto byId(@PathVariable long id,
+                                @RequestParam(required = false) String password,
+                                Authentication authentication) {
+        Contest c = contestService.require(id);
+        boolean isAdmin = authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+        if (!isAdmin && !contestService.verifyPassword(c, password)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Incorrect contest password");
+        }
+        return contestService.stateOf(c);
     }
 
     private ContestSummaryDto summarise(Contest c) {
@@ -53,6 +78,7 @@ public class ContestController {
                 end == null ? -1 : end.toEpochMilli(),
                 c.getDurationMinutes(),
                 problems.findByContestIdOrderByOrderingAscCodeAsc(c.getId()).size(),
-                c.getState().isJoinable());
+                c.getState().isJoinable(),
+                c.hasPassword());
     }
 }

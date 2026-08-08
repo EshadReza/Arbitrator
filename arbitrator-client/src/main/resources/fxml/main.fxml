@@ -33,14 +33,20 @@
                 <padding><Insets top="8" right="14" bottom="8" left="14"/></padding>
 
                 <left>
-                    <HBox alignment="CENTER_LEFT" spacing="12">
+                    <HBox alignment="CENTER_LEFT" spacing="14">
                         <Label text="%app.title" styleClass="logo-small"/>
-                        <Label fx:id="contestTitleLabel" styleClass="contest-title"/>
-                        <!-- The contest's number, small: with the Submissions
-                             tab now able to show rows from several contests at
-                             once (see SubmissionsPanelController), the student
-                             needs to know which number THIS contest is too. -->
-                        <Label fx:id="contestNumberLabel" styleClass="contest-number"/>
+                        <Region styleClass="topbar-divider" minWidth="1" maxWidth="1" prefHeight="20"/>
+                        <!-- Contest title + number in one chip, same "pill of
+                             context" language the admin topbar uses for its
+                             title/state pair. -->
+                        <HBox alignment="CENTER_LEFT" spacing="8" styleClass="topbar-chip">
+                            <Label fx:id="contestTitleLabel" styleClass="contest-title"/>
+                            <!-- The contest's number, small: with the Submissions
+                                 tab now able to show rows from several contests at
+                                 once (see SubmissionsPanelController), the student
+                                 needs to know which number THIS contest is too. -->
+                            <Label fx:id="contestNumberLabel" styleClass="contest-number"/>
+                        </HBox>
                     </HBox>
                 </left>
 
@@ -50,20 +56,29 @@
 
                 <right>
                     <HBox alignment="CENTER_RIGHT" spacing="10">
-                        <Label fx:id="userLabel"/>
-                        <Label fx:id="connLabel" styleClass="conn-ok"/>
+                        <!-- Who's signed in + live/offline, grouped into one
+                             chip instead of two loose labels. -->
+                        <HBox alignment="CENTER_LEFT" spacing="8" styleClass="topbar-chip">
+                            <Label fx:id="userAvatar" styleClass="topbar-avatar"/>
+                            <Label fx:id="userLabel"/>
+                            <Region styleClass="topbar-divider" minWidth="1" maxWidth="1" prefHeight="14"/>
+                            <Label fx:id="connLabel" styleClass="conn-ok"/>
+                        </HBox>
                         <!-- Appears only while offline: the usual cause of a
                              dead connection in a lab is the wrong server
                              address, so the remedy sits next to the symptom. -->
                         <Button fx:id="changeServerButton" text="Change IP"
                                 onAction="#onChangeServer" styleClass="btn-warn"
                                 visible="false" managed="false"/>
-                        <Button text="%main.refresh" onAction="#onRefresh"
-                                styleClass="refresh-button"/>
-                        <Button fx:id="themeButton" text="🌙" onAction="#onToggleTheme"
-                                styleClass="icon-button"/>
-                        <Button text="%main.switchContest" onAction="#onSwitchContest"/>
-                        <Button text="%main.signOut" onAction="#onSignOut"/>
+                        <!-- Actions share one bordered tray instead of floating loose. -->
+                        <HBox alignment="CENTER_RIGHT" spacing="6" styleClass="topbar-actions">
+                            <Button text="%main.refresh" onAction="#onRefresh"
+                                    styleClass="refresh-button"/>
+                            <Button fx:id="themeButton" text="🌙" onAction="#onToggleTheme"
+                                    styleClass="icon-button"/>
+                            <Button text="%main.switchContest" onAction="#onSwitchContest" styleClass="btn-outline"/>
+                            <Button text="%main.signOut" onAction="#onSignOut" styleClass="btn-ghost"/>
+                        </HBox>
                     </HBox>
                 </right>
             </BorderPane>

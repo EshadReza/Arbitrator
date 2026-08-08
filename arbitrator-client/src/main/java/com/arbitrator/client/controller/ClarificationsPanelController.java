@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.arbitrator.client.app.AppState;
+import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 
@@ -105,13 +106,14 @@ public class ClarificationsPanelController {
         question.getStyleClass().add("clarify-question");
 
         VBox card = new VBox(5, header, question);
-        card.getStyleClass().add("box");
+        card.getStyleClass().addAll("box", "list-card");
         card.setPadding(new Insets(10));
 
         // Only ever true for the asker's own entries — everyone else's private
         // questions never reach this list in the first place (server-filtered),
         // so seeing this badge at all already means "this one is mine."
         if (!c.isPublic()) {
+            card.getStyleClass().add("private");
             Label privateBadge = new Label("Private — only you and the instructor see this");
             privateBadge.getStyleClass().add("clarify-private-badge");
             card.getChildren().add(1, privateBadge);
@@ -189,6 +191,7 @@ public class ClarificationsPanelController {
         dialog.getDialogPane().setContent(content);
         ButtonType sendType = new ButtonType("Send", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(sendType, ButtonType.CANCEL);
+        SceneRouter.styleDialog(dialog.getDialogPane());
         if (listBox.getScene() != null) {
             dialog.initOwner(listBox.getScene().getWindow());
         }

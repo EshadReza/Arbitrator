@@ -8,6 +8,7 @@ import java.util.List;
 import org.fxmisc.richtext.CodeArea;
 
 import com.arbitrator.client.app.AppState;
+import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
 import com.arbitrator.common.dto.SubmissionTestsDto;
 import com.arbitrator.common.dto.TestCaseResultDto;
@@ -262,15 +263,9 @@ public class SubmissionsPanelController {
         dialog.setResizable(true);
         dialog.getDialogPane().setContent(content);
         dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        SceneRouter.styleDialog(dialog.getDialogPane());
         if (table.getScene() != null) {
             dialog.initOwner(table.getScene().getWindow());
-            // Inherit the theme, or a dark-mode user gets a white dialog.
-            dialog.getDialogPane().getStylesheets()
-                    .setAll(table.getScene().getStylesheets());
-            dialog.getDialogPane().getStyleClass().add("root");
-            if (state.darkMode()) {
-                dialog.getDialogPane().getStyleClass().add("dark");
-            }
         }
         dialog.setOnShown(e -> {
             var scene = dialog.getDialogPane().getScene();

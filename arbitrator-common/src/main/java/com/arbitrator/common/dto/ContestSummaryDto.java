@@ -14,6 +14,7 @@ public record ContestSummaryDto(
         long endTimeMs,        // -1 when never started; already pause-adjusted
         int durationMinutes,
         int problemCount,
-        boolean joinable
+        boolean joinable,
+        boolean passwordProtected   // never the password/hash itself — just whether one is needed
 ) {
 }

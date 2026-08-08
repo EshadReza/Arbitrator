@@ -10,8 +10,11 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
+import javafx.scene.shape.Rectangle;
 
 /**
  * UIF-01..04: logo, connection status dot, Enter-to-login, inline error that
@@ -27,6 +30,8 @@ public class LoginController {
     @FXML private Circle statusDot;
     @FXML private Button themeButton;
     @FXML private Button loginButton;
+    @FXML private StackPane heroPane;
+    @FXML private ImageView heroImage;
 
     private final AppState state = AppState.get();
 
@@ -45,6 +50,31 @@ public class LoginController {
         }
         themeButton.setText(state.darkMode() ? "☀" : "🌙");
         pingAsync();
+
+        // The server field is first in traversal order, so JavaFX would
+        // otherwise hand it initial keyboard focus on scene show — and
+        // select-all's its whole text, as it does for any TextField that
+        // gains focus via traversal rather than a click. Username is what
+        // someone actually wants to type first; claim focus after the
+        // scene's own initial-focus pass has already run.
+        Platform.runLater(() -> usernameField.requestFocus());
+
+        // Rounds the hero pane's corners by clipping it, rather than relying
+        // on -fx-background-radius (which JavaFX does not apply to
+        // BackgroundImage fills) — so a real photo dropped into heroImage
+        // later is masked exactly like the placeholder gradient is now.
+        if (heroPane != null) {
+            Rectangle clip = new Rectangle();
+            clip.setArcWidth(56);
+            clip.setArcHeight(56);
+            clip.widthProperty().bind(heroPane.widthProperty());
+            clip.heightProperty().bind(heroPane.heightProperty());
+            heroPane.setClip(clip);
+            if (heroImage != null) {
+                heroImage.fitWidthProperty().bind(heroPane.widthProperty());
+                heroImage.fitHeightProperty().bind(heroPane.heightProperty());
+            }
+        }
     }
 
     /** Wired to both the button and the password field's onAction (UIF-02). */
@@ -87,7 +117,6 @@ public class LoginController {
         SceneRouter.showRegister();
     }
 
-    
     @FXML
     private void onToggleTheme() {
         boolean dark = !state.darkMode();

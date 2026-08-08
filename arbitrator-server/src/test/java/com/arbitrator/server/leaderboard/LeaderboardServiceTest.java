@@ -65,7 +65,8 @@ class LeaderboardServiceTest {
                         ? List.copyOf(allProblems) : null);
         UserRepository users = fake(UserRepository.class, (m, a) ->
                 "findAll".equals(m) ? List.copyOf(allUsers) : null);
-        ContestService contestService = new ContestService(null) {
+        // Neither fake dependency is used by the overridden method below.
+        ContestService contestService = new ContestService(null, null) {
             @Override
             public Contest requireCurrent() {
                 return contest;

@@ -8,16 +8,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
+import com.arbitrator.common.dto.OfflineAlertDto;
 import com.arbitrator.common.dto.ParticipantDto;
 import com.arbitrator.common.dto.ParticipantSubmissionsDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
@@ -28,6 +32,7 @@ import com.arbitrator.server.entity.Submission;
 import com.arbitrator.server.entity.User;
 import com.arbitrator.server.leaderboard.LeaderboardService;
 import com.arbitrator.server.realtime.ContestStatePublisher;
+import com.arbitrator.server.realtime.OfflineAlertService;
 import com.arbitrator.server.realtime.PresenceTracker;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
@@ -52,6 +57,7 @@ public class AdminMonitorController {
     private final UserRepository users;
     private final SubmissionService submissionService;
     private final ContestStatePublisher statePublisher;
+    private final OfflineAlertService offlineAlerts;
 
     public AdminMonitorController(ContestService contestService,
                                   LeaderboardService leaderboard,
@@ -61,7 +67,8 @@ public class AdminMonitorController {
                                   TestCaseRepository testCases,
                                   UserRepository users,
                                   SubmissionService submissionService,
-                                  ContestStatePublisher statePublisher) {
+                                  ContestStatePublisher statePublisher,
+                                  OfflineAlertService offlineAlerts) {
         this.contestService = contestService;
         this.leaderboard = leaderboard;
         this.presence = presence;
@@ -71,6 +78,21 @@ public class AdminMonitorController {
         this.users = users;
         this.submissionService = submissionService;
         this.statePublisher = statePublisher;
+        this.offlineAlerts = offlineAlerts;
+    }
+
+    /** Newest first — the console's notification stack polls this. */
+    @GetMapping(ApiPaths.ADMIN_ALERTS)
+    public List<OfflineAlertDto> alerts() {
+        return offlineAlerts.current();
+    }
+
+    /** The instructor dismissed one; it never reappears. */
+    @DeleteMapping(ApiPaths.ADMIN_ALERT_BY_ID)
+    public void dismissAlert(@PathVariable long id) {
+        if (!offlineAlerts.dismiss(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such alert");
+        }
     }
 
     /**

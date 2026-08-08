@@ -83,13 +83,19 @@ public class FakeJudgeApi implements JudgeApi {
         long now = System.currentTimeMillis();
         return List.of(
                 new ContestSummaryDto(1, "Lab Contest #1 (MOCK)", ContestState.ACTIVE,
-                        now - 15 * 60_000, now + 105 * 60_000, 120, 3, true),
+                        now - 15 * 60_000, now + 105 * 60_000, 120, 3, true, false),
+                // Password-protected in mock mode too ("practice"), so the
+                // client's password-prompt flow has something to exercise
+                // without a real server.
                 new ContestSummaryDto(2, "Practice Round (MOCK)", ContestState.PAUSED,
-                        now - 60 * 60_000, now + 30 * 60_000, 90, 5, true));
+                        now - 60 * 60_000, now + 30 * 60_000, 90, 5, true, true));
     }
 
     @Override
-    public ContestStateDto contest(long id) {
+    public ContestStateDto contest(long id, String password) throws ApiException {
+        if (id == 2 && !"practice".equals(password)) {
+            throw new ApiException(403, "Wrong contest password");
+        }
         return currentContest();
     }
 

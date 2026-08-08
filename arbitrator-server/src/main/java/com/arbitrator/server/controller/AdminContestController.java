@@ -74,8 +74,9 @@ public class AdminContestController {
 
     @PostMapping(ApiPaths.ADMIN_CONTESTS)
     public ContestSummaryDto create(@RequestParam String title,
-                                    @RequestParam(defaultValue = "120") int durationMinutes) {
-        return summarise(contestService.create(title, durationMinutes));
+                                    @RequestParam(defaultValue = "120") int durationMinutes,
+                                    @RequestParam(required = false) String password) {
+        return summarise(contestService.create(title, durationMinutes, password));
     }
 
     /** Doors open, clock not running — students wait in the lobby. */
@@ -195,6 +196,7 @@ public class AdminContestController {
                 end == null ? -1 : end.toEpochMilli(),
                 c.getDurationMinutes(),
                 problems.findByContestIdOrderByOrderingAscCodeAsc(c.getId()).size(),
-                c.getState().isJoinable());
+                c.getState().isJoinable(),
+                c.hasPassword());
     }
 }

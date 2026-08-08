@@ -6,42 +6,90 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.PasswordField?>
 <?import javafx.scene.control.TextField?>
+<?import javafx.scene.image.Image?>
+<?import javafx.scene.image.ImageView?>
 <?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.shape.Circle?>
 
-<!-- UIF-01..04. All strings from the resource bundle (I18N-02). -->
+<!-- UIF-01..04. All strings from the resource bundle (I18N-02). Split-card
+     layout: one card on the left beside a rounded hero image on the right,
+     the whole thing framed by a black gap. See arbitrator.css's "login
+     screen" section for the (themed) card and the (constant) frame/hero. -->
+<StackPane xmlns="http://javafx.com/javafx/26" xmlns:fx="http://javafx.com/fxml/1"
+           fx:controller="com.arbitrator.client.controller.LoginController"
+           styleClass="login-page">
+    <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
 
-<VBox alignment="TOP_CENTER" styleClass="login-root" xmlns="http://javafx.com/javafx/26" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.arbitrator.client.controller.LoginController">
-    <!-- Top toolbar for theme toggle button -->
-    <HBox alignment="CENTER_RIGHT" maxWidth="Infinity">
-        <padding><Insets top="12" right="16" bottom="0" left="16" /></padding>
-        <!-- Not focus-traversable — see contest-picker.fxml's themeButton comment;
-             same fix, same reason: it must not eat the login form's Enter key. -->
-        <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button" text="🌙"
-                focusTraversable="false" />
-    </HBox>
+    <HBox styleClass="login-frame" spacing="10">
+        <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
 
-    <!-- Main login container centered according to window size -->
-    <VBox alignment="CENTER" spacing="12" VBox.vgrow="ALWAYS">
-        <Label styleClass="logo" text="%app.title" />
-        <Label styleClass="subtitle" text="%login.subtitle" />
+        <VBox styleClass="login-card" prefWidth="540" HBox.hgrow="ALWAYS">
+            <padding><Insets top="24" right="36" bottom="24" left="36"/></padding>
 
-        <VBox alignment="CENTER" prefWidth="440" maxWidth="440" spacing="12" styleClass="box, login-box">
-            <padding><Insets top="28" right="32" bottom="28" left="32" /></padding>
-
-            <HBox alignment="CENTER" spacing="6">
-                <Circle fx:id="statusDot" radius="5" />
-                <Label styleClass="subtitle" text="Server:" />
-                <TextField fx:id="serverAddressField" promptText="127.0.0.1:8080" styleClass="login-input" style="-fx-font-size: 11px; -fx-padding: 3 6;" maxWidth="180" />
+            <HBox alignment="CENTER_LEFT">
+                <ImageView fitWidth="48" fitHeight="48" preserveRatio="true" smooth="true">
+                    <Image url="@../images/app-logo.png"/>
+                </ImageView>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button"
+                        text="🌙" focusTraversable="false"/>
             </HBox>
 
-            <TextField fx:id="usernameField" promptText="%login.username" styleClass="login-input" />
-            <!-- UIF-02: Enter in the password field logs in -->
-            <PasswordField fx:id="passwordField" onAction="#onLogin" promptText="%login.password" styleClass="login-input" />
-            <Label fx:id="errorLabel" styleClass="error" wrapText="true" />
-            <Button fx:id="loginButton" defaultButton="true" maxWidth="Infinity" onAction="#onLogin" text="%login.button" styleClass="login-button" />
-            <Hyperlink onAction="#onGoToRegister" text="%login.register" />
+            <VBox alignment="CENTER" spacing="26" VBox.vgrow="ALWAYS">
+
+                <Label text="%login.welcome" styleClass="login-headline"/>
+
+                <VBox alignment="CENTER" spacing="14" maxWidth="380">
+                    <!-- LAN judge, no fixed host — kept, but tucked in small
+                         and muted since the reference mock has nothing like it. -->
+                    <HBox alignment="CENTER" spacing="6">
+                        <Circle fx:id="statusDot" radius="4"/>
+                        <Label text="%login.server" styleClass="login-server-label"/>
+                        <TextField fx:id="serverAddressField" promptText="127.0.0.1:8080"
+                                   styleClass="login-server-field" maxWidth="150"/>
+                    </HBox>
+
+                    <TextField fx:id="usernameField" promptText="%login.username"
+                               styleClass="login-pill-field" maxWidth="Infinity"/>
+                    <!-- UIF-02: Enter in the password field logs in -->
+                    <PasswordField fx:id="passwordField" onAction="#onLogin" promptText="%login.password"
+                                   styleClass="login-pill-field" maxWidth="Infinity"/>
+                    <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>
+
+                    <Button fx:id="loginButton" defaultButton="true" maxWidth="Infinity" onAction="#onLogin"
+                            text="%login.button" styleClass="login-signin-button"/>
+
+                    <HBox spacing="6" alignment="CENTER">
+                        <Label text="%login.needAccount" styleClass="login-need-account"/>
+                        <Hyperlink text="%login.signUp" onAction="#onGoToRegister" styleClass="login-signup-link"/>
+                    </HBox>
+                </VBox>
+
+            </VBox>
         </VBox>
-    </VBox>
-</VBox>
+
+        <!-- Right column: hero image. Corner-masked in code (LoginController)
+             with a clip bound to this pane's size, so a real photo dropped
+             into heroImage later is automatically rounded the same way. -->
+        <StackPane fx:id="heroPane" styleClass="login-hero-bg" prefWidth="620" HBox.hgrow="ALWAYS">
+            <ImageView fx:id="heroImage" preserveRatio="false" smooth="true"/>
+
+            <!-- Both labels need alignment="CENTER", not just textAlignment:
+                 fillWidth stretches each to the full 460px column, and
+                 textAlignment only centres wrapped LINES relative to each
+                 other — a single line (or a cap-width box) still sits at
+                 the label's default CENTER_LEFT content alignment unless
+                 that is overridden too. -->
+            <VBox alignment="CENTER" spacing="18" maxWidth="460" StackPane.alignment="CENTER">
+                <Label text="%app.title" styleClass="hero-brand" wrapText="true"
+                       maxWidth="Infinity" alignment="CENTER" textAlignment="CENTER"/>
+                <Label text="%login.hero.description" styleClass="hero-description"
+                       wrapText="true" maxWidth="360" alignment="CENTER" textAlignment="CENTER"/>
+            </VBox>
+        </StackPane>
+
+    </HBox>
+</StackPane>

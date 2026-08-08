@@ -63,6 +63,7 @@ public class MainController {
     @FXML private Label contestTitleLabel;
     @FXML private Label contestNumberLabel;
     @FXML private Label timerLabel;
+    @FXML private Label userAvatar;
     @FXML private Label userLabel;
     @FXML private Label connLabel;
     @FXML private Button changeServerButton;
@@ -116,6 +117,9 @@ public class MainController {
         contestTitleLabel.setText(state.contest().title());
         contestNumberLabel.setText("#" + state.contest().contestId());
         userLabel.setText(state.session().displayName());
+        String initial = state.session().displayName().isBlank() ? "?"
+                : state.session().displayName().substring(0, 1).toUpperCase();
+        userAvatar.setText(initial);
         workspacePanes = List.copyOf(workspaceSplit.getItems());
 
         problemList.setCellFactory(v -> new ProblemCell());
@@ -360,7 +364,9 @@ public class MainController {
                 long id = state.contest().contestId();
                 // Contest state first: it decides whether problems are released
                 // at all, so fetching problems before it can show a stale list.
-                var contestState = state.api().contest(id);
+                // Password (if any) is whatever unlocked this contest in the
+                // picker — see AppState.contestPassword() — not re-prompted here.
+                var contestState = state.api().contest(id, state.contestPassword());
                 onContestState(contestState);
                 if (contestState.state().releasesProblems()) {
                     List<ProblemSummaryDto> items = state.api().problems();
@@ -810,6 +816,7 @@ public class MainController {
         dialog.setHeaderText("Address of the machine running Arbitrator");
         dialog.setContentText("host:port");
         dialog.initOwner(rootStack.getScene().getWindow());
+        SceneRouter.styleDialog(dialog.getDialogPane());
 
         dialog.showAndWait().map(String::trim).filter(s -> !s.isEmpty()).ifPresent(address -> {
             state.serverConfig().updateHostPort(address);

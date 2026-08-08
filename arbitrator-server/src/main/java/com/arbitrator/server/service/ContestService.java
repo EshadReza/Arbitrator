@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -17,9 +18,11 @@ import com.arbitrator.server.repo.ContestRepository;
 public class ContestService {
 
     private final ContestRepository contests;
+    private final PasswordEncoder passwordEncoder;
 
-    public ContestService(ContestRepository contests) {
+    public ContestService(ContestRepository contests, PasswordEncoder passwordEncoder) {
         this.contests = contests;
+        this.passwordEncoder = passwordEncoder;
     }
 
     /**
@@ -114,11 +117,37 @@ public class ContestService {
     // --- admin operations (FR-04, FR-08) — called from AdminContestController ---
 
     public Contest create(String title, int durationMinutes) {
+        return create(title, durationMinutes, null);
+    }
+
+    /**
+     * {@code password} blank/null means "no password required" (the
+     * default) — most contests in a closed LAN lab don't need one. Only the
+     * bcrypt hash is ever persisted (see {@link Contest#passwordHash}).
+     */
+    public Contest create(String title, int durationMinutes, String password) {
         Contest c = new Contest();
         c.setTitle(title);
         c.setDurationMinutes(durationMinutes);
         c.setState(ContestState.DRAFT);
+        if (password != null && !password.isBlank()) {
+            c.setPasswordHash(passwordEncoder.encode(password));
+        }
         return contests.save(c);
+    }
+
+    /**
+     * True when the contest has no password, or {@code suppliedPassword}
+     * matches the one it was created with. Always call this before letting a
+     * student into a protected contest's state/problems — never trust a
+     * client-side "I have the password" flag.
+     */
+    public boolean verifyPassword(Contest c, String suppliedPassword) {
+        if (!c.hasPassword()) {
+            return true;
+        }
+        return suppliedPassword != null
+                && passwordEncoder.matches(suppliedPassword, c.getPasswordHash());
     }
 
     /**

@@ -71,7 +71,7 @@ public class AnnouncementsPanelController {
         body.getEngine().loadContent(wrap(a.body(), dark));
 
         VBox card = new VBox(4, when, body);
-        card.getStyleClass().add("box");
+        card.getStyleClass().addAll("box", "list-card");
         card.setPadding(new javafx.geometry.Insets(10));
         return card;
     }

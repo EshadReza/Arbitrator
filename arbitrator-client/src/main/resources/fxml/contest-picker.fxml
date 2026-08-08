@@ -5,52 +5,75 @@
 <?import javafx.scene.control.Hyperlink?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.image.Image?>
+<?import javafx.scene.image.ImageView?>
 <?import javafx.scene.layout.HBox?>
-<?import javafx.scene.layout.Priority?>
 <?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 
-<!-- Contest picker (shown after login when more than one contest is joinable) -->
-<!-- Same shape as login.fxml and register.fxml: the theme toggle is pinned to
-     the top of the window, and the content below it is what gets centred. With
-     a single CENTER-aligned VBox the toggle was part of the centred stack and
-     floated in the middle of the screen, directly above the title. -->
-<VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
-      fx:controller="com.arbitrator.client.controller.ContestPickerController"
-      alignment="TOP_CENTER" styleClass="login-root">
+<!-- Contest picker (shown after login when more than one contest is joinable).
+     Same card look as login.fxml (see arbitrator.css's "login screen"
+     section) but no hero panel — this screen is just a list and a couple of
+     buttons, a decorative side pane would be dead space, not branding. -->
+<StackPane xmlns="http://javafx.com/javafx/26" xmlns:fx="http://javafx.com/fxml/1"
+           fx:controller="com.arbitrator.client.controller.ContestPickerController"
+           styleClass="login-page">
+    <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
 
-    <HBox alignment="CENTER_RIGHT" maxWidth="Infinity">
-        <padding><Insets top="12" right="16" bottom="0" left="16"/></padding>
-        <!-- Not focus-traversable: as the first control in the scene it would
-             otherwise hold initial keyboard focus, and a focused Button fires
-             its own action on Enter before the picker's defaultButton ever
-             gets a look — pressing Enter to join a contest toggled the theme
-             instead. -->
-        <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button" text="🌙"
-                focusTraversable="false" />
+    <HBox styleClass="login-frame">
+        <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
+
+        <!-- Fills the frame at the same thin 10px inset as login.fxml's two
+             panels together — a fixed-width card here would leave big empty
+             black bars on both sides now that there's no hero pane to fill
+             the rest. alignment="CENTER" only affects children narrower than
+             the card (the 520-wide form column below); the header row still
+             fills the full width via fillWidth regardless. -->
+        <VBox styleClass="login-card" alignment="CENTER" HBox.hgrow="ALWAYS">
+            <padding><Insets top="24" right="36" bottom="24" left="36"/></padding>
+
+            <HBox alignment="CENTER_LEFT">
+                <ImageView fitWidth="48" fitHeight="48" preserveRatio="true" smooth="true">
+                    <Image url="@../images/app-logo.png"/>
+                </ImageView>
+                <Region HBox.hgrow="ALWAYS"/>
+                <!-- Not focus-traversable: as the first control in the scene
+                     it would otherwise hold initial keyboard focus, and a
+                     focused Button fires its own action on Enter before the
+                     picker's defaultButton ever gets a look. -->
+                <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button"
+                        text="🌙" focusTraversable="false"/>
+            </HBox>
+
+            <VBox alignment="CENTER" spacing="16" maxWidth="520" VBox.vgrow="ALWAYS">
+                <!-- Headline lives in this same 420-wide column, not a
+                     separately-capped sibling. It also needs its own
+                     alignment="CENTER": fillWidth stretches it to the full
+                     column width, and textAlignment only centres wrapped
+                     LINES relative to each other — the single-line text
+                     still sits at the label's default CENTER_LEFT content
+                     alignment unless that is overridden too. -->
+                <Label text="%picker.subtitle" styleClass="login-headline" wrapText="true"
+                       maxWidth="Infinity" alignment="CENTER" textAlignment="CENTER"
+                       style="-fx-font-size: 32px;"/>
+
+                <!-- The list refreshes itself every few seconds; the button
+                     is for the impatient, and makes it obvious the screen is live. -->
+                <HBox alignment="CENTER_LEFT" spacing="8" maxWidth="Infinity">
+                    <Label text="%picker.available" styleClass="login-server-label"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="refreshButton" text="%picker.refresh" onAction="#onRefresh"
+                            styleClass="login-refresh-button"/>
+                </HBox>
+
+                <ListView fx:id="contestList" prefHeight="220" VBox.vgrow="ALWAYS"/>
+                <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>
+
+                <Button fx:id="enterButton" text="%picker.enter" onAction="#onEnter"
+                        defaultButton="true" maxWidth="Infinity" styleClass="login-signin-button"/>
+                <Hyperlink text="%picker.logout" onAction="#onLogout" styleClass="login-signup-link"/>
+            </VBox>
+        </VBox>
     </HBox>
-
-    <VBox alignment="CENTER" spacing="10" VBox.vgrow="ALWAYS">
-    <Label text="%app.title" styleClass="logo"/>
-    <Label text="%picker.subtitle" styleClass="subtitle"/>
-
-    <VBox alignment="CENTER" spacing="8" maxWidth="460" maxHeight="360" styleClass="box">
-        <padding><Insets top="16" right="18" bottom="16" left="18"/></padding>
-
-        <!-- The list refreshes itself every few seconds; the button is for
-             the impatient, and makes it obvious the screen is live. -->
-        <HBox alignment="CENTER_LEFT" spacing="8">
-            <Label text="%picker.available" styleClass="subtitle"/>
-            <Region HBox.hgrow="ALWAYS"/>
-            <Button fx:id="refreshButton" text="%picker.refresh" onAction="#onRefresh"
-                    styleClass="refresh-button"/>
-        </HBox>
-
-        <ListView fx:id="contestList" prefHeight="220" VBox.vgrow="ALWAYS"/>
-        <Label fx:id="errorLabel" styleClass="error" wrapText="true"/>
-        <Button fx:id="enterButton" text="%picker.enter" onAction="#onEnter"
-                defaultButton="true" maxWidth="Infinity"/>
-        <Hyperlink text="%picker.logout" onAction="#onLogout"/>
-    </VBox>
-    </VBox>
-</VBox>
+</StackPane>

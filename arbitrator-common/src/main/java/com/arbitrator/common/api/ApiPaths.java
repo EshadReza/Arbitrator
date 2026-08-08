@@ -85,6 +85,9 @@ public final class ApiPaths {
     /** The clarification queue, with the asker's name attached. */
     public static final String ADMIN_CLARIFICATIONS = "/api/admin/contests/{id}/clarifications";
     public static final String ADMIN_CLARIFICATION_ANSWER = "/api/admin/clarifications/{id}/answer";
+    /** Escalating "offline for N minutes" alerts, newest first. GET to poll, DELETE one to dismiss it. */
+    public static final String ADMIN_ALERTS = "/api/admin/alerts";
+    public static final String ADMIN_ALERT_BY_ID = "/api/admin/alerts/{id}";
 
     // --- static admin panel, loopback only ---
     public static final String ADMIN_PANEL_PREFIX = "/admin";

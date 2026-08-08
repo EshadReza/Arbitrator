@@ -7,7 +7,7 @@
 
 .root {
     -fx-font-family: "Inter", "SF Pro Text", "Segoe UI", "DejaVu Sans", sans-serif;
-    -fx-font-size: 13px;
+    -fx-font-size: 13.5px;
 
     -c-bg:        #eef1f5;   /* window background */
     -c-surface:   #ffffff;   /* cards */
@@ -23,6 +23,19 @@
     -c-orange: #e08b2f;
     -c-purple: #8257c7;
     -c-amber:  #e5a50a;
+
+    /* Login card only — the coral/black frame and hero gradient around it
+       are constant brand chrome (see "login screen" section), but the card
+       itself must actually theme, which is what -lc-* is for. */
+    -lc-card-bg:     #f3f1ea;
+    -lc-card-text:   #14141a;
+    -lc-card-muted:  #6b6b6b;
+    -lc-card-border: #e2ded2;
+    -lc-field-bg:      #ffffff;
+    -lc-field-text:    #14141a;
+    -lc-field-prompt:  #9a9a9a;
+    -lc-accent-bg:   #101012;
+    -lc-accent-text: #ffffff;
 
     -fx-background-color: -c-bg;
 }
@@ -42,6 +55,16 @@
     -c-orange: #f0a44a;
     -c-purple: #a883ee;
     -c-amber:  #f2c14e;
+
+    -lc-card-bg:     #191c22;
+    -lc-card-text:   #f0f1f4;
+    -lc-card-muted:  #9aa0aa;
+    -lc-card-border: #2c313c;
+    -lc-field-bg:      #22262e;
+    -lc-field-text:    #f0f1f4;
+    -lc-field-prompt:  #6f7684;
+    -lc-accent-bg:   #f0f1f4;
+    -lc-accent-text: #14141a;
 }
 
 .label, .text { -fx-text-fill: -c-text; }
@@ -56,16 +79,20 @@
 .box {
     -fx-background-color: -c-surface;
     -fx-border-color: -c-border;
-    -fx-border-radius: 8px;
-    -fx-background-radius: 8px;
+    -fx-border-radius: 10px;
+    -fx-background-radius: 10px;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.05), 8, 0, 0, 2);
+}
+.root.dark .box {
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.3), 10, 0, 0, 2);
 }
 
 .box-head {
     -fx-background-color: -c-surface-2;
     -fx-text-fill: -c-text;
     -fx-font-weight: bold;
-    -fx-padding: 7 12 7 12;
-    -fx-background-radius: 8px 8px 0 0;
+    -fx-padding: 9 14 9 14;
+    -fx-background-radius: 10px 10px 0 0;
     -fx-border-color: transparent transparent -c-border transparent;
 }
 
@@ -122,23 +149,57 @@
     -fx-background-color: -c-surface-2;
     -fx-text-fill: -c-text;
     -fx-border-color: -c-border;
-    -fx-border-radius: 6px;
-    -fx-background-radius: 6px;
-    -fx-padding: 7 14 7 14;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+    -fx-padding: 8 16 8 16;
+    -fx-font-size: 12.5px;
+    -fx-font-weight: 600;
     -fx-cursor: hand;
 }
 
-.button:hover { -fx-background-color: derive(-c-surface-2, -6%); }
+.button:hover    { -fx-background-color: derive(-c-surface-2, -6%); -fx-border-color: derive(-c-border, -18%); }
+.button:pressed  { -fx-background-color: derive(-c-surface-2, -12%); }
 
 .button:default, .submit-button {
     -fx-background-color: -c-accent;
     -fx-text-fill: -c-accent-fg;
     -fx-border-color: -c-accent;
     -fx-font-weight: bold;
+    -fx-effect: dropshadow(gaussian, derive(-c-accent, -40%), 8, 0, 0, 2);
 }
 
 .button:default:hover, .submit-button:hover { -fx-background-color: derive(-c-accent, -12%); }
+.button:default:pressed, .submit-button:pressed { -fx-background-color: derive(-c-accent, -20%); }
 .button:disabled { -fx-opacity: .45; }
+
+/* Secondary action next to a primary one ("Switch Contest") — same pill
+   shape as the accent button, outlined instead of filled so it doesn't
+   compete with Refresh/Submit for attention. */
+.btn-outline {
+    -fx-background-color: transparent;
+    -fx-text-fill: -c-accent;
+    -fx-border-color: -c-accent;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 999px;
+    -fx-background-radius: 999px;
+    -fx-font-weight: 600;
+    -fx-padding: 7 16 7 16;
+    -fx-cursor: hand;
+}
+.btn-outline:hover { -fx-background-color: derive(-c-accent, 85%); }
+.root.dark .btn-outline:hover { -fx-background-color: derive(-c-accent, -55%); }
+
+/* Lowest-emphasis action ("Sign Out") — text only until hovered, so it
+   doesn't visually compete with the actions someone actually came to use. */
+.btn-ghost {
+    -fx-background-color: transparent;
+    -fx-text-fill: -c-muted;
+    -fx-border-color: transparent;
+    -fx-background-radius: 999px;
+    -fx-padding: 7 14 7 14;
+    -fx-cursor: hand;
+}
+.btn-ghost:hover { -fx-background-color: -c-surface-2; -fx-text-fill: -c-text; }
 
 /* Sits inside a table row, so it must not set the row's height on its own. */
 .btn-small {
@@ -166,22 +227,150 @@
 
 .hyperlink { -fx-text-fill: -c-accent; -fx-border-color: transparent; }
 
-/* icon-only buttons in panel headers (fullscreen, collapse) */
+/* icon-only buttons in panel headers (fullscreen, collapse, theme, zoom) */
 .icon-button {
     -fx-background-color: transparent;
     -fx-border-color: transparent;
-    -fx-padding: 2 7 2 7;
+    -fx-padding: 5 9 5 9;
     -fx-font-size: 13px;
     -fx-text-fill: -c-muted;
+    -fx-background-radius: 999px;
+    -fx-cursor: hand;
 }
 
-.icon-button:hover { -fx-background-color: -c-border; -fx-text-fill: -c-text; }
+.icon-button:hover    { -fx-background-color: -c-surface-2; -fx-text-fill: -c-text; }
+.icon-button:pressed  { -fx-background-color: -c-border; }
+
+/* --- login screen (split-card redesign) ------------------------------------
+   The frame/gap and the hero gradient are constant brand chrome — always
+   black / always blue, regardless of theme. The card itself (.login-card and
+   its children) DOES theme, via the -lc-* variables defined on .root/.root.dark
+   above. New class names only (login-page/login-frame/login-card/...) so
+   register.fxml and contest-picker.fxml, which still use the older
+   .login-root/.login-box/.login-input/.login-button/.logo rules above, are
+   untouched. */
+
+/* Flush black to the window edge — no colored border layer, no corner
+   rounding on the outer edge (the window itself is a plain rectangle, so a
+   rounded edge here would just be redundant against a same-colour square
+   behind it). Rounding lives only on the two inner content panes below. */
+.login-page  { -fx-background-color: #0d0d10; }
+.login-frame { -fx-background-color: #0d0d10; -fx-background-radius: 0; }
+
+.login-card {
+    -fx-background-color: -lc-card-bg;
+    -fx-background-radius: 22px;
+}
+
+.login-headline {
+    -fx-text-fill: -lc-card-text;
+    -fx-font-size: 52px;
+    -fx-font-weight: bold;
+}
+
+.login-need-account { -fx-text-fill: -lc-card-muted; -fx-font-size: 13px; }
+
+.login-signup-link {
+    -fx-text-fill: -lc-card-text;
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-border-color: transparent;
+    -fx-underline: true;
+}
+
+/* Server-address row: functionally required (this is a LAN judge with no
+   fixed host), but the reference mock has nothing like it, so it's kept
+   small and muted — a utility line, not a form field. */
+.login-server-label { -fx-text-fill: -lc-card-muted; -fx-font-size: 11px; }
+.login-server-field {
+    -fx-background-color: transparent;
+    -fx-text-fill: -lc-card-text;
+    -fx-font-size: 11px;
+    -fx-padding: 2 4 2 4;
+    -fx-border-color: transparent transparent -lc-card-border transparent;
+}
+.login-server-field:focused { -fx-border-color: transparent transparent -lc-accent-bg transparent; }
+
+.login-pill-field {
+    -fx-background-color: -lc-field-bg;
+    -fx-text-fill: -lc-field-text;
+    -fx-prompt-text-fill: -lc-field-prompt;
+    -fx-font-size: 14px;
+    -fx-padding: 13 22 13 22;
+    -fx-background-radius: 999px;
+    -fx-border-radius: 999px;
+    -fx-border-color: -lc-card-border;
+}
+.login-pill-field:focused { -fx-border-color: -lc-accent-bg; }
+
+/* Also matched as ".button.login-signin-button:default": defaultButton="true"
+   gives it the :default pseudo-class, and plain ".button:default" elsewhere
+   in this file outranks a single-class selector on specificity alone
+   regardless of source order — so the compound form is needed here to win. */
+.login-signin-button, .button.login-signin-button:default {
+    -fx-background-color: -lc-accent-bg;
+    -fx-text-fill: -lc-accent-text;
+    -fx-border-color: -lc-accent-bg;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-padding: 13 0 13 0;
+    -fx-background-radius: 999px;
+    -fx-border-radius: 999px;
+    -fx-cursor: hand;
+    /* Overrides plain ".button:default"'s accent-tinted CTA shadow (added for
+       the main app's buttons) — wrong color family against this screen's
+       own black/white palette, so this screen gets none instead. */
+    -fx-effect: none;
+}
+.login-signin-button:hover, .button.login-signin-button:default:hover { -fx-background-color: derive(-lc-accent-bg, 20%); }
+.login-signin-button:disabled { -fx-opacity: .55; }
+
+/* Small pill action next to a label (picker's "Refresh") — same accent pill
+   language as .login-signin-button, just compact instead of full-width. */
+.login-refresh-button {
+    -fx-background-color: -lc-accent-bg;
+    -fx-text-fill: -lc-accent-text;
+    -fx-border-color: -lc-accent-bg;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-padding: 6 16 6 16;
+    -fx-background-radius: 999px;
+    -fx-border-radius: 999px;
+    -fx-cursor: hand;
+}
+.login-refresh-button:hover { -fx-background-color: derive(-lc-accent-bg, 20%); }
+.login-refresh-button:disabled { -fx-opacity: .55; }
+
+/* Hero image side — always this gradient, in both themes (brand colour, not
+   themed content). Real corner-rounding (masking a photo, not just a flat
+   fill) needs a code-side clip — see LoginController — this gradient is only
+   the placeholder shown until that clip has an actual photo to mask. */
+.login-hero-bg {
+    -fx-background-color: linear-gradient(from 0% 0% to 100% 100%,
+            #2f5c9e 0%, #16294f 50%, #050810 100%);
+}
+
+.hero-brand {
+    -fx-text-fill: white;
+    -fx-font-size: 86px;
+    -fx-font-weight: bold;
+}
+
+.hero-description {
+    -fx-text-fill: rgba(255, 255, 255, 0.72);
+    -fx-font-size: 13.5px;
+    -fx-line-spacing: 3px;
+}
 
 /* --- top bar --------------------------------------------------------------- */
 
 .top-bar {
     -fx-background-color: -c-surface;
     -fx-border-color: transparent transparent -c-border transparent;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.06), 6, 0, 0, 2);
+}
+.root.dark .top-bar {
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.35), 8, 0, 0, 2);
 }
 
 .contest-title { -fx-font-weight: bold; }
@@ -205,12 +394,12 @@
     -fx-alignment: CENTER;
     -fx-text-alignment: CENTER;
     -fx-letter-spacing: 1.5px;
-    -fx-padding: 4 20 4 20;
+    -fx-padding: 4 22 4 22;
     -fx-background-color: derive(-c-surface-2, 4%);
-    -fx-background-radius: 9px;
+    -fx-background-radius: 999px;
     -fx-border-color: derive(-c-accent, 55%);
     -fx-border-width: 1.5;
-    -fx-border-radius: 9px;
+    -fx-border-radius: 999px;
     -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.18), 6, 0, 0, 1);
 }
 .root.dark .timer {
@@ -229,27 +418,35 @@
     -fx-text-fill: -c-accent-fg;
     -fx-border-color: -c-accent;
     -fx-font-weight: bold;
-    -fx-font-size: 13px;
+    -fx-font-size: 12.5px;
     -fx-padding: 7 16 7 16;
+    -fx-background-radius: 999px;
+    -fx-border-radius: 999px;
+    -fx-cursor: hand;
 }
 
-.refresh-button:hover { -fx-background-color: derive(-c-accent, -12%); }
+.refresh-button:hover   { -fx-background-color: derive(-c-accent, -12%); }
+.refresh-button:pressed { -fx-background-color: derive(-c-accent, -20%); }
+.refresh-button:disabled { -fx-opacity: .5; }
 
 .timer-critical { -fx-text-fill: -c-red; }
 .timer-paused   { -fx-text-fill: -c-amber; }
 .timer-waiting  { -fx-text-fill: -c-muted; -fx-font-size: 20px; }
 
-.conn-ok   { -fx-text-fill: -c-green; -fx-font-weight: bold; }
-.conn-lost { -fx-text-fill: -c-red;   -fx-font-weight: bold; }
+/* A small dot ahead of the word reads faster than colour on text alone —
+   the eye catches a status light before it parses "ok"/"lost". */
+.conn-ok, .conn-lost { -fx-font-weight: bold; -fx-font-size: 11.5px; }
+.conn-ok   { -fx-text-fill: -c-green; }
+.conn-lost { -fx-text-fill: -c-red; }
 
 /* Zoom readout in the status bar. Tabular-ish width so stepping 90 -> 100 ->
    110 does not shove the +/- buttons sideways on every press. */
 .zoom-bar {
     -fx-background-color: -c-surface;
-    -fx-background-radius: 6px;
+    -fx-background-radius: 999px;
     -fx-border-color: -c-border;
-    -fx-border-radius: 6px;
-    -fx-padding: 1 4 1 4;
+    -fx-border-radius: 999px;
+    -fx-padding: 1 5 1 5;
 }
 .zoom-value {
     -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
@@ -258,6 +455,42 @@
     -fx-min-width: 42px;
     -fx-alignment: CENTER;
     -fx-cursor: hand;
+}
+
+/* Top-bar groupings — the contest title and the user/connection status each
+   sit in a rounded chip, and the action buttons share one bordered tray,
+   same visual grammar as the admin console's topbar-pill/action-toolbar so
+   the two apps read as one product. */
+.topbar-divider { -fx-background-color: -c-border; }
+
+.topbar-chip {
+    -fx-background-color: -c-surface-2;
+    -fx-background-radius: 999px;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 999px;
+    -fx-padding: 5 14 5 14;
+}
+
+.topbar-avatar {
+    -fx-font-size: 11.5px;
+    -fx-font-weight: bold;
+    -fx-background-color: derive(-c-accent, 65%);
+    -fx-text-fill: derive(-c-accent, -25%);
+    -fx-background-radius: 999px;
+    -fx-min-width: 22px;
+    -fx-min-height: 22px;
+    -fx-max-width: 22px;
+    -fx-max-height: 22px;
+    -fx-alignment: CENTER;
+}
+.root.dark .topbar-avatar { -fx-background-color: derive(-c-accent, -50%); -fx-text-fill: white; }
+
+.topbar-actions {
+    -fx-background-color: -c-surface-2;
+    -fx-background-radius: 999px;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 999px;
+    -fx-padding: 4 8 4 8;
 }
 
 /* --- tabs ------------------------------------------------------------------ */
@@ -269,9 +502,20 @@
     /* Original was 6/16 — 1.5x (9/24) read oversized once actually seen, so
        this settles between the two. */
     -fx-padding: 7 19 7 19;
+    -fx-background-radius: 8px 8px 0 0;
+    /* Reserve the same 3px an active tab draws below, on every tab — so
+       selecting one doesn't shift the whole header up/down by 3px. */
+    -fx-border-color: transparent transparent transparent transparent;
+    -fx-border-width: 0 0 3 0;
 }
 
-.tab-pane .tab:selected { -fx-background-color: -c-surface; }
+.tab-pane .tab:hover { -fx-background-color: -c-surface-2; }
+/* Underline instead of a flat fill block — reads as the modern "active tab"
+   convention instead of a filled toolbar button. */
+.tab-pane .tab:selected {
+    -fx-background-color: -c-surface;
+    -fx-border-color: transparent transparent -c-accent transparent;
+}
 .tab-pane .tab .tab-label { -fx-text-fill: -c-muted; -fx-font-size: 15.5px; }
 .tab-pane .tab:selected .tab-label { -fx-text-fill: -c-accent; -fx-font-weight: bold; }
 .tab-pane > .tab-header-area > .headers-region > .tab:selected .focus-indicator { -fx-border-color: transparent; }
@@ -299,7 +543,15 @@
     -fx-border-color: transparent -c-border transparent transparent;
 }
 
-.table-view .column-header .label { -fx-text-fill: -c-muted; -fx-font-weight: bold; }
+/* Small-caps, letter-spaced column labels read as a modern data-table
+   convention rather than a plain bold word — same treatment the admin
+   console's <th> already uses, so the two UIs match. */
+.table-view .column-header .label {
+    -fx-text-fill: -c-muted;
+    -fx-font-weight: 700;
+    -fx-font-size: 10.5px;
+    -fx-letter-spacing: 0.4px;
+}
 .table-view .table-cell { -fx-text-fill: -c-text; -fx-alignment: CENTER; -fx-border-color: transparent; }
 .table-row-cell { -fx-background-color: -c-surface; }
 .table-row-cell:odd { -fx-background-color: -c-surface-2; }
@@ -370,17 +622,17 @@
 
 .badge-solved {
     -fx-text-fill: white; -fx-background-color: -c-green;
-    -fx-background-radius: 9px; -fx-padding: 1 8 1 8; -fx-font-weight: bold; -fx-font-size: 11px;
+    -fx-background-radius: 999px; -fx-padding: 2 10 2 10; -fx-font-weight: bold; -fx-font-size: 11px;
 }
 
 .badge-failed {
     -fx-text-fill: white; -fx-background-color: -c-red;
-    -fx-background-radius: 9px; -fx-padding: 1 8 1 8; -fx-font-weight: bold; -fx-font-size: 11px;
+    -fx-background-radius: 999px; -fx-padding: 2 10 2 10; -fx-font-weight: bold; -fx-font-size: 11px;
 }
 
 .badge-paused {
     -fx-text-fill: #3a2f00; -fx-background-color: -c-amber;
-    -fx-background-radius: 9px; -fx-padding: 1 8 1 8; -fx-font-weight: bold; -fx-font-size: 11px;
+    -fx-background-radius: 999px; -fx-padding: 2 10 2 10; -fx-font-weight: bold; -fx-font-size: 11px;
 }
 
 .contest-title-lg { -fx-font-weight: bold; -fx-font-size: 14px; }
@@ -390,6 +642,16 @@
 .editor-toolbar {
     -fx-background-color: -c-surface-2;
     -fx-border-color: transparent transparent -c-border transparent;
+}
+
+/* This row is genuinely tight for space (language picker + upload + submit +
+   fullscreen, all in the narrowest of the three workspace panes) — the
+   bigger, bolder buttons everywhere else in this pass push "Submit
+   (Ctrl+Enter)" into ellipsis here, so it keeps the old compact sizing. */
+.editor-toolbar .button {
+    -fx-padding: 6 12 6 12;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
 }
 
 .editor-statusbar {
@@ -433,9 +695,9 @@
     -fx-background-color: -c-amber;
     -fx-text-fill: #3a2f00;
     -fx-font-weight: bold;
-    -fx-background-radius: 6px;
+    -fx-background-radius: 999px;
     -fx-border-color: transparent;
-    -fx-padding: 4 10 4 10;
+    -fx-padding: 5 12 5 12;
     -fx-cursor: hand;
 }
 .btn-warn:hover { -fx-background-color: derive(-c-amber, -10%); }
@@ -450,8 +712,30 @@
 .keyword { -fx-fill: -c-accent; -fx-font-weight: bold; }
 .root.dark .keyword { -fx-fill: #7fb4ff; }
 
-.combo-box { -fx-background-color: -c-surface; -fx-border-color: -c-border; -fx-border-radius: 6px; }
+.combo-box {
+    -fx-background-color: -c-surface;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+    -fx-padding: 1 2 1 2;
+}
+.combo-box:hover { -fx-border-color: derive(-c-border, -20%); }
 .combo-box .list-cell { -fx-text-fill: -c-text; }
+
+/* The dropdown itself opens as its own popup — .combo-box's rules above only
+   reach the closed button face, not this list, which otherwise falls back to
+   a square-cornered, undecorated Modena panel. */
+.combo-box-popup .list-view {
+    -fx-background-color: -c-surface;
+    -fx-background-radius: 8px;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 8px;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.18), 12, 0, 0, 3);
+}
+.combo-box-popup .list-cell { -fx-padding: 6 12 6 12; }
+.combo-box-popup .list-cell:filled:hover { -fx-background-color: -c-surface-2; }
+.combo-box-popup .list-cell:filled:selected { -fx-background-color: derive(-c-accent, 72%); -fx-text-fill: -c-text; }
+.root.dark .combo-box-popup .list-cell:filled:selected { -fx-background-color: derive(-c-accent, -55%); }
 
 /* --- verdict banner (UIF-10 colour table) ------------------------------------ */
 
@@ -480,25 +764,30 @@
     -fx-control-inner-background: -c-surface;
     -fx-text-fill: -c-text;
     -fx-background-color: -c-border;
-    -fx-background-radius: 6px;
+    -fx-background-radius: 8px;
 }
 
-.text-area .content { -fx-background-color: -c-surface; -fx-background-radius: 6px; }
+.text-area .content { -fx-background-color: -c-surface; -fx-background-radius: 8px; }
 .text-area .scroll-pane, .text-area .viewport { -fx-background-color: transparent; }
 .text-area:focused { -fx-background-color: -c-accent; }
 
 .titled-pane > .title {
     -fx-background-color: -c-surface-2;
     -fx-border-color: -c-border;
-    -fx-background-radius: 6px 6px 0 0;
+    -fx-background-radius: 8px 8px 0 0;
+    -fx-padding: 8 12 8 12;
 }
 
 .titled-pane > .title > .text { -fx-fill: -c-text; -fx-font-weight: bold; }
-.titled-pane > .title > .arrow-button .arrow { -fx-background-color: -c-muted; }
+.titled-pane > .title > .arrow-button .arrow {
+    -fx-background-color: -c-muted;
+    -fx-padding: 3px;
+}
+.titled-pane:hover > .title > .arrow-button .arrow { -fx-background-color: -c-text; }
 .titled-pane > *.content {
     -fx-background-color: -c-surface;
     -fx-border-color: -c-border;
-    -fx-background-radius: 0 0 6px 6px;
+    -fx-background-radius: 0 0 8px 8px;
 }
 
 /* --- per-verdict colours (NFR-U02: colour + full descriptive text) --------- */
@@ -530,12 +819,81 @@
     -fx-background-radius: 8px;
 }
 
+/* --- dialogs (Alert / TextInputDialog / Dialog) -----------------------------
+   Each opens in its own Scene that does not inherit the main window's
+   stylesheet — SceneRouter.styleDialog() attaches arbitrator.css and the
+   theme class to every dialog this app creates, but the DialogPane skin's
+   own regions (header strip, button bar) still need rules of their own since
+   nothing above targets them. */
+.dialog-pane {
+    -fx-background-color: -c-surface;
+    -fx-font-size: 13px;
+}
+.dialog-pane > .header-panel {
+    -fx-background-color: -c-surface-2;
+    -fx-border-color: transparent transparent -c-border transparent;
+}
+.dialog-pane > .header-panel .label {
+    -fx-text-fill: -c-text;
+    -fx-font-weight: bold;
+    -fx-font-size: 14px;
+}
+.dialog-pane > .content.label { -fx-text-fill: -c-text; }
+.dialog-pane:no-header .graphic-container { -fx-padding: 0; }
+.dialog-pane > .button-bar > .container { -fx-padding: 10 14 10 14; }
+
 /* --- misc ---------------------------------------------------------------------- */
 
 .split-pane { -fx-background-color: -c-bg; -fx-padding: 6; }
-.split-pane > .split-pane-divider { -fx-background-color: -c-bg; -fx-padding: 0 2 0 2; }
+.split-pane > .split-pane-divider { -fx-background-color: transparent; -fx-padding: 0 1 0 1; }
+/* Invisible until touched — a thin accent line on hover/drag is enough to
+   find it, and it doesn't compete with the panels the rest of the time. */
+.split-pane > .split-pane-divider:hover,
+.split-pane > .split-pane-divider:pressed {
+    -fx-background-color: derive(-c-accent, 40%);
+}
 .scroll-pane, .scroll-pane .viewport { -fx-background-color: transparent; }
 .web-view { -fx-background-color: -c-surface; }
+
+/* Flat, thin, thumb-only scrollbars — Modena's default (chunky track +
+   square increment/decrement arrow buttons) is the single biggest "old
+   enterprise desktop app" tell in every scrollable panel. Applies globally
+   (ListView, TableView, TextArea, ScrollPane, WebView, ComboBox popups). */
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+.scroll-bar:horizontal, .scroll-bar:vertical {
+    -fx-padding: 2px;
+}
+.scroll-bar .track,
+.scroll-bar .track-background {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-background-radius: 0;
+}
+.scroll-bar .thumb {
+    -fx-background-color: -c-border;
+    -fx-background-radius: 999px;
+}
+.scroll-bar .thumb:hover  { -fx-background-color: -c-muted; }
+.scroll-bar .thumb:pressed { -fx-background-color: -c-accent; }
+.scroll-bar:vertical .thumb   { -fx-background-insets: 0 2 0 2; }
+.scroll-bar:horizontal .thumb { -fx-background-insets: 2 0 2 0; }
+.scroll-bar:vertical   { -fx-pref-width: 12px; }
+.scroll-bar:horizontal { -fx-pref-height: 12px; }
+/* The increment/decrement end buttons default to a filled square with a
+   triangular glyph — collapse both to nothing so the thumb is the whole
+   control, the way every modern OS/browser scrollbar already looks. */
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+.scroll-bar .increment-arrow,
+.scroll-bar .decrement-arrow {
+    -fx-shape: " ";
+    -fx-padding: 0;
+}
 
 /* ── announcements (FR-07) ───────────────────────────────────────────────── */
 
@@ -567,6 +925,17 @@
     -fx-cursor: hand;
 }
 .announce-ok:hover { -fx-background-color: derive(-c-accent, -12%); }
+
+/* Accent-bordered item cards (announcements, clarifications) — same "colour
+   bar down the left edge" language as the admin console's .list-row, so a
+   scroll of these reads as a feed rather than a stack of plain white boxes. */
+.list-card {
+    -fx-border-width: 1 1 1 3;
+    -fx-border-color: -c-border -c-border -c-border -c-accent;
+    -fx-background-radius: 12px;
+    -fx-border-radius: 12px;
+}
+.list-card.private { -fx-border-color: -c-border -c-border -c-border -c-purple; }
 
 /* ── clarifications ──────────────────────────────────────────────────────── */
 .clarify-question { -fx-text-fill: -c-text; -fx-font-size: 13.5px; }
