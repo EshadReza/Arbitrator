@@ -373,6 +373,7 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
 .gate-logo{ width:44px; height:44px; flex:none; display:block; object-fit:contain; }
 .gate-headline{font-size:42px; font-weight:800; color:var(--ink); line-height:1.05; margin-top:4px}
 .gate-sub{color:var(--muted); font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em}
+.gate-brand{font-size:20px; font-weight:800; color:var(--accent); margin-bottom:2px}
 .gate-hint{color:var(--muted); font-size:12.5px; line-height:1.5; max-width:320px}
 
 .gate-form{width:100%; max-width:320px; display:flex; flex-direction:column; gap:12px; margin-top:4px}
@@ -554,11 +555,10 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
     <div class="gate-card">
       <img class="gate-logo" src="logo.png" alt="Arbitrator">
       <div>
+        <div class="gate-brand">Arbitrator</div>
         <div class="gate-sub">Instructor Console</div>
         <div class="gate-headline">Welcome</div>
       </div>
-      <p class="gate-hint">Available on the server machine only. Requires an ADMIN account.</p>
-
       <div class="gate-form">
         <input type="text" id="u" class="gate-input" value="admin" placeholder="username">
         <input type="password" id="p" class="gate-input" placeholder="password"
@@ -566,6 +566,8 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
         <button class="gate-signin" onclick="login()">Sign in</button>
         <div id="gateMsg" class="hint err"></div>
       </div>
+
+      <p class="gate-hint">Available on the server machine only. Requires an ADMIN account.</p>
     </div>
   </div>
 </div>
@@ -588,9 +590,9 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
     <button class="nav" data-sec="announce" onclick="go('announce')"><span class="ic">📢</span>Announcements</button>
     <button class="nav" data-sec="clarify"  onclick="go('clarify')"><span class="ic">❓</span>Clarifications
       <span class="pill hide" id="clarifyBadge">0</span></button>
-    <button class="nav"    data-sec="contests" onclick="go('contests')"><span class="ic">🗂</span>All contests</button>
     <button class="nav" data-sec="notifications" onclick="go('notifications')"><span class="ic">🔔</span>Notifications
       <span class="pill hide" id="notifNavBadge">0</span></button>
+    <button class="nav"    data-sec="contests" onclick="go('contests')"><span class="ic">🗂</span>All contests</button>
     <div class="side-foot">
       <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
       <div style="margin-top:6px" id="whoami"></div>

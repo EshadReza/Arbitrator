@@ -207,20 +207,33 @@ public class ContestService {
      * opened client would land in.
      *
      * Rejects ENDED for the same reason {@link #openLobby} does — see its
-     * comment. In practice this also means a contest can only ever reach here
-     * once per lifetime (DRAFT or LOBBY are the only states start() accepts,
-     * and nothing leads back to either of those after ACTIVE except the now-
-     * removed ENDED path), so {@link #onStarted}'s hooks — which archive the
-     * previous run's submissions/announcements/clarifications — fire against
-     * an always-empty previous run. Left in place rather than removed: it is
-     * harmless, and it is exactly the safety net a future lifecycle change
-     * would need.
+     * comment. DRAFT or LOBBY are the only states this actually transitions —
+     * anything else (ACTIVE/PAUSED/FROZEN) is a no-op that returns the
+     * contest unchanged rather than resetting its clock, so a contest can
+     * only ever really start once per lifetime, and {@link #onStarted}'s
+     * hooks — which archive the previous run's submissions/announcements/
+     * clarifications — always fire against an always-empty previous run.
      */
     public Contest start(long id) {
         Contest c = require(id);
         if (c.getState() == ContestState.ENDED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This contest has ended and cannot be started again. Clone it to run a fresh copy.");
+        }
+        if (c.getState() != ContestState.DRAFT && c.getState() != ContestState.LOBBY) {
+            // Already running — a no-op, not a re-start. Without this guard,
+            // two independent callers checking the identical "LOBBY whose
+            // scheduledStartAt is due" condition (LeaderboardBroadcaster's 1s
+            // checkScheduledLobbies() and stateOf()'s own copy of the same
+            // check, driven by ContestStatePublisher's 10s heartbeat — see the
+            // comment on openLobby above) can both see the contest as still
+            // LOBBY in the same narrow window and both call start(). The
+            // second call used to overwrite startTime with a brand new
+            // Instant.now() on an already-ACTIVE contest — a real field
+            // change that MainController.onContestState's restart detector
+            // correctly read as a genuine restart, wiping every connected
+            // client's editor a few seconds into the contest.
+            return c;
         }
         assertNoOtherContestLive(id);
         c.setState(ContestState.ACTIVE);

@@ -452,6 +452,14 @@
     -fx-border-color: -c-border;
     -fx-border-radius: 999px;
     -fx-padding: 1 5 1 5;
+    /* icon-button (13px font + 5px top/bottom padding) is taller than
+       zoom-value (11px font, no padding); without CENTER the HBox's default
+       TOP alignment pins the shorter label's text near the top of the row
+       instead of level with the +/- buttons. main.fxml's zoom bar sets this
+       via alignment="CENTER" in FXML; the View Code popup builds its own
+       zoom bar in Java (SubmissionsPanelController) and never set it there,
+       so it needs to live here instead, on the shared class. */
+    -fx-alignment: CENTER;
 }
 .zoom-value {
     -fx-font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
