@@ -179,6 +179,9 @@ public class MainController {
      */
     private static final int[] ZOOM_LEVELS = { 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 };
 
+    /** See the comment at its use in {@link #onContestState} for why this exists. */
+    private static final long RESTART_TOLERANCE_MS = 3000;
+
     /** Index into {@link #ZOOM_LEVELS}; starts on 100%. */
     private int zoomIndex = 5;
 
@@ -359,6 +362,7 @@ public class MainController {
     @FXML
     private void onRefresh() {
         submissionsPanelController.refresh();
+        announcementsPanelController.refresh();
         async(() -> {
             try {
                 long id = state.contest().contestId();
@@ -395,6 +399,15 @@ public class MainController {
         // username, and afterwards there is no username to file it under.
         stashDraft(currentProblemId);
         stopClocks();
+        // The STOMP socket is a singleton for the app's lifetime and
+        // connect() is a no-op once isConnected() is true — so without an
+        // explicit drop here it stays authenticated as the outgoing user's
+        // JWT. The next sign-in's connectLive() then finds a socket that
+        // already looks connected and never redials, leaving the new
+        // user's private /user/queue/verdicts bound to the old Principal:
+        // verdict popups silently never arrive and submissions only show up
+        // after a manual refresh falls back to polling.
+        state.api().dropConnection();
         state.setSession(null);
         state.setContestCleared();
         SceneRouter.showLogin();
@@ -425,6 +438,15 @@ public class MainController {
         if (selected != null) {
             loadProblem(selected.id());
         }
+        // Same reason: each announcement card is a WebView whose background/
+        // text colors are baked into the loaded HTML at render time (see
+        // AnnouncementsPanelController.card()), not driven by theme CSS. Left
+        // alone, a card rendered under one theme stays that color forever —
+        // including after the top-bar Refresh button, which never touches
+        // this panel either — so toggling light/dark leaves old cards as a
+        // wrong-colored, near-unreadable block until a new announcement
+        // happens to arrive and re-triggers a render.
+        announcementsPanelController.refresh();
     }
 
     // --- problems -----------------------------------------------------------
@@ -738,8 +760,20 @@ public class MainController {
 
             // A different start instant means the contest was restarted, so
             // whatever is in the editor belongs to a run that no longer counts.
+            //
+            // RESTART_TOLERANCE_MS, not an exact !=: start_time is a plain
+            // MySQL DATETIME (whole-second precision), but the very first
+            // state this client saw came from the in-memory entity right
+            // after start() set it via Instant.now() (millisecond precision).
+            // ContestStatePublisher's 10s heartbeat re-reads the contest from
+            // the DB, which has since truncated that value by up to 999ms —
+            // a real field, a fake "restart": a contest that has been running
+            // for hours doesn't drift back near its own start time again, so
+            // a gap this small can only be that truncation, never a genuine
+            // second run.
+            long startDeltaMs = Math.abs(contestState.startTimeMs() - previousStart);
             if (previousStart > 0 && contestState.startTimeMs() > 0
-                    && contestState.startTimeMs() != previousStart) {
+                    && startDeltaMs > RESTART_TOLERANCE_MS) {
                 discardDraftsForNewRun();
                 toast("Contest restarted — the editor has been cleared for the new run");
             }
@@ -996,6 +1030,7 @@ public class MainController {
                 return;
             }
             Label name = new Label(item.code() + ". " + item.title());
+            name.getStyleClass().add("problem-list-name");
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
             HBox row = new HBox(6, name, spacer);

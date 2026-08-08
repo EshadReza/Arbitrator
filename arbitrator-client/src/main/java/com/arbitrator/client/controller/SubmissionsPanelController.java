@@ -182,8 +182,8 @@ public class SubmissionsPanelController {
         source.setEditable(false);
         source.setParagraphGraphicFactory(CodeAreaGutter.factory(source));
         source.getStyleClass().add("code-area");
-        source.setPrefHeight(360);
-        source.setMinHeight(120);
+        source.setPrefHeight(480);
+        source.setMinHeight(160);
         source.replaceText("loading source…");
 
         Label testsHeading = new Label("Judgement protocol");
@@ -225,7 +225,9 @@ public class SubmissionsPanelController {
         int[] zoomIndex = { 5 };
         Label zoomLabel = new Label("100%");
         zoomLabel.getStyleClass().add("zoom-value");
-        Button zoomOutBtn = new Button("−");
+        // Plain hyphen-minus, not U+2212 MINUS SIGN — see main.fxml's zoom bar
+        // for why: Inter renders the two at different vertical positions.
+        Button zoomOutBtn = new Button("-");
         zoomOutBtn.getStyleClass().add("icon-button");
         Button zoomInBtn = new Button("+");
         zoomInBtn.getStyleClass().add("icon-button");
@@ -255,8 +257,12 @@ public class SubmissionsPanelController {
 
         VBox content = new VBox(8, headerRow, detailSplit);
         content.setPadding(new Insets(12));
-        content.setPrefWidth(940);
-        content.setPrefHeight(640);
+        // Was 940x640 — cramped enough that reading a solution meant either
+        // squinting or fighting the split divider for room. Big enough to sit
+        // comfortably inside the app's own 1280x768 minimum window size, and
+        // still resizable (below) for anyone running larger.
+        content.setPrefWidth(1180);
+        content.setPrefHeight(760);
 
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Submission #" + row.id());

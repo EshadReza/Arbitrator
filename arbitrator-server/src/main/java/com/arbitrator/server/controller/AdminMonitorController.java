@@ -21,7 +21,7 @@ import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
-import com.arbitrator.common.dto.OfflineAlertDto;
+import com.arbitrator.common.dto.NotificationDto;
 import com.arbitrator.common.dto.ParticipantDto;
 import com.arbitrator.common.dto.ParticipantSubmissionsDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
@@ -32,7 +32,7 @@ import com.arbitrator.server.entity.Submission;
 import com.arbitrator.server.entity.User;
 import com.arbitrator.server.leaderboard.LeaderboardService;
 import com.arbitrator.server.realtime.ContestStatePublisher;
-import com.arbitrator.server.realtime.OfflineAlertService;
+import com.arbitrator.server.realtime.NotificationService;
 import com.arbitrator.server.realtime.PresenceTracker;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
@@ -57,7 +57,7 @@ public class AdminMonitorController {
     private final UserRepository users;
     private final SubmissionService submissionService;
     private final ContestStatePublisher statePublisher;
-    private final OfflineAlertService offlineAlerts;
+    private final NotificationService notificationService;
 
     public AdminMonitorController(ContestService contestService,
                                   LeaderboardService leaderboard,
@@ -68,7 +68,7 @@ public class AdminMonitorController {
                                   UserRepository users,
                                   SubmissionService submissionService,
                                   ContestStatePublisher statePublisher,
-                                  OfflineAlertService offlineAlerts) {
+                                  NotificationService notificationService) {
         this.contestService = contestService;
         this.leaderboard = leaderboard;
         this.presence = presence;
@@ -78,20 +78,20 @@ public class AdminMonitorController {
         this.users = users;
         this.submissionService = submissionService;
         this.statePublisher = statePublisher;
-        this.offlineAlerts = offlineAlerts;
+        this.notificationService = notificationService;
     }
 
-    /** Newest first — the console's notification stack polls this. */
-    @GetMapping(ApiPaths.ADMIN_ALERTS)
-    public List<OfflineAlertDto> alerts() {
-        return offlineAlerts.current();
+    /** Newest first — the console's toast stack and Notifications tab both poll this. */
+    @GetMapping(ApiPaths.ADMIN_NOTIFICATIONS)
+    public List<NotificationDto> notifications() {
+        return notificationService.current();
     }
 
     /** The instructor dismissed one; it never reappears. */
-    @DeleteMapping(ApiPaths.ADMIN_ALERT_BY_ID)
-    public void dismissAlert(@PathVariable long id) {
-        if (!offlineAlerts.dismiss(id)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such alert");
+    @DeleteMapping(ApiPaths.ADMIN_NOTIFICATION_BY_ID)
+    public void dismissNotification(@PathVariable long id) {
+        if (!notificationService.dismiss(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such notification");
         }
     }
 

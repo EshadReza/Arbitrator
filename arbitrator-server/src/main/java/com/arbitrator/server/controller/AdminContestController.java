@@ -173,12 +173,29 @@ public class AdminContestController {
     public record CloneRequest(String title) {
     }
 
-    /** Destructive action: deletes contest and all associated submissions, submission_results, problems, and testcases. */
+    /**
+     * Destructive action: deletes contest and everything that FKs to it or to
+     * one of its problems — submissions, submission_results, test_cases,
+     * problem_statement_pdfs, problems, clarifications, announcements.
+     *
+     * clarifications and announcements were missing here: both have a FK on
+     * contest_id (clarifications also on problem_id), so any contest that had
+     * ever received a clarification or announcement — i.e. almost any contest
+     * that actually ran — made the final DELETE FROM contests fail on an FK
+     * constraint violation. The whole method is @Transactional, so that
+     * violation rolled back every delete above it too, leaving the contest
+     * looking completely untouched — Delete appeared to silently do nothing,
+     * no matter how many times it was pressed.
+     */
     @DeleteMapping(ApiPaths.ADMIN_CONTEST_BY_ID)
     @Transactional
     public ResponseEntity<Void> delete(@PathVariable long id) {
         jdbcTemplate.update("DELETE FROM submission_results WHERE submission_id IN (SELECT id FROM submissions WHERE contest_id = ?)", id);
         jdbcTemplate.update("DELETE FROM submissions WHERE contest_id = ?", id);
+        // Must run before the problems delete below: clarifications FKs on
+        // problem_id as well as contest_id.
+        jdbcTemplate.update("DELETE FROM clarifications WHERE contest_id = ?", id);
+        jdbcTemplate.update("DELETE FROM announcements WHERE contest_id = ?", id);
         jdbcTemplate.update("DELETE FROM test_cases WHERE problem_id IN (SELECT id FROM problems WHERE contest_id = ?)", id);
         // Same fk_statement_pdf_problem gap as AdminProblemController.delete().
         jdbcTemplate.update("DELETE FROM problem_statement_pdfs WHERE problem_id IN (SELECT id FROM problems WHERE contest_id = ?)", id);

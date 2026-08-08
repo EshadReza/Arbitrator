@@ -145,12 +145,17 @@
 
 .text-field:focused, .password-field:focused { -fx-border-color: -c-accent; }
 
+/* One consistent shape (fully rounded, like the login screen's pills) and
+   one consistent "primary" colour — the same black-in-light/white-in-dark
+   ink the login/register/picker screens already use (-lc-accent-*), not the
+   accent blue. That blue stays reserved for links, focus rings and syntax
+   highlighting; buttons speak one premium colour everywhere in the app. */
 .button {
     -fx-background-color: -c-surface-2;
     -fx-text-fill: -c-text;
     -fx-border-color: -c-border;
-    -fx-border-radius: 8px;
-    -fx-background-radius: 8px;
+    -fx-border-radius: 999px;
+    -fx-background-radius: 999px;
     -fx-padding: 8 16 8 16;
     -fx-font-size: 12.5px;
     -fx-font-weight: 600;
@@ -161,24 +166,24 @@
 .button:pressed  { -fx-background-color: derive(-c-surface-2, -12%); }
 
 .button:default, .submit-button {
-    -fx-background-color: -c-accent;
-    -fx-text-fill: -c-accent-fg;
-    -fx-border-color: -c-accent;
+    -fx-background-color: -lc-accent-bg;
+    -fx-text-fill: -lc-accent-text;
+    -fx-border-color: -lc-accent-bg;
     -fx-font-weight: bold;
-    -fx-effect: dropshadow(gaussian, derive(-c-accent, -40%), 8, 0, 0, 2);
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.3), 8, 0, 0, 2);
 }
 
-.button:default:hover, .submit-button:hover { -fx-background-color: derive(-c-accent, -12%); }
-.button:default:pressed, .submit-button:pressed { -fx-background-color: derive(-c-accent, -20%); }
+.button:default:hover, .submit-button:hover { -fx-background-color: derive(-lc-accent-bg, 20%); }
+.button:default:pressed, .submit-button:pressed { -fx-background-color: derive(-lc-accent-bg, -15%); }
 .button:disabled { -fx-opacity: .45; }
 
 /* Secondary action next to a primary one ("Switch Contest") — same pill
-   shape as the accent button, outlined instead of filled so it doesn't
+   shape as the primary button, outlined instead of filled so it doesn't
    compete with Refresh/Submit for attention. */
 .btn-outline {
     -fx-background-color: transparent;
-    -fx-text-fill: -c-accent;
-    -fx-border-color: -c-accent;
+    -fx-text-fill: -lc-accent-bg;
+    -fx-border-color: -lc-accent-bg;
     -fx-border-width: 1.5;
     -fx-border-radius: 999px;
     -fx-background-radius: 999px;
@@ -186,8 +191,8 @@
     -fx-padding: 7 16 7 16;
     -fx-cursor: hand;
 }
-.btn-outline:hover { -fx-background-color: derive(-c-accent, 85%); }
-.root.dark .btn-outline:hover { -fx-background-color: derive(-c-accent, -55%); }
+.btn-outline:hover { -fx-background-color: derive(-lc-accent-bg, 85%); }
+.root.dark .btn-outline:hover { -fx-background-color: derive(-lc-accent-bg, -75%); }
 
 /* Lowest-emphasis action ("Sign Out") — text only until hovered, so it
    doesn't visually compete with the actions someone actually came to use. */
@@ -205,25 +210,25 @@
 .btn-small {
     -fx-font-size: 11px;
     -fx-padding: 2 9 2 9;
-    -fx-background-radius: 5px;
-    -fx-border-radius: 5px;
+    -fx-background-radius: 999px;
+    -fx-border-radius: 999px;
 }
 
 /* "View code" in the Submissions table — the row is 42px tall (ROW_HEIGHT,
-   1.75x default), so this can be a real accent button instead of the
+   1.75x default), so this can be a real primary button instead of the
    cramped .btn-small chip it used to share with tighter rows. */
 .view-code-button {
     -fx-font-size: 13px;
     -fx-font-weight: bold;
     -fx-padding: 6 18 6 18;
-    -fx-background-color: -c-accent;
-    -fx-text-fill: -c-accent-fg;
-    -fx-border-color: -c-accent;
-    -fx-background-radius: 6px;
-    -fx-border-radius: 6px;
+    -fx-background-color: -lc-accent-bg;
+    -fx-text-fill: -lc-accent-text;
+    -fx-border-color: -lc-accent-bg;
+    -fx-background-radius: 999px;
+    -fx-border-radius: 999px;
     -fx-cursor: hand;
 }
-.view-code-button:hover { -fx-background-color: derive(-c-accent, -12%); }
+.view-code-button:hover { -fx-background-color: derive(-lc-accent-bg, 20%); }
 
 .hyperlink { -fx-text-fill: -c-accent; -fx-border-color: transparent; }
 
@@ -414,9 +419,9 @@
 }
 
 .refresh-button {
-    -fx-background-color: -c-accent;
-    -fx-text-fill: -c-accent-fg;
-    -fx-border-color: -c-accent;
+    -fx-background-color: -lc-accent-bg;
+    -fx-text-fill: -lc-accent-text;
+    -fx-border-color: -lc-accent-bg;
     -fx-font-weight: bold;
     -fx-font-size: 12.5px;
     -fx-padding: 7 16 7 16;
@@ -425,8 +430,8 @@
     -fx-cursor: hand;
 }
 
-.refresh-button:hover   { -fx-background-color: derive(-c-accent, -12%); }
-.refresh-button:pressed { -fx-background-color: derive(-c-accent, -20%); }
+.refresh-button:hover   { -fx-background-color: derive(-lc-accent-bg, 20%); }
+.refresh-button:pressed { -fx-background-color: derive(-lc-accent-bg, -15%); }
 .refresh-button:disabled { -fx-opacity: .5; }
 
 .timer-critical { -fx-text-fill: -c-red; }
@@ -533,9 +538,27 @@
     -fx-padding: 7 10 7 10;
 }
 
+/* Problem list (main workspace, left pane) — rows were reading as cramped
+   next to the editor's much larger type; 1.5x the padding (row height) and
+   a modestly bigger label font than the plain list-cell default. */
+.problem-list .list-cell { -fx-padding: 10.5 15 10.5 15; }
+.problem-list-name { -fx-font-size: 15.5px; -fx-font-weight: 600; }
+
 .list-cell:filled:hover { -fx-background-color: -c-surface-2; }
-.list-cell:filled:selected { -fx-background-color: derive(-c-accent, 72%); -fx-text-fill: -c-text; }
-.root.dark .list-cell:filled:selected { -fx-background-color: derive(-c-accent, -55%); }
+/* Rounded card + left accent bar instead of a flat edge-to-edge blue
+   rectangle — same "colour bar down the left edge" language as the feed's
+   .list-card items, so a selected row reads as a deliberate premium pick
+   rather than the old flat highlight block. -lc-accent-bg already themes
+   (black in light, white in dark), so no separate .root.dark override. */
+.list-cell:filled:selected {
+    -fx-background-color: -c-surface-2;
+    -fx-background-insets: 2 6 2 2;
+    -fx-background-radius: 0 10px 10px 0;
+    -fx-border-color: -lc-accent-bg;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-insets: 2 6 2 2;
+    -fx-text-fill: -c-text;
+}
 
 .table-view .column-header,
 .table-view .column-header-background .filler {
@@ -555,8 +578,14 @@
 .table-view .table-cell { -fx-text-fill: -c-text; -fx-alignment: CENTER; -fx-border-color: transparent; }
 .table-row-cell { -fx-background-color: -c-surface; }
 .table-row-cell:odd { -fx-background-color: -c-surface-2; }
-.table-row-cell:selected { -fx-background-color: derive(-c-accent, 65%); }
-.root.dark .table-row-cell:selected { -fx-background-color: derive(-c-accent, -55%); }
+.table-row-cell:selected {
+    -fx-background-color: -c-surface-2;
+    -fx-background-insets: 1 4 1 1;
+    -fx-background-radius: 0 8px 8px 0;
+    -fx-border-color: -lc-accent-bg;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-insets: 1 4 1 1;
+}
 
 /* UIF-15: the viewer's own standings row.
    No amber fill any more — on the redesigned board every problem cell already
@@ -734,8 +763,44 @@
 }
 .combo-box-popup .list-cell { -fx-padding: 6 12 6 12; }
 .combo-box-popup .list-cell:filled:hover { -fx-background-color: -c-surface-2; }
-.combo-box-popup .list-cell:filled:selected { -fx-background-color: derive(-c-accent, 72%); -fx-text-fill: -c-text; }
-.root.dark .combo-box-popup .list-cell:filled:selected { -fx-background-color: derive(-c-accent, -55%); }
+.combo-box-popup .list-cell:filled:selected {
+    -fx-background-color: -c-surface-2;
+    -fx-background-insets: 1 4 1 1;
+    -fx-background-radius: 0 8px 8px 0;
+    -fx-border-color: -lc-accent-bg;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-insets: 1 4 1 1;
+    -fx-text-fill: -c-text;
+}
+
+/* ChoiceBox (the clarification dialog's "This is about" scope picker) is a
+   different control from ComboBox — different default style class, different
+   popup mechanism (a ContextMenu of MenuItems, not a ListView) — so none of
+   the .combo-box rules above ever reached it. Left unstyled it rendered in
+   plain Modena grey-on-grey regardless of theme, which read as fine in light
+   mode but put low-contrast text on a light box sitting inside a dark dialog
+   in dark mode — the "blends in" bug. */
+.choice-box {
+    -fx-background-color: -c-surface;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+    -fx-padding: 1 2 1 2;
+    -fx-mark-color: -c-text;
+}
+.choice-box:hover { -fx-border-color: derive(-c-border, -20%); }
+.choice-box .label { -fx-text-fill: -c-text; -fx-padding: 6 8 6 10; }
+.choice-box .context-menu {
+    -fx-background-color: -c-surface;
+    -fx-background-radius: 8px;
+    -fx-border-color: -c-border;
+    -fx-border-radius: 8px;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.18), 12, 0, 0, 3);
+}
+.choice-box .menu-item { -fx-background-color: transparent; -fx-padding: 6 12 6 12; }
+.choice-box .menu-item .label { -fx-text-fill: -c-text; }
+.choice-box .menu-item:focused { -fx-background-color: -c-surface-2; -fx-background-radius: 6px; }
+.choice-box .menu-item:focused .label { -fx-text-fill: -c-text; }
 
 /* --- verdict banner (UIF-10 colour table) ------------------------------------ */
 
@@ -763,6 +828,7 @@
 .text-area {
     -fx-control-inner-background: -c-surface;
     -fx-text-fill: -c-text;
+    -fx-prompt-text-fill: -c-muted;
     -fx-background-color: -c-border;
     -fx-background-radius: 8px;
 }
@@ -917,14 +983,14 @@
 }
 .announce-time { -fx-text-fill: -c-muted; -fx-font-size: 12px; }
 .announce-ok {
-    -fx-background-color: -c-accent;
-    -fx-text-fill: white;
+    -fx-background-color: -lc-accent-bg;
+    -fx-text-fill: -lc-accent-text;
     -fx-font-weight: bold;
     -fx-padding: 6 26 6 26;
-    -fx-background-radius: 7px;
+    -fx-background-radius: 999px;
     -fx-cursor: hand;
 }
-.announce-ok:hover { -fx-background-color: derive(-c-accent, -12%); }
+.announce-ok:hover { -fx-background-color: derive(-lc-accent-bg, 20%); }
 
 /* Accent-bordered item cards (announcements, clarifications) — same "colour
    bar down the left edge" language as the admin console's .list-row, so a

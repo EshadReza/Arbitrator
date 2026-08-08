@@ -65,9 +65,17 @@ public class AnnouncementsPanelController {
         when.getStyleClass().add("subtitle");
 
         boolean dark = state.darkMode();
+        String bg = dark ? "#1c222c" : "#ffffff";
         WebView body = new WebView();
         body.setPrefHeight(120);
-        body.setPageFill(dark ? Color.web("#1c222c") : Color.web("#ffffff"));
+        // Belt-and-suspenders: setPageFill only paints once the engine has a
+        // page to lay out, and the node's own background can otherwise show
+        // through — briefly, but visibly — for the instant between the
+        // WebView existing in the scene and loadContent() finishing. An
+        // inline -fx-background-color has no such gap; it's the node's paint
+        // from the very first frame, regardless of theme-CSS cascade timing.
+        body.setStyle("-fx-background-color: " + bg + ";");
+        body.setPageFill(Color.web(bg));
         body.getEngine().loadContent(wrap(a.body(), dark));
 
         VBox card = new VBox(4, when, body);

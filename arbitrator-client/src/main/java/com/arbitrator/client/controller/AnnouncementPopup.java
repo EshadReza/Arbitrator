@@ -80,9 +80,16 @@ public final class AnnouncementPopup {
         HBox head = new HBox(10, title, spacer, when);
         head.setAlignment(Pos.CENTER_LEFT);
 
+        String bg = dark ? "#232a36" : "#ffffff";
         WebView body = new WebView();
         body.setPrefHeight(190);
-        body.setPageFill(dark ? Color.web("#232a36") : Color.web("#ffffff"));
+        // Belt-and-suspenders: an inline -fx-background-color paints from the
+        // node's very first frame, so there's no gap between this WebView
+        // entering the scene and loadContent() actually finishing where it
+        // could show through with the wrong (or WebKit's default) colour —
+        // see AnnouncementsPanelController's identical fix for the same gap.
+        body.setStyle("-fx-background-color: " + bg + ";");
+        body.setPageFill(Color.web(bg));
         body.getEngine().loadContent(wrap(a.body(), dark));
 
         Button ok = new Button("OK");

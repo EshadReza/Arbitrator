@@ -32,12 +32,17 @@ import jakarta.annotation.PreDestroy;
  * file of {@code #include </dev/urandom>} makes the preprocessor read an endless
  * stream and exhaust host RAM before any program is even produced.
  *
- * Two enforcement paths:
+ * Three enforcement paths:
  *  - Linux: scripts/sandbox-run.sh — unshare -Urn (no network) + prlimit +
  *    timeout -k, with real peak RSS from /usr/bin/time.
- *  - Anywhere else (dev machines): {@code sh -c 'ulimit …; exec …'}, which still
+ *  - macOS (dev machines): {@code sh -c 'ulimit …; exec …'}, which still
  *    caps CPU, address space, process count and file size, plus an RSS sampler
  *    so MLE is a real verdict instead of a mislabelled RE.
+ *  - Windows (dev machines, decision D2 — never a deployment target): no
+ *    POSIX shell and no ulimit equivalent exist, so the command runs
+ *    directly; the wall-clock timeout and the process-TREE kill below are
+ *    what contain it, and peak RSS is left unmeasured (-1) exactly like the
+ *    "ps unavailable" case already handled on other platforms.
  *
  * Whatever the path, three things always hold:
  *  1. the whole process TREE is killed, not just the direct child — otherwise a
@@ -54,6 +59,23 @@ public class SandboxExecutor {
 
     private static final boolean IS_LINUX =
             System.getProperty("os.name").toLowerCase().contains("linux");
+
+    /**
+     * Dev fallback only (decision D2 — Windows is never a deployment target).
+     * {@link #runLimited} shells every command through {@code /bin/sh -c
+     * "ulimit …; exec …"}, which does not exist on Windows: without this
+     * branch {@code ProcessBuilder("/bin/sh", ...).start()} throws
+     * immediately for the COMPILE step of every single submission (compile()
+     * always calls runLimited, unconditionally), JudgeWorker's catch-all
+     * turns that into Outcome.internalError(...), and every submission comes
+     * back RE regardless of what the student wrote — nothing ever actually
+     * ran. ulimit has no Windows equivalent, so CPU/address-space/process
+     * caps are simply unavailable there; the Java-level wall-clock timeout
+     * and destroyTree()'s process-tree kill (both already OS-agnostic) are
+     * what contain a submission on this path instead.
+     */
+    private static final boolean IS_WINDOWS =
+            System.getProperty("os.name").toLowerCase().contains("win");
 
     private static final ExecutorService STREAM_POOL = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "sandbox-stream");
@@ -210,35 +232,42 @@ public class SandboxExecutor {
                                        long addressSpaceKb, boolean runPhase)
             throws IOException, InterruptedException {
 
-        // Process cap, applied to the RUN phase only.
-        //
-        // On macOS/BSD RLIMIT_NPROC counts every process owned by the user, not
-        // descendants of this shell, so an absolute value like 64 makes even the
-        // compiler die with "posix_spawn failed: Resource temporarily
-        // unavailable". The cap must therefore be RELATIVE to what the account
-        // already has: a submitted program legitimately needs one process, so
-        // current + 8 leaves normal code untouched while a fork bomb starts
-        // failing after 8 children instead of reaching thousands.
-        //
-        // This is the real containment. destroyTree() alone cannot do it —
-        // ProcessHandle.descendants() is a snapshot, and a bomb forks faster
-        // than that snapshot can be walked, so children escape and survive.
-        // The compile phase gets no -u at all: compilers spawn helper processes.
-        String nprocLimit = "";
-        if (runPhase) {
-            int base = userProcessCount();
-            if (base > 0) {
-                nprocLimit = "ulimit -u %d 2>/dev/null; ".formatted(base + MAX_EXTRA_PROCESSES);
+        ProcessBuilder pb;
+        if (IS_WINDOWS) {
+            // No POSIX shell and no ulimit equivalent here — see IS_WINDOWS's
+            // javadoc. Run the argv list directly; the wall-clock timeout below
+            // and destroyTree()'s process-tree kill are the containment.
+            pb = new ProcessBuilder(command).directory(workDir.toFile());
+        } else {
+            // Process cap, applied to the RUN phase only.
+            //
+            // On macOS/BSD RLIMIT_NPROC counts every process owned by the user, not
+            // descendants of this shell, so an absolute value like 64 makes even the
+            // compiler die with "posix_spawn failed: Resource temporarily
+            // unavailable". The cap must therefore be RELATIVE to what the account
+            // already has: a submitted program legitimately needs one process, so
+            // current + 8 leaves normal code untouched while a fork bomb starts
+            // failing after 8 children instead of reaching thousands.
+            //
+            // This is the real containment. destroyTree() alone cannot do it —
+            // ProcessHandle.descendants() is a snapshot, and a bomb forks faster
+            // than that snapshot can be walked, so children escape and survive.
+            // The compile phase gets no -u at all: compilers spawn helper processes.
+            String nprocLimit = "";
+            if (runPhase) {
+                int base = userProcessCount();
+                if (base > 0) {
+                    nprocLimit = "ulimit -u %d 2>/dev/null; ".formatted(base + MAX_EXTRA_PROCESSES);
+                }
             }
-        }
-        // -v is unsupported on some shells, hence 2>/dev/null on each.
-        String limited = (nprocLimit + "ulimit -t %d 2>/dev/null; ulimit -f %d 2>/dev/null; "
-                + "ulimit -v %d 2>/dev/null; exec %s").formatted(
-                Math.max(1, cpuSeconds), MAX_FILE_SIZE_BLOCKS,
-                Math.max(65536, addressSpaceKb), shellQuote(command));
+            // -v is unsupported on some shells, hence 2>/dev/null on each.
+            String limited = (nprocLimit + "ulimit -t %d 2>/dev/null; ulimit -f %d 2>/dev/null; "
+                    + "ulimit -v %d 2>/dev/null; exec %s").formatted(
+                    Math.max(1, cpuSeconds), MAX_FILE_SIZE_BLOCKS,
+                    Math.max(65536, addressSpaceKb), shellQuote(command));
 
-        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", limited)
-                .directory(workDir.toFile());
+            pb = new ProcessBuilder("/bin/sh", "-c", limited).directory(workDir.toFile());
+        }
         if (inputFile != null) {
             pb.redirectInput(inputFile.toFile());
         }

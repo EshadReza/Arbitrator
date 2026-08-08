@@ -80,7 +80,7 @@ public class ContestPickerController {
             }
         });
 
-        poller = new Timeline(new KeyFrame(POLL_INTERVAL, e -> load()));
+        poller = new Timeline(new KeyFrame(POLL_INTERVAL, e -> load(false)));
         poller.setCycleCount(Animation.INDEFINITE);
         poller.play();
 
@@ -95,7 +95,7 @@ public class ContestPickerController {
             }
         });
 
-        load();
+        load(false);
     }
 
     /**
@@ -119,7 +119,7 @@ public class ContestPickerController {
 
     @FXML
     private void onRefresh() {
-        load();
+        load(true);
     }
 
     @FXML
@@ -138,12 +138,25 @@ public class ContestPickerController {
         }
     }
 
-    private void load() {
+    /**
+     * @param manual true for an explicit click on the Refresh button, which
+     *               dims it for the round trip so a second click can't queue
+     *               up behind the first. The background poller passes false
+     *               — it fires every 3s (POLL_INTERVAL), and dimming the
+     *               button on every one of those silent ticks was the "goes
+     *               blank every couple of seconds" flicker: nothing the
+     *               student did, just the routine poll being shown as if it
+     *               were a loading state. The {@link #loading} guard already
+     *               prevents overlapping requests regardless of this flag.
+     */
+    private void load(boolean manual) {
         if (loading) {
             return;
         }
         loading = true;
-        refreshButton.setDisable(true);
+        if (manual) {
+            refreshButton.setDisable(true);
+        }
         Thread worker = new Thread(() -> {
             try {
                 List<ContestSummaryDto> contests = state.api().contests();
@@ -154,7 +167,9 @@ public class ContestPickerController {
                         : e.getMessage()));
             } finally {
                 loading = false;
-                Platform.runLater(() -> refreshButton.setDisable(false));
+                if (manual) {
+                    Platform.runLater(() -> refreshButton.setDisable(false));
+                }
             }
         }, "picker-io");
         worker.setDaemon(true);

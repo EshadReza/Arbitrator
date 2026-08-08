@@ -126,7 +126,9 @@ public class AdminStandingsController {
             }
         }
         
-        result.sort(Comparator.comparing(StandingsEntryDto::username));
+        // Do NOT re-sort here: leaderboard.rows() above is already ordered by
+        // BR-06 rank (solved desc, penalty asc, earliest last-AC, username) —
+        // re-sorting by username alone destroyed that rank order.
         return result;
     }
 

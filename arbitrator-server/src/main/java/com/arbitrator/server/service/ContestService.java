@@ -44,9 +44,7 @@ public class ContestService {
             // The clock ran out on its own, so the end instant IS the scheduled
             // one — record it before flipping state, since endTime() starts
             // answering with endedAt the moment it is set.
-            c.setEndedAt(c.endTime());
-            c.setState(ContestState.ENDED);
-            contests.save(c);
+            endNow(c, c.endTime());
         }
     }
 
@@ -70,9 +68,7 @@ public class ContestService {
             c = start(c.getId());
         } else if ((c.getState() == ContestState.ACTIVE || c.getState() == ContestState.FROZEN)
                 && c.endTime() != null && !Instant.now().isBefore(c.endTime())) {
-            c.setEndedAt(c.endTime());
-            c.setState(ContestState.ENDED);
-            c = contests.save(c);
+            c = endNow(c, c.endTime());
         }
         Instant start = c.getStartTime();
         if (start == null && c.getState() == ContestState.LOBBY && c.getScheduledStartAt() != null) {
@@ -242,8 +238,31 @@ public class ContestService {
      */
     private final List<java.util.function.Consumer<Long>> onStarted = new ArrayList<>();
 
+    /**
+     * Callbacks run when a contest ends — by an explicit "End contest" click
+     * OR by its clock simply running out ({@link #checkExpiredContests} /
+     * {@link #stateOf}, both of which also flow through {@link #endNow}).
+     * Used to stop per-contest state that lives outside this service (e.g.
+     * NotificationService's offline-duration clocks) from continuing to run,
+     * or from being read later, against a contest that is no longer live.
+     */
+    private final List<java.util.function.Consumer<Long>> onEnded = new ArrayList<>();
+
     public void onContestStarted(java.util.function.Consumer<Long> hook) {
         onStarted.add(hook);
+    }
+
+    public void onContestEnded(java.util.function.Consumer<Long> hook) {
+        onEnded.add(hook);
+    }
+
+    /** Every path to ENDED funnels through here so {@link #onEnded} always fires. */
+    private Contest endNow(Contest c, Instant endedAt) {
+        c.setEndedAt(endedAt);
+        c.setState(ContestState.ENDED);
+        Contest saved = contests.save(c);
+        onEnded.forEach(hook -> hook.accept(saved.getId()));
+        return saved;
     }
 
     public Contest end(long id) {
@@ -256,9 +275,7 @@ public class ContestService {
         // Ending early moves the deadline to now. Leaving it at start+duration
         // left every clock derived from endTime() counting down to a deadline
         // that no longer meant anything.
-        c.setEndedAt(Instant.now());
-        c.setState(ContestState.ENDED);
-        return contests.save(c);
+        return endNow(c, Instant.now());
     }
 
     /**

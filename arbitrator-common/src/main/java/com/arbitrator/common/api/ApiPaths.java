@@ -86,8 +86,8 @@ public final class ApiPaths {
     public static final String ADMIN_CLARIFICATIONS = "/api/admin/contests/{id}/clarifications";
     public static final String ADMIN_CLARIFICATION_ANSWER = "/api/admin/clarifications/{id}/answer";
     /** Escalating "offline for N minutes" alerts, newest first. GET to poll, DELETE one to dismiss it. */
-    public static final String ADMIN_ALERTS = "/api/admin/alerts";
-    public static final String ADMIN_ALERT_BY_ID = "/api/admin/alerts/{id}";
+    public static final String ADMIN_NOTIFICATIONS = "/api/admin/notifications";
+    public static final String ADMIN_NOTIFICATION_BY_ID = "/api/admin/notifications/{id}";
 
     // --- static admin panel, loopback only ---
     public static final String ADMIN_PANEL_PREFIX = "/admin";

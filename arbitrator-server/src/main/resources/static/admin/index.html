@@ -92,8 +92,8 @@ code,pre,.addr,.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,mo
      cursor:pointer;color:var(--muted);font-weight:500;border:none;background:none;
      width:100%;text-align:left;position:relative;transition:.12s}
 .nav:hover{background:var(--surface2);color:var(--ink)}
-.nav.on{background:var(--accent);color:var(--accent-ink);font-weight:600;
-        box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 45%,transparent)}
+.nav.on{background:var(--gate-accent);color:var(--gate-accent-ink);font-weight:600;
+        box-shadow:0 4px 12px rgba(0,0,0,.25)}
 .nav .ic{width:26px;height:26px;text-align:center;flex:none;border-radius:8px;
          background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:13px}
 .nav.on .ic{background:rgba(255,255,255,.22)}
@@ -167,23 +167,32 @@ input:disabled{opacity:.45;cursor:not-allowed;background:var(--surface2)}
 .list-row .content{min-width:0;flex:1}
 
 /* ── buttons ─────────────────────────────────────────────────────────────── */
+/* One consistent shape (fully rounded) and one consistent "primary" colour —
+   the same black-in-light/white-in-dark ink the login gate already uses
+   (--gate-accent), not the accent blue. That blue stays reserved for links,
+   focus rings, badges and chart hues; buttons speak one premium colour. */
 .btn{padding:8px 15px;border:1px solid var(--border);background:var(--surface2);
-     border-radius:11px;cursor:pointer;font-weight:600;transition:.14s}
+     border-radius:999px;cursor:pointer;font-weight:600;transition:.14s}
 .btn:hover:not(:disabled){background:var(--surface3);transform:translateY(-1px);box-shadow:0 3px 9px rgba(16,24,40,.12)}
 .btn:active:not(:disabled){transform:translateY(0)}
 .btn:disabled{opacity:.38;cursor:not-allowed}
-.btn.primary{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#7db4ff));
-  border-color:transparent;color:var(--accent-ink);font-weight:700;
-  box-shadow:0 3px 10px color-mix(in srgb,var(--accent) 35%,transparent)}
+/* Same dimmed look as :disabled, but the click still fires — used where the
+   handler itself explains why (e.g. Delete on a still-running contest)
+   instead of the button just doing nothing. */
+.btn.locked{opacity:.38}
+.btn.locked:hover{transform:none;box-shadow:none}
+.btn.primary{background:var(--gate-accent);border-color:var(--gate-accent);color:var(--gate-accent-ink);
+  font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,.25)}
 .btn.danger{background:linear-gradient(135deg,var(--red),color-mix(in srgb,var(--red) 55%,#ff9a9a));
   border-color:transparent;color:#fff;font-weight:700}
-.btn.primary:hover:not(:disabled),.btn.danger:hover:not(:disabled){filter:brightness(1.06)}
-.btn.sm{padding:5px 10px;font-size:12px;border-radius:8px}
-.btn.lg{padding:11px 22px;font-size:14.5px;border-radius:12px}
+.btn.primary:hover:not(:disabled){filter:brightness(1.18)}
+.btn.danger:hover:not(:disabled){filter:brightness(1.06)}
+.btn.sm{padding:5px 10px;font-size:12px}
+.btn.lg{padding:11px 22px;font-size:14.5px}
 /* Icon-only utility buttons (header refresh/copy) — a circle just big enough
    for one glyph, instead of a text-sized button squeezed around a symbol. */
 .btn.icon{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;
-  justify-content:center;border-radius:9px;font-size:13.5px;flex:none}
+  justify-content:center;border-radius:999px;font-size:13.5px;flex:none}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 
 input[type=text],input[type=password],input[type=number]{
@@ -263,6 +272,11 @@ tr.drag-row.dragging{opacity:.35}
 
 /* ── sliding switch (Test case visibility, Private clarifications, etc.) ──── */
 .switch-row{display:flex;align-items:center;gap:13px;cursor:pointer}
+/* A disabled toggle (contest ended) otherwise looked pixel-identical to an
+   enabled one — same solid colour whichever way it's set — which read as
+   "still live" even though clicking it does nothing. */
+.switch-row input:disabled+.switch{opacity:.45;cursor:not-allowed}
+.switch-row:has(input:disabled){cursor:not-allowed}
 .switch-row input{position:absolute;opacity:0;width:0;height:0}
 .switch{position:relative;width:42px;height:23px;border-radius:999px;flex:none;
   background:var(--surface3);border:1px solid var(--border);transition:.2s}
@@ -308,6 +322,7 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
   animation:alert-in .18s ease-out;
 }
 .alert-card.severe{border-left-color:var(--red)}
+.alert-card.good{border-left-color:var(--green)}
 @keyframes alert-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 .alert-card .body{flex:1;min-width:0}
 .alert-card .who{font-weight:700;font-size:13px}
@@ -574,6 +589,8 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
     <button class="nav" data-sec="clarify"  onclick="go('clarify')"><span class="ic">❓</span>Clarifications
       <span class="pill hide" id="clarifyBadge">0</span></button>
     <button class="nav"    data-sec="contests" onclick="go('contests')"><span class="ic">🗂</span>All contests</button>
+    <button class="nav" data-sec="notifications" onclick="go('notifications')"><span class="ic">🔔</span>Notifications
+      <span class="pill hide" id="notifNavBadge">0</span></button>
     <div class="side-foot">
       <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
       <div style="margin-top:6px" id="whoami"></div>
@@ -719,13 +736,13 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
           <p class="hint">Sets the countdown timer waiting participants see in the lobby.</p>
         </div>
 
-        <div class="dash-card" style="grid-column:span 6">
+        <div class="dash-card" id="cardAdjustTime" style="grid-column:span 6">
           <div class="hd"><div class="ic" style="--tile-hue:var(--hue-amber)">🕓</div><h3>Adjust time</h3></div>
           <div class="row">
             <label for="extMin">Minutes</label>
             <input type="number" id="extMin" value="5" min="1" step="1" style="width:90px">
-            <button class="btn sm" onclick="extendBy(1)">+ Add</button>
-            <button class="btn sm" onclick="extendBy(-1)">− Remove</button>
+            <button class="btn sm" id="bExtendAdd" onclick="extendBy(1)">+ Add</button>
+            <button class="btn sm" id="bExtendRemove" onclick="extendBy(-1)">− Remove</button>
           </div>
           <p class="hint"><b>Add</b> extends the deadline, <b>Remove</b> shortens it — reaches every client immediately.</p>
         </div>
@@ -784,7 +801,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
           <div class="table-flush">
             <table id="partTable"><thead><tr><th style="width:44px"></th><th>Participant</th>
               <th style="width:64px">Rank</th><th style="width:70px">Solved</th>
-              <th style="width:78px">Penalty</th><th style="width:64px">Subs</th>
+              <th style="width:78px">Penalty</th><th style="width:100px">Submissions</th>
               <th style="width:92px">Last</th></tr></thead><tbody></tbody></table>
           </div>
         </div>
@@ -821,7 +838,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
 
     <section id="sec-standings" class="hide">
       <h1>Standings & Marks</h1>
-      <div class="lede">Assign marks based on standings. Sorted by username. <button class="btn sm" onclick="openExport()" style="margin-left:8px">⭳ Export…</button></div>
+      <div class="lede">Assign marks based on standings. Ranked by most solved, then least penalty. <button class="btn sm" onclick="loadStandings()" style="margin-left:8px">⟳ Refresh</button> <button class="btn sm" onclick="openExport()">⭳ Export…</button></div>
       <div class="dash-grid">
         <div class="dash-tile" style="grid-column:span 6;--tile-hue:var(--hue-purple)">
           <div class="ic">🧑‍🎓</div><div class="lbl">Participants</div>
@@ -890,7 +907,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
     <section id="sec-clarify" class="hide">
       <h1>Clarifications</h1>
       <div class="lede">
-        Questions from participants. Answers are public — everyone sees them, which is the point.
+        Questions from participants. Answers are public — everyone sees them.
         <b>You</b> see who asked; participants do not.
       </div>
       <div class="dash-stack">
@@ -942,6 +959,27 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
           <div class="row hide" id="newPasswordRow">
             <input type="text" id="newPassword" placeholder="Contest password" style="flex:1;max-width:280px">
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sec-notifications" class="hide">
+      <h1>Notifications</h1>
+      <div class="lede">Every disconnect and reconnect, in order — one entry each, nothing repeats on its own. Delete what you've dealt with.</div>
+      <div class="dash-stack">
+        <div class="dash-card">
+          <div class="hd"><div class="ic" style="--tile-hue:var(--hue-red)">🔔</div><h3>All notifications</h3>
+            <span class="spacer"></span><span class="badge" id="notifCountBadge" style="background:var(--accent)">0</span>
+            <button class="btn icon" onclick="refreshNotifications()" title="Refresh">⟳</button></div>
+          <div id="notifList"></div>
+        </div>
+
+        <div class="dash-card">
+          <div class="hd"><div class="ic" style="--tile-hue:var(--hue-purple)">⚡</div><h3>Recent actions</h3>
+            <span class="spacer"></span><span class="badge" id="actionLogCountBadge" style="background:var(--purple)">0</span>
+            <button class="btn sm" onclick="clearActionLog()">Clear</button></div>
+          <p class="hint">Confirmations from this console — this session only, not shared with other instructors signed in elsewhere.</p>
+          <div id="actionLogList"></div>
         </div>
       </div>
     </section>
@@ -1170,14 +1208,68 @@ function summariseLogBody(status, body){
   }
   return status<300 ? 'Done' : `Request failed (HTTP ${status})`;
 }
+/* Every toast this session, newest first — feeds the Notifications tab's
+   "Recent actions" card. Session-only (not sent to the server): these are
+   confirmations of what THIS console just did, not events other instructors
+   signed in elsewhere would need to see. */
+let actionLog=[];
+let actionLogNextId=1;
+/** ids of toasts currently on screen, oldest first — capped so that e.g.
+    hammering a toggle 20 times can't fill the whole side of the screen
+    with stacked cards; the 6th arrival drops the 1st from view (it's still
+    in actionLog/the tab, just not cluttering the live corner any more). */
+let visibleToastIds=[];
+const MAX_VISIBLE_TOASTS=5;
+
 function showToast(status,msg){
+  const entry={id:actionLogNextId++, status, msg, atMs:Date.now()};
+  actionLog.unshift(entry);
+  if(actionLog.length>200) actionLog.length=200;
+  if(!$('sec-notifications').classList.contains('hide')) renderActionLogTab();
+
   const stack=$('toastStack');
   if(!stack) return;
+  visibleToastIds.push(entry.id);
+  if(visibleToastIds.length>MAX_VISIBLE_TOASTS){
+    const droppedId=visibleToastIds.shift();
+    const dropped=stack.querySelector(`[data-toast-id="${droppedId}"]`);
+    if(dropped) dropped.remove();
+  }
   const t=document.createElement('div');
   t.className='toast '+(status<300?'ok':'err');
+  t.dataset.toastId=entry.id;
   t.innerHTML=`<span class="ic">${status<300?'✅':'⚠️'}</span><span>${esc(msg)}</span>`;
   stack.appendChild(t);
-  setTimeout(()=>{ t.classList.add('out'); setTimeout(()=>t.remove(),220); }, 3600);
+  setTimeout(()=>{
+    t.classList.add('out');
+    setTimeout(()=>{
+      t.remove();
+      visibleToastIds=visibleToastIds.filter(id=>id!==entry.id);
+    },220);
+  }, 3600);
+}
+
+function renderActionLogTab(){
+  const badge=$('actionLogCountBadge');
+  if(badge) badge.textContent=actionLog.length;
+  const list=$('actionLogList');
+  if(!list) return;
+  list.innerHTML = actionLog.length ? actionLog.map(e=>`
+    <div class="list-row">
+      <div class="ic">${e.status<300?'✅':'⚠️'}</div>
+      <div class="content">
+        <div class="row" style="gap:8px">
+          <span>${esc(e.msg)}</span>
+          <span class="spacer"></span>
+          <span class="hint">${new Date(e.atMs).toLocaleTimeString()}</span>
+        </div>
+      </div>
+    </div>`).join('') : '<div class="empty">No actions yet this session.</div>';
+}
+
+function clearActionLog(){
+  actionLog=[];
+  renderActionLogTab();
 }
 
 async function api(method,path,params,quiet){
@@ -1192,7 +1284,7 @@ async function api(method,path,params,quiet){
 }
 
 function go(sec){
-  ['dashboard','control','problems','people','feed','standings','announce','clarify','contests']
+  ['dashboard','control','problems','people','feed','standings','announce','clarify','contests','notifications']
     .forEach(s=>$('sec-'+s).classList.toggle('hide',s!==sec));
   document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('on',n.dataset.sec===sec));
   if(sec==='dashboard') loadDashboard();
@@ -1200,9 +1292,14 @@ function go(sec){
   if(sec==='people')   loadMonitor();
   if(sec==='feed')     loadFeed();
   if(sec==='standings') loadStandings();
-  if(sec==='announce') loadAnnouncements();
+  // "Published." (or any error text) from a previous visit otherwise sat
+  // there forever — it's only ever cleared by publishing again, so opening
+  // this tab fresh (or after switching contests) showed a stale confirmation
+  // for something that hadn't happened yet this time.
+  if(sec==='announce'){ $('annStatus').textContent=''; loadAnnouncements(); }
   if(sec==='clarify')  loadClarifications();
   if(sec==='contests') loadContests();
+  if(sec==='notifications'){ refreshNotifications(); renderActionLogTab(); }
 }
 
 async function login(){
@@ -1222,33 +1319,102 @@ async function login(){
   if(!monitorTick) monitorTick=setInterval(()=>{
     if($('autoRefresh').checked && selected!=null && !$('sec-people').classList.contains('hide')) loadMonitor();
   },5000);
-  if(!alertsTick){ loadAlerts(); alertsTick=setInterval(loadAlerts,6000); }
+  if(!alertsTick){ refreshNotifications(); alertsTick=setInterval(refreshNotifications,6000); }
   if(!dashTick) dashTick=setInterval(()=>{
     if(selected!=null && !$('sec-dashboard').classList.contains('hide')) loadDashboard();
   },8000);
 }
 
-/** minutesOffline escalates the styling — a couple of minutes is amber
-    ("keep an eye on it"), five or more is red ("go check"). */
-async function loadAlerts(){
-  const {status,body}=await api('GET','/api/admin/alerts',null,true);
-  if(status>=300 || !Array.isArray(body)) return;
-  $('alertStack').innerHTML = body.map(a=>`
-    <div class="alert-card ${a.minutesOffline>=5?'severe':''}">
-      <div class="body">
-        <div class="who">${esc(a.displayName)}</div>
-        <div class="what">offline ${a.minutesOffline} min &middot; ${esc(a.contestTitle)}</div>
-      </div>
-      <span class="x" onclick="dismissAlert(${a.id})" title="Dismiss">&times;</span>
-    </div>`).join('');
+/* ── notifications: disconnect / reconnect ─────────────────────────────────
+   One entry each, raised by the server exactly once per genuine state
+   transition — nothing repeats on a timer any more. This poll only decides
+   how to PRESENT what the server already has: brand-new entries (id greater
+   than the highest seen last poll) pop as a live toast; the full list is
+   what the Notifications tab and its badge always show. */
+let lastNotifId=-1, notifFirstPoll=true;
+/** Currently-visible toasts, newest first, capped at 4 — a 5th arrival
+    bumps the oldest of the four off screen (it's still in the tab/history,
+    just not in this live strip). Each entry times out on its own 5s clock
+    regardless of how many others are showing. */
+let liveNotifs=[];
+
+function notifIcon(n){ return n.type==='RECONNECTED' ? '🟢' : '🔴'; }
+function notifWhat(n){
+  if(n.type==='RECONNECTED'){
+    return n.minutesOffline<1 ? 'reconnected — offline briefly' : `reconnected after ${n.minutesOffline} min`;
+  }
+  return 'disconnected';
+}
+function notifCardHtml(n){
+  return `<div class="alert-card ${n.type==='DISCONNECTED'?'severe':'good'}">
+    <div class="body">
+      <div class="who">${notifIcon(n)} ${esc(n.displayName)}</div>
+      <div class="what">${notifWhat(n)} &middot; ${esc(n.contestTitle)}</div>
+    </div>
+    <span class="x" onclick="dismissNotification(${n.id})" title="Dismiss">&times;</span>
+  </div>`;
+}
+function renderLiveNotifs(){
+  $('alertStack').innerHTML = liveNotifs.map(notifCardHtml).join('');
+}
+function pushLiveNotification(n){
+  liveNotifs.unshift(n);
+  if(liveNotifs.length>4) liveNotifs.length=4;
+  renderLiveNotifs();
+  setTimeout(()=>{
+    liveNotifs=liveNotifs.filter(x=>x.id!==n.id);
+    renderLiveNotifs();
+  },5000);
 }
 
-async function dismissAlert(id){
-  // Optimistic: the next 6 s poll will confirm it either way, no need to
-  // wait on the DELETE round trip before the card disappears.
-  const card=[...$('alertStack').children].find(c=>c.querySelector(`[onclick="dismissAlert(${id})"]`));
-  if(card) card.remove();
-  await api('DELETE','/api/admin/alerts/'+id,null,true);
+function renderNotifTab(body){
+  $('notifCountBadge').textContent=body.length;
+  $('notifList').innerHTML = body.length ? body.map(n=>`
+    <div class="list-row" data-notif-id="${n.id}">
+      <div class="ic">${notifIcon(n)}</div>
+      <div class="content">
+        <div class="row" style="gap:8px">
+          <b>${esc(n.displayName)}</b>
+          <span class="hint">${notifWhat(n)}</span>
+          <span class="spacer"></span>
+          <span class="hint">${new Date(n.atMs).toLocaleString()}</span>
+        </div>
+        <div class="hint" style="margin-top:2px">${esc(n.contestTitle)}</div>
+      </div>
+      <button class="btn sm danger" onclick="dismissNotification(${n.id})" style="align-self:center">Delete</button>
+    </div>`).join('') : '<div class="empty">No notifications yet.</div>';
+}
+
+async function refreshNotifications(){
+  const {status,body}=await api('GET','/api/admin/notifications',null,true);
+  if(status>=300 || !Array.isArray(body)) return;
+
+  // Never toast on the very first poll after login — otherwise the whole
+  // history accumulated since the server booted would dump onto the screen
+  // at once instead of just what's actually new.
+  if(!notifFirstPoll){
+    body.filter(n=>n.id>lastNotifId)
+        .sort((a,b)=>a.id-b.id)
+        .forEach(pushLiveNotification);
+  }
+  notifFirstPoll=false;
+  if(body.length) lastNotifId=Math.max(lastNotifId, ...body.map(n=>n.id));
+
+  const navBadge=$('notifNavBadge');
+  navBadge.textContent=body.length;
+  navBadge.classList.toggle('hide', body.length===0);
+
+  if(!$('sec-notifications').classList.contains('hide')) renderNotifTab(body);
+}
+
+async function dismissNotification(id){
+  // Optimistic in both places it can appear — the next poll confirms either
+  // way, no need to wait on the DELETE round trip first.
+  liveNotifs=liveNotifs.filter(n=>n.id!==id);
+  renderLiveNotifs();
+  const row=document.querySelector(`#notifList [data-notif-id="${id}"]`);
+  if(row) row.remove();
+  await api('DELETE','/api/admin/notifications/'+id,null,true);
 }
 
 async function loadContests(){
@@ -1271,7 +1437,9 @@ async function loadContests(){
       <td>${c.problemCount}</td><td>${c.durationMinutes} min</td>
       <td style="white-space:nowrap">
         <button class="btn sm" onclick="event.stopPropagation();cloneContest(${c.id},'${esc(c.title)}')">Clone</button>
-        <button class="btn sm danger" onclick="event.stopPropagation();deleteContest(${c.id},'${esc(c.title)}')">Delete</button>
+        <button class="btn sm danger${c.state==='DRAFT'||c.state==='ENDED'?'':' locked'}"
+                onclick="event.stopPropagation();deleteContest(${c.id},'${esc(c.title)}','${c.state}')"
+                title="${c.state==='DRAFT'||c.state==='ENDED'?'Delete':'End the contest first'}">Delete</button>
       </td>
     </tr>`).join('') : '<tr><td colspan="6" class="empty">No contests yet — create one below.</td></tr>';
 
@@ -1284,15 +1452,30 @@ async function loadContests(){
 async function selectContest(id){
   selected=id; await loadContests(); await refreshSelected();
   if(!$('sec-problems').classList.contains('hide')) listProblems();
+  // A stale "Published." from whichever contest was selected before must not
+  // survive a switch — it would read as having just published to THIS one.
+  $('annStatus').textContent='';
 }
 
-async function deleteContest(id,title){
+async function deleteContest(id,title,state){
+  // Deleting a contest that's still LOBBY/ACTIVE/PAUSED/FROZEN would yank the
+  // room out from under whoever's connected to it — greyed out in the row
+  // (see loadContests()), but the click is left wired so pressing it anyway
+  // explains why instead of doing nothing.
+  if(state && state!=='DRAFT' && state!=='ENDED'){
+    log(400,'You must end the contest first before deleting it.');
+    return;
+  }
   if(!(await showConfirm(`Permanently delete contest "${title}" along with all its problems, test cases, and submissions?`))) return;
-  const {status}=await api('DELETE','/api/admin/contests/'+id,null,true);
+  const {status,body}=await api('DELETE','/api/admin/contests/'+id,null,true);
   if(status<300){
     log(200,`Deleted contest "${title}"`);
     if(selected===id){ selected=null; state=null; }
     await loadContests();
+  } else {
+    // A failed delete used to do nothing visible at all — same call,
+    // pressed again, with no explanation of why nothing changed.
+    log(status, `Could not delete "${title}"` + (body ? ` — ${typeof body==='string'?body:(body.message||JSON.stringify(body))}` : ''));
   }
 }
 
@@ -1341,12 +1524,32 @@ async function refreshSelected(){
   $('bUnfreeze').disabled = s!=='FROZEN';
   $('bEnd').disabled      = s==='DRAFT'||s==='ENDED';
   const started           = s==='ACTIVE'||s==='PAUSED'||s==='FROZEN'||s==='ENDED';
+  const ended              = s==='ENDED';
   $('lobbyMins').disabled = started;
   $('bScheduleLobby').disabled = started;
   const cardLobby = $('cardLobbyCountdown');
   if (cardLobby) cardLobby.classList.toggle('disabled', started);
-  loadTestVisibility();
-  loadClarificationPrivacy();
+
+  // Nothing below does anything useful once the contest is over: the clock
+  // that "adjust time" moves no longer runs, and a toggle flipped now would
+  // never reach a participant — the contest they'd apply to has stopped
+  // accepting connections. Greyed out rather than merely ignored, so it's
+  // obvious why instead of silently doing nothing.
+  $('extMin').disabled = ended;
+  $('bExtendAdd').disabled = ended;
+  $('bExtendRemove').disabled = ended;
+  const cardExtend = $('cardAdjustTime');
+  if (cardExtend) cardExtend.classList.toggle('disabled', ended);
+  const annPublish = $('annPublish');
+  if (annPublish) annPublish.disabled = ended;
+
+  // Awaited, not fire-and-forget: both of these re-enable tvCheck/cpCheck
+  // themselves on a successful fetch (that's how they clear the "stale
+  // server" disabled state), which would otherwise win a race against the
+  // ended-disable below and silently re-enable a toggle that should stay off.
+  await loadTestVisibility();
+  await loadClarificationPrivacy();
+  if (ended) { $('tvCheck').disabled = true; $('cpCheck').disabled = true; }
   paintLifecycle(s);
   paintClocks();
 }
