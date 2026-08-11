@@ -22,6 +22,7 @@ import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemPackageResultDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
+import com.arbitrator.common.dto.ProblemTestCasesDto;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.realtime.ContestStatePublisher;
 import com.arbitrator.server.repo.ProblemRepository;
@@ -110,6 +111,22 @@ public class AdminProblemController {
         return new ProblemDetailDto(p.getId(), p.getCode(), p.getTitle(),
                 p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb(),
                 p.isStatementIsPdf());
+    }
+
+    /**
+     * Read-only: statement + every stored test case (item 6) — Edit only ever
+     * showed the statement, and there was previously no way to see a
+     * problem's test data from the console at all short of the per-submission
+     * view, which only shows the tests one particular run happened to reach.
+     */
+    @GetMapping(ApiPaths.ADMIN_PROBLEM_TESTCASES)
+    public ProblemTestCasesDto viewTestCases(@PathVariable long id) {
+        Problem p = problems.findById(id).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
+        List<ProblemTestCasesDto.Entry> entries = testCases.findByProblemIdOrderByIdxAsc(id).stream()
+                .map(tc -> new ProblemTestCasesDto.Entry(tc.getIdx(), tc.getInputData(), tc.getExpectedOutput()))
+                .toList();
+        return new ProblemTestCasesDto(p.getId(), p.getCode(), p.getTitle(), p.getStatementHtml(), entries);
     }
 
     /**

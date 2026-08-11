@@ -25,17 +25,25 @@ import com.arbitrator.server.repo.UserRepository;
  * The clarification board.
  *
  * Owner: Mahir. The default, and the common case, is public: every question
- * and answer visible to everyone, because a clarification given privately to
- * one team is an advantage the rest of the room never gets a chance at. The
- * asker may instead mark a question private — for something that identifies
- * their approach, or isn't really a fairness issue — in which case it is
- * visible only to them and the instructor.
+ * and answer intended to reach everyone, because a clarification given
+ * privately to one team is an advantage the rest of the room never gets a
+ * chance at. The asker may instead mark a question private — for something
+ * that identifies their approach, or isn't really a fairness issue — in which
+ * case it is visible only to them and the instructor.
  *
- * Both filters happen here, in {@link #forContest} and {@link #toDto}, never
- * in the client: a participant's response is missing the name and missing
- * other people's private questions outright, not merely told not to display
- * them. Hiding either in the UI would leave it sitting in the JSON for anyone
- * who looked.
+ * A public question isn't broadcast the instant it's answered, though — an
+ * admin must {@link #setApproved approve} it first. "Public" at ask-time is
+ * the asker's request to eventually share it, not a publish decision; a
+ * question can be worth answering privately-in-effect (typo in the phrasing,
+ * or half the class already knows) without the instructor having to
+ * mislabel it "private" to keep the raw answer off the board.
+ *
+ * All three filters — public/private, approved/not, and the asker's own name
+ * — happen here, in {@link #forContest} and {@link #toDto}, never in the
+ * client: a participant's response is missing the name, missing other
+ * people's private questions, and missing not-yet-approved public ones
+ * outright, not merely told not to display them. Hiding any of it in the UI
+ * would leave it sitting in the JSON for anyone who looked.
  */
 @Service
 public class ClarificationService {
@@ -124,7 +132,14 @@ public class ClarificationService {
         return toDto(c, problemsById(), namesById(), false);
     }
 
-    /** The instructor answers; the board updates for everyone at once. */
+    /**
+     * The instructor answers. For a private clarification the board updates
+     * for everyone who can already see it (the asker) right away; for a
+     * public one, this only writes the answer — it stays invisible to
+     * everyone but the asker and admins until {@link #setApproved} publishes
+     * it. Revising an already-approved answer does not un-approve it; an
+     * admin who wants to pull a revision back for review does so explicitly.
+     */
     public ClarificationDto answer(long id, String answer) {
         if (answer == null || answer.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An answer cannot be empty");
@@ -138,6 +153,26 @@ public class ClarificationService {
 
         c.setAnswer(answer.trim());
         c.setAnsweredAt(Instant.now());
+        clarifications.save(c);
+
+        broadcast(c.getContestId());
+        return toDto(c, problemsById(), namesById(), true);
+    }
+
+    /**
+     * The instructor's publish decision for a public, answered clarification
+     * (item: "approval system"). Approving before an answer exists would
+     * publish an empty answer the moment one is later added with no further
+     * review step, so it's refused outright rather than silently allowed.
+     */
+    public ClarificationDto setApproved(long id, boolean approved) {
+        Clarification c = clarifications.findById(id).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "No such clarification"));
+        if (approved && (c.getAnswer() == null || c.getAnswer().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Answer it before approving — there's nothing to publish yet");
+        }
+        c.setApproved(approved);
         clarifications.save(c);
 
         broadcast(c.getContestId());
@@ -159,7 +194,7 @@ public class ClarificationService {
                 ? userService.requireByUsername(callerUsername).getId() : null;
 
         return clarifications.findByContestIdOrderByAskedAtDesc(contestId).stream()
-                .filter(c -> admin || c.isPublic() || c.getUserId().equals(callerId))
+                .filter(c -> admin || (c.isPublic() && c.isApproved()) || c.getUserId().equals(callerId))
                 .map(c -> toDto(c, problemMap, nameMap, admin))
                 .toList();
     }
@@ -217,6 +252,7 @@ public class ClarificationService {
                 c.getAskedAt().toEpochMilli(),
                 c.getAnsweredAt() == null ? -1 : c.getAnsweredAt().toEpochMilli(),
                 admin ? nameMap.get(c.getUserId()) : null,
-                c.isPublic());
+                c.isPublic(),
+                c.isApproved());
     }
 }

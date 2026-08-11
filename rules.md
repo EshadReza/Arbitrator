@@ -11,7 +11,7 @@ Read this before your first commit. Every rule here exists because breaking it c
 | Owner | Paths |
 |---|---|
 | **Eshad** | `arbitrator-server/src/main/java/com/arbitrator/server/{config,security,entity,repo}/**`<br>`.../service/{user,contest,problem,report}/**` · `.../controller/{auth,admin,contest,problem,user}/**`<br>`arbitrator-server/src/main/resources/db/migration/**` · `.../static/admin/**`<br>root `pom.xml` · `README.md` · `.github/**` |
-| **Mahir** | `arbitrator-server/src/main/java/com/arbitrator/server/{judge,realtime,leaderboard}/**`<br>`.../service/{submission,announcement}/**` · `.../controller/{submission,announcement}/**`<br>`arbitrator-server/src/main/resources/languages.yml` · `scripts/sandbox-run.sh` |
+| **Mahir** | `arbitrator-server/src/main/java/com/arbitrator/server/{judge,realtime,leaderboard}/**`<br>`.../service/{submission,announcement}/**` · `.../controller/{submission,announcement}/**`<br>`arbitrator-server/src/main/resources/languages.yml` · `scripts/docker/**` |
 | **Zahin** | `arbitrator-client/**` (everything, including `codeforces.css`) |
 | **Shared** | `arbitrator-common/**` — see Rule 2 |
 

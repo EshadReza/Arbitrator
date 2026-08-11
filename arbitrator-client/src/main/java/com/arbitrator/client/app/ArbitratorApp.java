@@ -2,6 +2,8 @@ package com.arbitrator.client.app;
 
 import javafx.application.Application;
 
+import javafx.geometry.Rectangle2D;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 /**
@@ -17,8 +19,13 @@ public class ArbitratorApp extends Application {
         SceneRouter.init(stage);
         SceneRouter.showLogin();
         stage.setTitle("Arbitrator");
-        stage.setMinWidth(1280);    // §3.3.1 minimum supported resolution
-        stage.setMinHeight(768);
+        // §3.3.1's 1280x768 is the minimum *supported* resolution, but a hard
+        // min larger than the actual screen (small/scaled Ubuntu displays)
+        // forced an oversized, partly off-screen window with no way to
+        // resize it back down — clamp to whatever's actually usable.
+        Rectangle2D bounds = Screen.getPrimary().getVisualBounds();
+        stage.setMinWidth(Math.min(1280, bounds.getWidth()));
+        stage.setMinHeight(Math.min(768, bounds.getHeight()));
         stage.show();
     }
 

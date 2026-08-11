@@ -20,10 +20,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
 
-    private final JwtService jwtService;
+    /** Body sent when a token was superseded by a later login elsewhere (item 5). */
+    public static final String SESSION_SUPERSEDED = "SESSION_SUPERSEDED";
 
-    public JwtAuthFilter(JwtService jwtService) {
+    private final JwtService jwtService;
+    private final ActiveSessionRegistry sessions;
+
+    public JwtAuthFilter(JwtService jwtService, ActiveSessionRegistry sessions) {
         this.jwtService = jwtService;
+        this.sessions = sessions;
     }
 
     @Override
@@ -39,6 +44,26 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             Claims claims = jwtService.parse(header.substring(7));
             if (claims != null) {
                 String username = claims.getSubject();
+                String sid = claims.get("sid", String.class);
+                // sid==null means this token predates single-session tracking
+                // (or was minted somewhere that deliberately opts out, e.g.
+                // tests) — nothing to compare against, so it authenticates as
+                // before. A real login always carries a sid, so once one is
+                // present a mismatch means a later login elsewhere replaced it.
+                if (sid != null && !sessions.isActive(username, sid)) {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    // Writing the body by hand (no Spring message converter in
+                    // play here, unlike a ResponseStatusException) means the
+                    // container's default response charset — ISO-8859-1, not
+                    // UTF-8 — applies unless set explicitly. Left unset, the
+                    // em dash below silently corrupts to "?" on the wire.
+                    response.setCharacterEncoding("UTF-8");
+                    response.setContentType("application/json");
+                    response.getWriter().write(
+                            "{\"error\":\"" + SESSION_SUPERSEDED + "\","
+                                    + "\"message\":\"Signed out — this account logged in from another device\"}");
+                    return;
+                }
                 String role = claims.get("role", String.class);
                 var auth = new UsernamePasswordAuthenticationToken(
                         username,

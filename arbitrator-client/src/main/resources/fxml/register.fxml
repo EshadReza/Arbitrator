@@ -37,7 +37,7 @@
                      would otherwise hold initial keyboard focus, stealing the
                      Enter key from the form's own defaultButton. -->
                 <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button"
-                        text="🌙" focusTraversable="false"/>
+                        text="☾" focusTraversable="false"/>
             </HBox>
 
             <VBox alignment="CENTER" spacing="14" maxWidth="380" VBox.vgrow="ALWAYS">

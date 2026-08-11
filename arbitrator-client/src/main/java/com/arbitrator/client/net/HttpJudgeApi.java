@@ -53,9 +53,10 @@ public class HttpJudgeApi implements JudgeApi {
     }
 
     @Override
-    public LoginResponse login(String username, String password) throws ApiException {
+    public LoginResponse login(String username, String password, boolean force) throws ApiException {
         LoginResponse res = post(ApiPaths.AUTH_LOGIN,
-                new LoginRequest(username, null, password), LoginResponse.class);
+                new LoginRequest(username, null, password, MacAddress.detect(), force),
+                LoginResponse.class);
         this.token = res.token();
         return res;
     }
@@ -64,7 +65,8 @@ public class HttpJudgeApi implements JudgeApi {
     public LoginResponse register(String username, String displayName, String password)
             throws ApiException {
         LoginResponse res = post(ApiPaths.AUTH_REGISTER,
-                new LoginRequest(username, displayName, password), LoginResponse.class);
+                new LoginRequest(username, displayName, password, MacAddress.detect(), null),
+                LoginResponse.class);
         this.token = res.token();
         return res;
     }

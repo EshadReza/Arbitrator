@@ -28,7 +28,20 @@ import com.arbitrator.common.dto.VerdictEventDto;
  */
 public interface JudgeApi extends AutoCloseable {
 
-    LoginResponse login(String username, String password) throws ApiException;
+    default LoginResponse login(String username, String password) throws ApiException {
+        return login(username, password, false);
+    }
+
+    /**
+     * @param force true only after the caller already confirmed the "this
+     *              account is already logged in elsewhere" prompt (item 5) —
+     *              a normal first attempt always passes false. A false
+     *              attempt against an already-active session throws an
+     *              {@link ApiException} with {@link ApiException#status()}
+     *              {@code == 409}; the caller shows the confirmation and, on
+     *              OK, retries with {@code force=true}.
+     */
+    LoginResponse login(String username, String password, boolean force) throws ApiException;
 
     /**
      * FR-01. On success the account exists and the returned token is already

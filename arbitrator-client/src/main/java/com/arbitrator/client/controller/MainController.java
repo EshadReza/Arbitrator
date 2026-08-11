@@ -96,6 +96,15 @@ public class MainController {
     private volatile boolean reconnecting;
 
     /**
+     * Consecutive missed watchdog ticks (item 7). A single miss is often just
+     * a heartbeat blip that resolves itself within a second or two; flipping
+     * the visible "offline" banner on the very first one made the label
+     * flicker on every minor hiccup. Only the second consecutive miss in a
+     * row (~8s of genuinely being down) updates what the student sees.
+     */
+    private int missedTicks;
+
+    /**
      * Per-problem editor drafts, kept for the session. Switching problems must
      * not discard work — losing code mid-contest is unforgivable.
      */
@@ -151,7 +160,7 @@ public class MainController {
         // keep its own copy, or it will drift from what is actually released.
         clarificationsPanelController.setProblemSupplier(
                 () -> List.copyOf(problemList.getItems()));
-        themeButton.setText(state.darkMode() ? "☀" : "🌙");
+        themeButton.setText(state.darkMode() ? "☼" : "☾");
 
         // Submissions/Standings selection is just "I clicked here," not a real
         // selection with any downstream effect — it must not survive leaving
@@ -272,8 +281,11 @@ public class MainController {
                 this::onToggleTheme);
         accelerators.put(new KeyCodeCombination(KeyCode.B, KeyCombination.CONTROL_DOWN),
                 this::onToggleProblemList);
-        accelerators.put(new KeyCodeCombination(KeyCode.F11),
-                this::onToggleStatementFullscreen);
+        // F11 is now real OS-level window fullscreen, wired once at the Stage
+        // level in SceneRouter.init() so it works on every screen, not just
+        // here — see there for why. The statement/editor panel-collapse
+        // "fullscreen" toggle below is unrelated and still reachable from its
+        // own button (⛶), just no longer bound to F11.
         accelerators.put(new KeyCodeCombination(KeyCode.R, KeyCombination.CONTROL_DOWN),
                 this::onRefresh);
         accelerators.put(new KeyCodeCombination(KeyCode.EQUALS, KeyCombination.CONTROL_DOWN), () -> changeZoom(+1));
@@ -432,7 +444,7 @@ public class MainController {
         state.setDarkMode(dark);
         SceneRouter.applyTheme(rootStack.getScene());
         applyWebViewFill();
-        themeButton.setText(dark ? "☀" : "🌙");
+        themeButton.setText(dark ? "☼" : "☾");
         // Re-render the statement so its inline CSS matches the new theme.
         var selected = problemList.getSelectionModel().getSelectedItem();
         if (selected != null) {
@@ -814,12 +826,24 @@ public class MainController {
     }
 
     private void startConnectionWatchdog() {
-        watchdog = new Timeline(new KeyFrame(Duration.seconds(3), e -> {
+        watchdog = new Timeline(new KeyFrame(Duration.seconds(4), e -> {
             boolean live = state.api().isLive();
-            setConnected(live);
-            if (!live && !reconnecting) {
-                reconnecting = true;
-                connectLive();
+            if (live) {
+                missedTicks = 0;
+                setConnected(true);
+            } else {
+                missedTicks++;
+                // Reconnect attempts stay cheap/idempotent from the first
+                // miss (connectLive() no-ops if already connecting/connected)
+                // — only the visible banner waits for a second consecutive
+                // miss, so a lone blip never flickers it.
+                if (missedTicks >= 2) {
+                    setConnected(false);
+                }
+                if (!reconnecting) {
+                    reconnecting = true;
+                    connectLive();
+                }
             }
         }));
         watchdog.setCycleCount(Animation.INDEFINITE);

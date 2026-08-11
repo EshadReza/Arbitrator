@@ -64,10 +64,26 @@ public class NotificationService {
     }
 
     private void raise(long contestId, String username, String type, int minutesOffline) {
-        String displayName = users.findByUsername(username)
-                .map(User::getDisplayName).orElse(username);
         String contestTitle = contests.findById(contestId)
                 .map(c -> c.getTitle()).orElse("Contest #" + contestId);
+        raise(contestId, contestTitle, username, type, minutesOffline);
+    }
+
+    /**
+     * A user's client reported a different MAC address than last time — not
+     * contest-scoped (it happens at login, before any contest is chosen), so
+     * this bypasses PresenceTracker entirely and is called directly from
+     * UserService.login(). Surfaced through the same poll/dismiss channel as
+     * DISCONNECTED/RECONNECTED so the console needs no new endpoint.
+     */
+    public void raiseMacChanged(String username) {
+        raise(0, "Account", username, "MAC_CHANGED", 0);
+    }
+
+    private void raise(long contestId, String contestTitle, String username, String type,
+                       int minutesOffline) {
+        String displayName = users.findByUsername(username)
+                .map(User::getDisplayName).orElse(username);
 
         NotificationDto n = new NotificationDto(
                 nextId.getAndIncrement(), contestId, contestTitle,

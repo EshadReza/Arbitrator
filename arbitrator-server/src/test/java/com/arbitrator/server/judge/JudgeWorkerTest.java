@@ -36,7 +36,7 @@ import com.arbitrator.server.repo.UserRepository;
  */
 class JudgeWorkerTest {
 
-    private static boolean gppAvailable;
+    private static boolean dockerReady;
 
     private SandboxExecutor sandbox;
     private JudgeProperties props;
@@ -47,7 +47,8 @@ class JudgeWorkerTest {
 
     @BeforeAll
     static void detectToolchain() {
-        gppAvailable = runsCleanly("g++", "--version");
+        dockerReady = runsCleanly("docker", "version")
+                && runsCleanly("docker", "image", "inspect", "arbitrator-judge:latest");
     }
 
     @BeforeEach
@@ -137,7 +138,7 @@ class JudgeWorkerTest {
 
     @Test
     void contestantReShortCircuitsCheckerInvocation() {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
 
         // Contestant code that crashes (exit 1)
         String crashingCode = """
@@ -159,7 +160,7 @@ class JudgeWorkerTest {
 
     @Test
     void contestantTleShortCircuitsCheckerInvocation() {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
 
         // Contestant code that infinite loops
         String tleCode = """

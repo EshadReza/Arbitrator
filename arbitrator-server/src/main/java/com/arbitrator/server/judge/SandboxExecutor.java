@@ -1,14 +1,15 @@
 package com.arbitrator.server.judge;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +17,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,55 +30,40 @@ import jakarta.annotation.PreDestroy;
 /**
  * Runs untrusted code (FR-10, NFR-S03/S04, NFR-R04, FMEA-02/08).
  *
- * Every externally-triggered process — the COMPILER as well as the submission —
- * runs under hard limits. Sandboxing only the run step was a real hole: a source
- * file of {@code #include </dev/urandom>} makes the preprocessor read an endless
- * stream and exhaust host RAM before any program is even produced.
+ * Every externally-triggered process — the COMPILER as well as the submission
+ * itself, and the custom checker — executes inside a throwaway Docker
+ * container (scripts/docker/Dockerfile, built by
+ * scripts/docker/build-sandbox-image.sh). Nothing participant-supplied ever
+ * runs as a direct child of this JVM, on any platform: there is no
+ * host-process fallback here, unlike the previous unshare(Linux)/ulimit(dev)
+ * split. Docker Desktop/Engine is required everywhere this server runs.
  *
- * Three enforcement paths:
- *  - Linux: scripts/sandbox-run.sh — unshare -Urn (no network) + prlimit +
- *    timeout -k, with real peak RSS from /usr/bin/time.
- *  - macOS (dev machines): {@code sh -c 'ulimit …; exec …'}, which still
- *    caps CPU, address space, process count and file size, plus an RSS sampler
- *    so MLE is a real verdict instead of a mislabelled RE.
- *  - Windows (dev machines, decision D2 — never a deployment target): no
- *    POSIX shell and no ulimit equivalent exist, so the command runs
- *    directly; the wall-clock timeout and the process-TREE kill below are
- *    what contain it, and peak RSS is left unmeasured (-1) exactly like the
- *    "ps unavailable" case already handled on other platforms.
+ * Per container:
+ *  - {@code --network none}                 no network at all (NFR-S04)
+ *  - {@code --memory}/{@code --memory-swap}  equal, so it's a real cgroup
+ *                                            hard RSS cap, not the address-
+ *                                            space-only bound the old
+ *                                            {@code prlimit --as} gave
+ *  - {@code --pids-limit}                    fork-bomb containment (FMEA-08)
+ *  - {@code --cap-drop ALL} + no-new-privileges, {@code --read-only} root fs
+ *    with a small tmpfs for scratch space
+ *  - only {@link JudgeProperties#getWorkRoot()} is ever bind-mounted (read-
+ *    only) plus the specific call's own work dir (read-write) — the rest of
+ *    the host filesystem is never visible, closing the gap the previous
+ *    Linux path left open (STATUS.md known issue 10a)
  *
- * Whatever the path, three things always hold:
- *  1. the whole process TREE is killed, not just the direct child — otherwise a
- *     fork bomb's children survive and peg the CPU;
- *  2. every live process is tracked and killed on JVM shutdown, because Java
- *     does NOT reap child processes when it exits;
- *  3. captured output is capped, so a program printing forever cannot exhaust
- *     memory or disk (surfaced as OLE).
+ * The command runs wrapped as {@code timeout -k1 <2xTL>s /usr/bin/time -o
+ * <rusage> -v <cmd>} *inside* the container — the same technique
+ * sandbox-run.sh used host-side: {@code /usr/bin/time} gives the true inner
+ * elapsed time (excluding container startup overhead) and peak RSS in one
+ * read, and {@code timeout}'s exit code 124 is the one unambiguous signal
+ * that OUR deadline (not an OOM kill, which also exits 137) is what ended
+ * the process — see {@link #parseContainerResult}.
  */
 @Component
 public class SandboxExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(SandboxExecutor.class);
-
-    private static final boolean IS_LINUX =
-            System.getProperty("os.name").toLowerCase().contains("linux");
-
-    /**
-     * Dev fallback only (decision D2 — Windows is never a deployment target).
-     * {@link #runLimited} shells every command through {@code /bin/sh -c
-     * "ulimit …; exec …"}, which does not exist on Windows: without this
-     * branch {@code ProcessBuilder("/bin/sh", ...).start()} throws
-     * immediately for the COMPILE step of every single submission (compile()
-     * always calls runLimited, unconditionally), JudgeWorker's catch-all
-     * turns that into Outcome.internalError(...), and every submission comes
-     * back RE regardless of what the student wrote — nothing ever actually
-     * ran. ulimit has no Windows equivalent, so CPU/address-space/process
-     * caps are simply unavailable there; the Java-level wall-clock timeout
-     * and destroyTree()'s process-tree kill (both already OS-agnostic) are
-     * what contain a submission on this path instead.
-     */
-    private static final boolean IS_WINDOWS =
-            System.getProperty("os.name").toLowerCase().contains("win");
 
     private static final ExecutorService STREAM_POOL = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "sandbox-stream");
@@ -85,49 +73,100 @@ public class SandboxExecutor {
 
     /** Captured output cap; hitting it means OLE, not a host memory problem. */
     public static final int OUTPUT_CAP = 10 * 1024 * 1024;                   // 10 MiB
-    private static final long COMPILE_ADDRESS_SPACE_KB = 2L * 1024 * 1024;   // 2 GiB
-    private static final long MAX_FILE_SIZE_BLOCKS = 65536;                  // 64 MiB (512B blocks)
+
+    private static final long COMPILE_MEMORY_KB = 2L * 1024 * 1024;          // 2 GiB
+    private static final long MAX_FILE_SIZE_BYTES = 64L * 1024 * 1024;       // 64 MiB
 
     /**
-     * How many processes a submission may add beyond what the account already
-     * has. Normal code needs one; the headroom covers a language runtime that
-     * spawns helpers and the other judge threads running concurrently, while
-     * still stopping a fork bomb after a few dozen instead of thousands.
-     *
-     * Too small is not "safer": the cap is per-UID, so a tight value makes
-     * legitimate submissions fail intermittently as the machine's own process
-     * count drifts.
+     * Process cap inside the container. Compile gets more headroom than run:
+     * g++ forks cc1plus/as/collect2, javac spawns its own helper threads (not
+     * processes, but give it room too); a fork bomb only needs to be stopped
+     * well short of exhausting the host, not pinned to the bare minimum a
+     * legitimate toolchain uses.
      */
-    private static final int MAX_EXTRA_PROCESSES = 32;
+    private static final int COMPILE_PIDS_LIMIT = 200;
+    private static final int RUN_PIDS_LIMIT = 64;
 
     /**
-     * Every process started here and not yet reaped. The shutdown hook empties
-     * it — without that, stopping the server leaves compiled submissions
-     * ("prog") running forever at full CPU.
+     * The container's own {@code --memory} hard cap is set to this multiple
+     * of the problem's stated limit, not the limit itself. A program that
+     * merely touches the limit must be OBSERVABLE exceeding it — with the
+     * container cap equal to the limit, the cgroup OOM-kills the process at
+     * (or fractionally under, per its own accounting) the exact boundary, so
+     * peak RSS can never be measured as greater than the limit and a real MLE
+     * is misreported as RE instead. Matches the old host-side sandbox-run.sh
+     * script's ">1x is already MLE" reasoning — MLE is still decided purely
+     * by JudgeWorker comparing peakMemoryKb against the problem's own limit,
+     * this only gives the container room to let that comparison see a real
+     * number above it before anything gets killed.
      */
-    private static final Set<Process> LIVE = ConcurrentHashMap.newKeySet();
+    private static final int MEMORY_HEADROOM_MULTIPLIER = 2;
+
+    /** Fixed non-root uid/gid baked into scripts/docker/Dockerfile. */
+    private static final String SANDBOX_UID_GID = "10001:10001";
+
+    private static final Pattern PEAK_RSS =
+            Pattern.compile("Maximum resident set size \\(kbytes\\):\\s*(\\d+)");
+    private static final Pattern ELAPSED =
+            Pattern.compile("Elapsed \\(wall clock\\) time.*:\\s*([0-9:.]+)\\s*$", Pattern.MULTILINE);
+
+    /**
+     * Container names currently running, so the shutdown hook can kill them —
+     * without this, stopping the server leaves judged submissions' containers
+     * running (Docker does not tie a container's life to the client that
+     * started it).
+     */
+    private static final Set<String> LIVE = ConcurrentHashMap.newKeySet();
+    private static final AtomicLong SEQ = new AtomicLong();
+
+    /**
+     * Mirrors {@code arbitrator.judge.docker-binary} for the shutdown hook
+     * and other static contexts that run without a {@link JudgeProperties}
+     * reference. Set once from the constructor; every Spring context has
+     * exactly one {@link SandboxExecutor}, so there is no multi-value race.
+     */
+    private static volatile String dockerBinaryStatic = "docker";
 
     static {
         Runtime.getRuntime().addShutdownHook(
-                new Thread(() -> LIVE.forEach(SandboxExecutor::destroyTree), "sandbox-reaper"));
+                new Thread(() -> LIVE.forEach(SandboxExecutor::killContainerQuietly), "sandbox-reaper"));
     }
 
     private final JudgeProperties props;
 
     public SandboxExecutor(JudgeProperties props) {
         this.props = props;
+        dockerBinaryStatic = props.getDockerBinary();
     }
 
     /**
-     * Kills any submission binary left over from a previous run and clears the
-     * work root. A server that was killed mid-judge leaves those processes
-     * alive — they are not the JVM's children any more, so nothing else will
-     * ever reap them, and they accumulate across restarts.
+     * Fails loud, not silent: if Docker isn't reachable or the sandbox image
+     * hasn't been built, every submission from here on returns a clear
+     * judge-error RE (see JudgeWorker's internalError) instead of quietly
+     * running participant code some other way. Also sweeps containers and
+     * work-dir leftovers from a server that was killed mid-judge.
      */
     @PostConstruct
-    void sweepStaleProcesses() {
+    void verifyDockerReady() {
+        if (!runsCleanly(props.getDockerBinary(), "version")) {
+            log.error("Docker is not available ({} version failed). No submission can be judged until "
+                    + "Docker Desktop/Engine is running — this server never runs participant code "
+                    + "outside a container.", props.getDockerBinary());
+        } else if (!runsCleanly(props.getDockerBinary(), "image", "inspect", props.getDockerImage())) {
+            log.error("Sandbox image '{}' not found. Run scripts/docker/build-sandbox-image.sh before "
+                    + "judging any submission.", props.getDockerImage());
+        } else {
+            log.info("Docker sandbox ready: image {}", props.getDockerImage());
+        }
+
         Path root = Path.of(props.getWorkRoot());
-        killByWorkDir(root);
+        try {
+            Files.createDirectories(root);
+            permitContainerAccess(root);
+        } catch (IOException ignored) {
+            // best effort; createWorkDir() will surface any real problem per-submission
+        }
+        sweepStaleContainers();
         try (var walk = Files.walk(root)) {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {
                 try {
@@ -136,9 +175,33 @@ public class SandboxExecutor {
                     // best effort
                 }
             });
+            Files.createDirectories(root);
             log.info("Cleared stale judge work root {}", root);
         } catch (IOException ignored) {
             // root does not exist yet on a first run — nothing to sweep
+        }
+    }
+
+    /** Every container this process has ever started is named with this prefix. */
+    private static final String NAME_PREFIX = "arbitrator-sbx-";
+
+    private void sweepStaleContainers() {
+        try {
+            Process ps = new ProcessBuilder(props.getDockerBinary(), "ps", "-aq",
+                    "--filter", "name=" + NAME_PREFIX)
+                    .redirectErrorStream(true).start();
+            String ids = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            ps.waitFor(10, TimeUnit.SECONDS);
+            if (!ids.isBlank()) {
+                List<String> cmd = new ArrayList<>(List.of(props.getDockerBinary(), "rm", "-f"));
+                cmd.addAll(List.of(ids.split("\\s+")));
+                new ProcessBuilder(cmd).redirectErrorStream(true).start().waitFor(15, TimeUnit.SECONDS);
+                log.info("Removed {} stale sandbox container(s) from a previous run", ids.split("\\s+").length);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+            // docker unavailable — already logged loudly above
         }
     }
 
@@ -146,208 +209,240 @@ public class SandboxExecutor {
     public Path createWorkDir(long submissionId) throws IOException {
         Path root = Path.of(props.getWorkRoot());
         Files.createDirectories(root);
-        return Files.createTempDirectory(root, "sub-" + submissionId + "-");
+        Path dir = Files.createTempDirectory(root, "sub-" + submissionId + "-");
+        permitContainerAccess(dir);
+        return dir;
     }
 
     /**
-     * Compile step — also limited. The compiler processes attacker-supplied
-     * input and can be driven to unbounded CPU, memory and disk use.
+     * Compile step — also containerized. The compiler processes
+     * attacker-supplied input and can be driven to unbounded CPU, memory and
+     * disk use (e.g. {@code #include </dev/urandom>} feeding the
+     * preprocessor), and previously ran with no network isolation at all.
      */
     public ExecutionResult compile(Path workDir, List<String> command)
             throws IOException, InterruptedException {
-        long timeoutMs = props.getCompileTimeoutMs();
-        return runLimited(workDir, command, null, timeoutMs,
-                timeoutMs / 1000 + 5, COMPILE_ADDRESS_SPACE_KB, false);
+        return runInContainer(workDir, command, null, props.getCompileTimeoutMs(),
+                COMPILE_MEMORY_KB, COMPILE_PIDS_LIMIT);
     }
 
-    /** Run one test case under the problem's limits. */
+    /**
+     * Run one test case (or a custom checker) under the problem's limits.
+     * The container's own cap is given headroom above memoryLimitKb — see
+     * MEMORY_HEADROOM_MULTIPLIER — but MLE is still decided by JudgeWorker
+     * comparing the returned peakMemoryKb against the problem's real limit.
+     */
     public ExecutionResult run(Path workDir, List<String> command, Path inputFile,
                                int timeLimitMs, int memoryLimitKb)
             throws IOException, InterruptedException {
-
-        Path script = Path.of(props.getSandboxScript()).toAbsolutePath();
-        if (IS_LINUX && Files.isExecutable(script)) {
-            return runSandboxed(script, workDir, command, inputFile, timeLimitMs, memoryLimitKb);
-        }
-        // Dev fallback: still limited, and NFR-R04's 2x kill is preserved.
-        return runLimited(workDir, command, inputFile, timeLimitMs * 2L,
-                timeLimitMs / 1000 + 1, memoryLimitKb * 2L, true);
+        return runInContainer(workDir, command, inputFile, timeLimitMs,
+                (long) memoryLimitKb * MEMORY_HEADROOM_MULTIPLIER, RUN_PIDS_LIMIT);
     }
 
     // ------------------------------------------------------------------
 
-    private ExecutionResult runSandboxed(Path script, Path workDir, List<String> command,
-                                         Path inputFile, int timeLimitMs, int memoryLimitKb)
+    private ExecutionResult runInContainer(Path workDir, List<String> command, Path inputFile,
+                                           long timeLimitMs, long memoryLimitKb, int pidsLimit)
             throws IOException, InterruptedException {
 
-        Path outFile = workDir.resolve("__stdout.txt");
-        Path errFile = workDir.resolve("__stderr.txt");
-        Path metrics = workDir.resolve("__metrics.txt");
+        permitContainerAccess(workDir);
+
+        long hardKillS = Math.max(1, (timeLimitMs * 2 + 999) / 1000);   // SIGKILL at 2x, NFR-R04
+        long javaWaitMs = hardKillS * 1000 + 15_000;                    // outer safety net; see class javadoc
+
+        long seq = SEQ.incrementAndGet();
+        String rusageName = "__rusage_" + seq + ".txt";
+        Path rusageFile = workDir.resolve(rusageName);
+        String name = NAME_PREFIX + workDir.getFileName() + "-" + seq;
 
         List<String> cmd = new ArrayList<>(List.of(
-                "bash", script.toString(),
-                String.valueOf(timeLimitMs), String.valueOf(memoryLimitKb),
-                workDir.toString(), inputFile.toString(),
-                outFile.toString(), errFile.toString(), metrics.toString(), "--"));
-        cmd.addAll(command);
-
-        Process p = new ProcessBuilder(cmd).directory(workDir.toFile()).start();
-        LIVE.add(p);
-        boolean timedOutWrapper = false;
-        try {
-            if (!p.waitFor(timeLimitMs * 3L + 10_000, TimeUnit.MILLISECONDS)) {
-                timedOutWrapper = true;
-            }
-        } finally {
-            destroyTree(p);
-            LIVE.remove(p);
+                props.getDockerBinary(), "run", "--rm", "-i",
+                "--name", name,
+                "--network", "none",
+                "--memory", memoryLimitKb + "k",
+                "--memory-swap", memoryLimitKb + "k",
+                "--pids-limit", String.valueOf(pidsLimit),
+                "--cpus", "1",
+                "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges",
+                "--read-only",
+                "--tmpfs", "/tmp:rw,size=64m,exec",
+                "--ulimit", "fsize=" + MAX_FILE_SIZE_BYTES,
+                "--ulimit", "nofile=64:64",
+                "-v", props.getWorkRoot() + ":/base:ro",
+                "-v", workDir + ":/sandbox:rw",
+                "-w", "/sandbox",
+                "--user", SANDBOX_UID_GID,
+                props.getDockerImage(),
+                "timeout", "-k", "1", hardKillS + "s",
+                "/usr/bin/time", "-o", "/sandbox/" + rusageName, "-v"));
+        for (String token : command) {
+            cmd.add(translatePath(workDir, token));
         }
-        if (timedOutWrapper) {
-            return new ExecutionResult(124, "", "sandbox wrapper hung",
-                    timeLimitMs * 3L, -1, true);
-        }
 
-        Properties m = new Properties();
-        if (Files.exists(metrics)) {
-            try (var in = Files.newInputStream(metrics)) {
-                m.load(in);
-            }
-        }
-        int exit = Integer.parseInt(m.getProperty("exit", "1"));
-        long timeMs = Long.parseLong(m.getProperty("time_ms", "-1"));
-        long peakKb = Long.parseLong(m.getProperty("peak_kb", "-1"));
-        boolean timedOut = "1".equals(m.getProperty("timed_out", "0")) || exit == 124;
-
-        return new ExecutionResult(exit, readCapped(outFile), readCapped(errFile),
-                timeMs, peakKb, timedOut);
-    }
-
-    /**
-     * Non-Linux path, but still bounded. ulimit is applied in a shell wrapper so
-     * the limits are in force before the untrusted program is exec'd:
-     * -t CPU seconds, -f file size, -u processes, -v address space.
-     */
-    private ExecutionResult runLimited(Path workDir, List<String> command, Path inputFile,
-                                       long wallTimeoutMs, long cpuSeconds,
-                                       long addressSpaceKb, boolean runPhase)
-            throws IOException, InterruptedException {
-
-        ProcessBuilder pb;
-        if (IS_WINDOWS) {
-            // No POSIX shell and no ulimit equivalent here — see IS_WINDOWS's
-            // javadoc. Run the argv list directly; the wall-clock timeout below
-            // and destroyTree()'s process-tree kill are the containment.
-            pb = new ProcessBuilder(command).directory(workDir.toFile());
-        } else {
-            // Process cap, applied to the RUN phase only.
-            //
-            // On macOS/BSD RLIMIT_NPROC counts every process owned by the user, not
-            // descendants of this shell, so an absolute value like 64 makes even the
-            // compiler die with "posix_spawn failed: Resource temporarily
-            // unavailable". The cap must therefore be RELATIVE to what the account
-            // already has: a submitted program legitimately needs one process, so
-            // current + 8 leaves normal code untouched while a fork bomb starts
-            // failing after 8 children instead of reaching thousands.
-            //
-            // This is the real containment. destroyTree() alone cannot do it —
-            // ProcessHandle.descendants() is a snapshot, and a bomb forks faster
-            // than that snapshot can be walked, so children escape and survive.
-            // The compile phase gets no -u at all: compilers spawn helper processes.
-            String nprocLimit = "";
-            if (runPhase) {
-                int base = userProcessCount();
-                if (base > 0) {
-                    nprocLimit = "ulimit -u %d 2>/dev/null; ".formatted(base + MAX_EXTRA_PROCESSES);
-                }
-            }
-            // -v is unsupported on some shells, hence 2>/dev/null on each.
-            String limited = (nprocLimit + "ulimit -t %d 2>/dev/null; ulimit -f %d 2>/dev/null; "
-                    + "ulimit -v %d 2>/dev/null; exec %s").formatted(
-                    Math.max(1, cpuSeconds), MAX_FILE_SIZE_BLOCKS,
-                    Math.max(65536, addressSpaceKb), shellQuote(command));
-
-            pb = new ProcessBuilder("/bin/sh", "-c", limited).directory(workDir.toFile());
-        }
+        ProcessBuilder pb = new ProcessBuilder(cmd).directory(workDir.toFile());
         if (inputFile != null) {
             pb.redirectInput(inputFile.toFile());
+        } else {
+            pb.redirectInput(new File("/dev/null"));
         }
 
         long start = System.nanoTime();
         Process p = pb.start();
-        LIVE.add(p);
+        LIVE.add(name);
 
         CompletableFuture<String> out = readAsync(p.getInputStream());
         CompletableFuture<String> err = readAsync(p.getErrorStream());
-        AtomicLong peakKb = runPhase ? samplePeakRss(p) : new AtomicLong(-1);
 
         try {
-            boolean finished = p.waitFor(wallTimeoutMs, TimeUnit.MILLISECONDS);
+            boolean finished = p.waitFor(javaWaitMs, TimeUnit.MILLISECONDS);
             long wallMs = (System.nanoTime() - start) / 1_000_000;
             if (!finished) {
-                destroyTree(p);
-                return new ExecutionResult(124, safeJoin(out), safeJoin(err),
-                        wallMs, peakKb.get(), true);
+                // The inner `timeout` should have already killed it; this is
+                // the safety net for a wedged container (e.g. docker daemon
+                // itself stalled) — same two-layer shape as before.
+                killContainerQuietly(name);
+                p.destroyForcibly();
+                return new ExecutionResult(124, safeJoin(out), safeJoin(err), wallMs, -1, true);
             }
-            return new ExecutionResult(p.exitValue(), safeJoin(out), safeJoin(err),
-                    wallMs, peakKb.get(), false);
+
+            int exit = p.exitValue();
+            if (exit == 125) {
+                throw new IOException("docker run failed before the sandbox container started: "
+                        + safeJoin(err));
+            }
+            return parseContainerResult(exit, safeJoin(out), safeJoin(err), wallMs, rusageFile);
         } finally {
-            destroyTree(p);
-            LIVE.remove(p);
+            LIVE.remove(name);
+            Files.deleteIfExists(rusageFile);
         }
     }
 
     /**
-     * Polls RSS so MLE is detectable off Linux. Without it peakMemoryKb stays
-     * -1, the MLE branch never fires, and a memory hog is reported as RE.
+     * Turns the container's raw exit code + {@code /usr/bin/time -v} output
+     * into an {@link ExecutionResult}.
+     *
+     * Exit 124 is the ONE unambiguous "our own {@code timeout} deadline
+     * fired" signal (GNU coreutils: 124 only when timeout itself judged the
+     * command overran, regardless of whether SIGTERM or the {@code -k}
+     * SIGKILL follow-up actually ended it). A cgroup OOM kill also delivers
+     * SIGKILL and exits 137 — the SAME raw code {@code timeout} would report
+     * after its own SIGKILL escalation — so 137 alone is NOT trustworthy as
+     * a timeout signal (verified empirically: a memory-hog fixture here hits
+     * exit 137 within milliseconds, nowhere near its wall-clock deadline).
+     * MLE detection instead relies entirely on the measured peak RSS versus
+     * the problem's limit, exactly as it did before Docker — see
+     * JudgeWorker.evaluate(), unchanged.
      */
-    private static AtomicLong samplePeakRss(Process p) {
-        AtomicLong peak = new AtomicLong(-1);
-        Thread sampler = new Thread(() -> {
-            String pid = String.valueOf(p.pid());
-            while (p.isAlive()) {
-                try {
-                    Process ps = new ProcessBuilder("ps", "-o", "rss=", "-p", pid)
-                            .redirectErrorStream(true).start();
-                    String line = new String(ps.getInputStream().readAllBytes(),
-                            StandardCharsets.UTF_8).trim();
-                    ps.waitFor(1, TimeUnit.SECONDS);
-                    if (!line.isEmpty()) {
-                        long rss = Long.parseLong(line.split("\\s+")[0]);
-                        peak.updateAndGet(prev -> Math.max(prev, rss));
-                    }
-                    Thread.sleep(40);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                } catch (Exception ignored) {
-                    return;                 // process gone, or ps unavailable
+    private static ExecutionResult parseContainerResult(int exit, String stdout, String stderr,
+                                                         long wallMs, Path rusageFile) {
+        boolean timedOut = exit == 124;
+
+        long peakKb = -1;
+        long elapsedMs = wallMs;
+        if (Files.exists(rusageFile)) {
+            try {
+                String text = Files.readString(rusageFile, StandardCharsets.UTF_8);
+                Matcher peak = PEAK_RSS.matcher(text);
+                if (peak.find()) {
+                    peakKb = Long.parseLong(peak.group(1));
                 }
+                Matcher elapsed = ELAPSED.matcher(text);
+                if (elapsed.find()) {
+                    Long parsed = parseElapsed(elapsed.group(1));
+                    if (parsed != null) {
+                        elapsedMs = parsed;
+                    }
+                }
+            } catch (IOException ignored) {
+                // fall back to the Java-measured wall clock bracket below
             }
-        }, "rss-sampler");
-        sampler.setDaemon(true);
-        sampler.start();
-        return peak;
+        }
+
+        return new ExecutionResult(exit, stdout, stderr, elapsedMs, peakKb, timedOut);
+    }
+
+    /** Parses GNU time's {@code H:MM:SS} or {@code M:SS.ss} elapsed format into milliseconds. */
+    private static Long parseElapsed(String raw) {
+        try {
+            String[] parts = raw.split(":");
+            double secs;
+            if (parts.length == 3) {
+                secs = Long.parseLong(parts[0]) * 3600.0 + Long.parseLong(parts[1]) * 60.0
+                        + Double.parseDouble(parts[2]);
+            } else if (parts.length == 2) {
+                secs = Long.parseLong(parts[0]) * 60.0 + Double.parseDouble(parts[1]);
+            } else {
+                return null;
+            }
+            return Math.round(secs * 1000);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
-     * Kills the process and every descendant. Killing only the direct child
-     * leaves a fork bomb's children running — exactly how orphaned "prog"
-     * processes end up pegging the CPU after the server stops.
+     * Rewrites an absolute host path token to its path inside the container.
+     * Tokens under this call's own work dir map to the read-write mount
+     * ({@code /sandbox}); anything else under the shared work root (e.g. a
+     * cached compiled checker binary living in a sibling directory — see
+     * CheckerRunner) maps to the read-only mount ({@code /base}). Anything
+     * else (flags like {@code -O2}, relative binary names) passes through
+     * unchanged.
      */
-    private static void destroyTree(Process p) {
-        if (p == null) {
-            return;
+    private String translatePath(Path workDir, String token) {
+        String wd = workDir.toString();
+        if (token.equals(wd) || token.startsWith(wd + File.separator)) {
+            return "/sandbox" + token.substring(wd.length());
         }
-        try {
-            p.descendants().forEach(ProcessHandle::destroyForcibly);
-        } catch (Exception ignored) {
-            // descendants() can race with exit; the direct kill below still runs
+        String root = Path.of(props.getWorkRoot()).toString();
+        if (token.equals(root) || token.startsWith(root + File.separator)) {
+            return "/base" + token.substring(root.length());
         }
-        p.destroyForcibly();
+        return token;
+    }
+
+    /**
+     * Containers run as a fixed, image-baked uid (not this JVM's host user),
+     * so the directory being bind-mounted read-write must be open to any
+     * uid. It's pure ephemeral scratch space under the work root — nothing
+     * sensitive — so this costs nothing on either native Linux Docker or
+     * Docker Desktop's file-sharing layer.
+     */
+    private static void permitContainerAccess(Path dir) {
         try {
-            p.waitFor(5, TimeUnit.SECONDS);      // reap; don't leave a zombie
+            Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwxrwxrwx"));
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // non-POSIX filesystem (Windows dev machine) — Docker Desktop's
+            // own file sharing handles this case without help.
+        }
+    }
+
+    /** Best-effort SIGKILL + forced removal; tolerates the container already being gone. */
+    private static void killContainerQuietly(String name) {
+        try {
+            new ProcessBuilder(dockerBinaryStatic, "kill", name)
+                    .redirectErrorStream(true).start().waitFor(5, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+        }
+        try {
+            new ProcessBuilder(dockerBinaryStatic, "rm", "-f", name)
+                    .redirectErrorStream(true).start().waitFor(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean runsCleanly(String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes();
+            return p.waitFor(10, TimeUnit.SECONDS) && p.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -355,65 +450,10 @@ public class SandboxExecutor {
     @PreDestroy
     void shutdown() {
         if (!LIVE.isEmpty()) {
-            log.warn("Killing {} judge process(es) still running at shutdown", LIVE.size());
+            log.warn("Killing {} sandbox container(s) still running at shutdown", LIVE.size());
         }
-        LIVE.forEach(SandboxExecutor::destroyTree);
+        LIVE.forEach(SandboxExecutor::killContainerQuietly);
         LIVE.clear();
-    }
-
-    /**
-     * Processes currently owned by this user. RLIMIT_NPROC is per-UID on
-     * macOS/BSD, so the run-phase cap has to be expressed relative to this.
-     * Returns -1 when it cannot be determined, in which case no cap is applied
-     * rather than risking a limit that blocks legitimate submissions.
-     */
-    private static int userProcessCount() {
-        try {
-            Process ps = new ProcessBuilder("/bin/sh", "-c", "ps -u \"$(id -u)\" | wc -l")
-                    .redirectErrorStream(true).start();
-            String out = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-            if (!ps.waitFor(3, TimeUnit.SECONDS)) {
-                ps.destroyForcibly();
-                return -1;
-            }
-            return Integer.parseInt(out.split("\\s+")[0]);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return -1;
-        } catch (Exception e) {
-            return -1;
-        }
-    }
-
-    /**
-     * Kills anything still executing out of a work directory, matched by path.
-     *
-     * destroyTree() walks a snapshot of descendants, which a rapidly forking
-     * program outruns; those survivors keep the binary's path in their command
-     * line, so a pattern kill catches exactly the strays it missed and nothing
-     * belonging to another submission.
-     */
-    private static void killByWorkDir(Path workDir) {
-        try {
-            new ProcessBuilder("pkill", "-9", "-f", workDir.toString())
-                    .redirectErrorStream(true).start()
-                    .waitFor(5, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (Exception ignored) {
-            // pkill absent (non-POSIX host); the limits above are the real guard
-        }
-    }
-
-    private static String shellQuote(List<String> command) {
-        StringBuilder sb = new StringBuilder();
-        for (String arg : command) {
-            if (!sb.isEmpty()) {
-                sb.append(' ');
-            }
-            sb.append('\'').append(arg.replace("'", "'\\''")).append('\'');
-        }
-        return sb.toString();
     }
 
     private static CompletableFuture<String> readAsync(InputStream in) {
@@ -434,24 +474,27 @@ public class SandboxExecutor {
         }
     }
 
-    private static String readCapped(Path file) {
-        try (var in = Files.newInputStream(file)) {
-            return new String(in.readNBytes(OUTPUT_CAP), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            return "";
-        }
-    }
-
-    /** Kills stragglers from this submission, then deletes its work dir. */
+    /** Kills any leftover container for this work dir, then deletes it. */
     public void cleanup(Path workDir) {
         if (workDir == null) {
             return;
         }
-        // Must happen BEFORE the delete: a still-running binary would otherwise
-        // keep executing from a path that no longer exists, which is exactly how
-        // orphaned "prog" processes end up pegging the CPU with nothing on disk
-        // to trace them back to.
-        killByWorkDir(workDir);
+        try {
+            Process ps = new ProcessBuilder(dockerBinaryStatic, "ps", "-aq",
+                    "--filter", "name=" + NAME_PREFIX + workDir.getFileName())
+                    .redirectErrorStream(true).start();
+            String ids = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            ps.waitFor(5, TimeUnit.SECONDS);
+            if (!ids.isBlank()) {
+                List<String> cmd = new ArrayList<>(List.of(dockerBinaryStatic, "rm", "-f"));
+                cmd.addAll(List.of(ids.split("\\s+")));
+                new ProcessBuilder(cmd).redirectErrorStream(true).start().waitFor(10, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+            // docker unavailable — nothing to clean up on the container side
+        }
 
         try (var walk = Files.walk(workDir)) {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {

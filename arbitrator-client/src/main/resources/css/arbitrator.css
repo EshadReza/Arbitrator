@@ -748,6 +748,18 @@
 .root.dark .code-area .selection { -fx-fill: derive(-c-accent, -40%); }
 .keyword { -fx-fill: -c-accent; -fx-font-weight: bold; }
 .root.dark .keyword { -fx-fill: #7fb4ff; }
+/* VSCode-Dark+-inspired token colors — type/string/comment/number/function,
+   the other five groups EditorController.highlight() can now emit. */
+.type     { -fx-fill: #267f99; }
+.root.dark .type     { -fx-fill: #4ec9b0; }
+.string   { -fx-fill: #a31515; }
+.root.dark .string   { -fx-fill: #ce9178; }
+.comment  { -fx-fill: #008000; -fx-font-style: italic; }
+.root.dark .comment  { -fx-fill: #6a9955; -fx-font-style: italic; }
+.number   { -fx-fill: #098658; }
+.root.dark .number   { -fx-fill: #b5cea8; }
+.function { -fx-fill: #795e26; }
+.root.dark .function { -fx-fill: #dcdcaa; }
 
 .combo-box {
     -fx-background-color: -c-surface;

@@ -56,6 +56,8 @@ public final class ApiPaths {
     public static final String ADMIN_PROBLEM_STATEMENT_PDF = "/api/admin/problems/{id}/statement.pdf";
     /** Resequences a contest's problems; codes are recomputed A, B, C... to match. */
     public static final String ADMIN_PROBLEM_REORDER = "/api/admin/contests/{id}/problems/reorder";
+    /** Read-only: statement + every stored test case, for the console's "View" action. */
+    public static final String ADMIN_PROBLEM_TESTCASES = "/api/admin/problems/{id}/testcases";
     public static final String ADMIN_PARTICIPANTS = "/api/admin/contests/{id}/participants";
     public static final String ADMIN_CONTEST_SUBMISSIONS = "/api/admin/contests/{id}/submissions";
     public static final String ADMIN_SUBMISSION_SOURCE = "/api/admin/submissions/{id}/source";
@@ -85,6 +87,8 @@ public final class ApiPaths {
     /** The clarification queue, with the asker's name attached. */
     public static final String ADMIN_CLARIFICATIONS = "/api/admin/contests/{id}/clarifications";
     public static final String ADMIN_CLARIFICATION_ANSWER = "/api/admin/clarifications/{id}/answer";
+    /** Publish (or unpublish) a public, answered clarification to the whole class. */
+    public static final String ADMIN_CLARIFICATION_APPROVE = "/api/admin/clarifications/{id}/approve";
     /** Escalating "offline for N minutes" alerts, newest first. GET to poll, DELETE one to dismiss it. */
     public static final String ADMIN_NOTIFICATIONS = "/api/admin/notifications";
     public static final String ADMIN_NOTIFICATION_BY_ID = "/api/admin/notifications/{id}";

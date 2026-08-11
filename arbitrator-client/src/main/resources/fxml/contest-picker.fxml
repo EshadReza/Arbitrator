@@ -43,7 +43,7 @@
                      focused Button fires its own action on Enter before the
                      picker's defaultButton ever gets a look. -->
                 <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button"
-                        text="🌙" focusTraversable="false"/>
+                        text="☾" focusTraversable="false"/>
             </HBox>
 
             <VBox alignment="CENTER" spacing="16" maxWidth="520" VBox.vgrow="ALWAYS">

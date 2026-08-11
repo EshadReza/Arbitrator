@@ -36,10 +36,24 @@ public class JwtService {
     }
 
     public String generate(String username, Role role) {
+        return generate(username, role, null);
+    }
+
+    /**
+     * @param sid session id (ActiveSessionRegistry's key) — null keeps the
+     *            token valid for as long as it hasn't expired, with no
+     *            single-session enforcement (used only where that doesn't
+     *            apply, e.g. tests). Real logins always pass one.
+     */
+    public String generate(String username, Role role, String sid) {
         Instant now = Instant.now();
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(username)
-                .claim("role", role.name())
+                .claim("role", role.name());
+        if (sid != null) {
+            builder.claim("sid", sid);
+        }
+        return builder
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(expiry)))
                 .signWith(key)

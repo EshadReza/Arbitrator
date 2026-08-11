@@ -2,10 +2,14 @@ package com.arbitrator.client.controller;
 
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.client.app.SceneRouter;
+import com.arbitrator.client.net.JudgeApi.ApiException;
 import com.arbitrator.common.dto.LoginResponse;
 
 import javafx.application.Platform;
 import javafx.fxml.FXML;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
@@ -48,7 +52,7 @@ public class LoginController {
                 }
             });
         }
-        themeButton.setText(state.darkMode() ? "☀" : "🌙");
+        themeButton.setText(state.darkMode() ? "☼" : "☾");
         pingAsync();
 
         // The server field is first in traversal order, so JavaFX would
@@ -91,15 +95,28 @@ public class LoginController {
         }
         loginButton.setDisable(true);
         errorLabel.setVisible(false);
+        attemptLogin(username, password, false);
+    }
 
+    /**
+     * @param force see {@link com.arbitrator.client.net.JudgeApi#login}. A 409
+     *              here (only possible when {@code force} was false) means
+     *              this account is already logged in elsewhere — item 5's
+     *              confirm-to-kick flow, not a credentials error.
+     */
+    private void attemptLogin(String username, String password, boolean force) {
         runAsync(() -> {
             try {
-                LoginResponse session = state.api().login(username, password);
+                LoginResponse session = state.api().login(username, password, force);
                 state.setSession(session);
                 // The picker chooses the contest and then routes onward; it
                 // skips itself when only one contest is joinable.
                 Platform.runLater(SceneRouter::showContestPicker);
-            } catch (Exception e) {
+            } catch (ApiException e) {
+                if (e.status() == 409) {
+                    Platform.runLater(() -> confirmKickOtherSession(username, password));
+                    return;
+                }
                 Platform.runLater(() -> {
                     // UIF-03: error below the fields, username preserved
                     showError(e.getMessage() == null
@@ -108,8 +125,30 @@ public class LoginController {
                     passwordField.clear();
                     loginButton.setDisable(false);
                 });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    showError(SceneRouter.bundle().getString("login.error.generic"));
+                    passwordField.clear();
+                    loginButton.setDisable(false);
+                });
             }
         });
+    }
+
+    private void confirmKickOtherSession(String username, String password) {
+        Alert alert = new Alert(AlertType.CONFIRMATION);
+        alert.setTitle("Already logged in");
+        alert.setHeaderText(null);
+        alert.setContentText(
+                "This account is already logged in elsewhere. Disconnect that session and continue?");
+        SceneRouter.styleDialog(alert.getDialogPane());
+        alert.showAndWait().ifPresentOrElse(button -> {
+            if (button == ButtonType.OK) {
+                attemptLogin(username, password, true);
+            } else {
+                loginButton.setDisable(false);
+            }
+        }, () -> loginButton.setDisable(false));
     }
 
     @FXML
@@ -122,7 +161,7 @@ public class LoginController {
         boolean dark = !state.darkMode();
         state.setDarkMode(dark);
         SceneRouter.applyTheme(usernameField.getScene());
-        themeButton.setText(dark ? "☀" : "🌙");
+        themeButton.setText(dark ? "☼" : "☾");
     }
     private void showError(String message) {
         errorLabel.setText(message);

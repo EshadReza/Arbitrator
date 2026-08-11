@@ -1,6 +1,6 @@
 # STATUS
 
-**Last updated:** 2026-08-01
+**Last updated:** 2026-08-11
 **Product name:** Arbitrator — rename COMPLETE: packages `com.arbitrator.*`, modules `arbitrator-*`, classes `ArbitratorApp` / `ArbitratorServerApplication`, config prefix `arbitrator.*`, MySQL schema `arbitrator`, project folder `Arbitrator/arbitrator/`.
 **Current phase:** Sprint 2 complete, checkpoint **I2 closed**. Leaderboard end-to-end (engine + client view).
 Next: announcements (S3-B5), freeze controls (S3-B4), submission history UI (S3-C4).
@@ -69,6 +69,16 @@ Roughly **Sprint 1 + half of Sprint 2** of the 4-sprint plan in `WORKFLOW_PLAN.m
 | — | **Multi-contest**: student contest picker; submissions derive their contest from the problem; standings broadcast per contest | picker auto-skips when only one contest is joinable |
 | — | **Error messages now reach clients** (`server.error.include-message`) | Spring was dropping every `ResponseStatusException` reason — clients only ever saw "Forbidden" |
 | **S3-C1** | **Client standings view** (UIF-13..16) — Standings tab, runtime problem columns, self-row highlight, freeze banner, "last updated" | compiles; **needs a visual pass on Linux/macOS — see Known issue 7** |
+| **S4-B1** | **Docker-backed sandbox** (FR-10, NFR-S03/S04) — `SandboxExecutor` now runs every compile and every test/checker run inside a throwaway container (`scripts/docker/Dockerfile`), replacing the unshare(Linux)/ulimit(dev) split entirely. No participant code ever runs as a direct child of the JVM, on any platform. Supersedes the sudoers/process-group approach originally sketched for this chunk. | 49/49 server tests green; live end-to-end across cpp17/java17/python310 (AC/WA/TLE/CE) through the real HTTP→queue→judge→verdict path, with `docker ps` + host `ps` sampled throughout judging confirming containers appear/reap correctly and zero host toolchain processes (`g++`/`javac`/`python3`/`prog`) ever run directly. Closes known issues 1, 9, 10 below. |
+| — | **Ubuntu client/UI punch list** — theme toggle icon fixed (color-emoji glyphs on Linux ignored `-fx-text-fill`; swapped for monochrome dingbats `☾`/`☼`); window now clamps to the actual screen (`Screen.getPrimary().getVisualBounds()`) instead of forcing a fixed 1280×768; F11 is real `Stage.setFullScreen()`, wired once at the Stage level so it works on every screen, not just Main. | client compiles; visual pass not done on a real Ubuntu box in this session (no GUI access here) — verify on the actual lab hardware before calling this closed |
+| — | **MAC address tracking** (Participants) — client reports its own MAC at login (`NetworkInterface`, best-effort); `users.mac_address`/`mac_changed_at` (V63); a change raises an admin `MAC_CHANGED` notification through the existing `NotificationService` poll channel, no new push infra. | live-verified via curl + admin panel: Participants table shows the MAC and a red ⚠ on recent change; notification appears in `/api/admin/notifications` |
+| — | **Single active session, confirm-to-kick** — a second login while one is active gets 409 `ALREADY_LOGGED_IN`; the caller (JavaFX `LoginController`, and the admin panel's own login gate) shows a confirm dialog and retries with `force=true`, which invalidates the first session's token on its very next request (`ActiveSessionRegistry`, a `sid` JWT claim, checked in `JwtAuthFilter`). In-memory only — correct for this single-server deployment (D2/D3), not something to carry over if that ever changes. | live-verified end to end via curl (409 → force login → old token 401s, new token works) and through the real admin panel UI in two browser tabs |
+| — | **Admin Problems "View"** — read-only statement + full test suite, alongside Edit/Delete (`GET /api/admin/problems/{id}/testcases`). | live-verified in the admin panel: rendered statement + all 8 test cases for problem A |
+| — | **Presence disconnect debounce** — a heartbeat miss or few-ms blip no longer fires a DISCONNECTED+RECONNECTED notification pair; `PresenceTracker` waits 4s and rechecks before deciding someone's really gone (was instant, zero grace period). Client watchdog matches: polls every 4s (was 3s) and waits for 2 consecutive misses before flipping the visible "offline" banner. | server compiles/tests green; not soak-tested against a real flaky LAN in this session |
+| — | **"Username" relabeled "Student ID"** in all user-visible copy (login/register screens, admin CSV/HTML export headers) — `username` unchanged as the internal field/column/URL-path name everywhere (a rename there is a much bigger contract-change, not what was asked). | |
+| — | **Real syntax highlighting in the code editor** — `EditorController.highlight()` went from one un-grouped keyword regex to a combined named-group pattern per language (comment/string/number/keyword/type/function), each with its own CSS class (`.type`/`.string`/`.comment`/`.number`/`.function`, VSCode-Dark+-inspired, alongside the existing `.keyword`). | all three language patterns validated standalone against real C++/Java/Python snippets (correct token-by-token classification); not yet eyeballed in the running JavaFX app in this session — no GUI access here |
+| — | **Enter splits an auto-closed bracket pair onto three lines** (opener / indented blank / dedented closer) instead of leaving the closer on the cursor's line — `autoIndentNewline()` now checks the chars either side of the caret before falling back to the old single-line behavior. **Tab/Shift+Tab on a selection indents/dedents every selected line** (preserving the text and the selection) instead of replacing the selection with four spaces; Shift+Tab dedent didn't exist at all before, on a selection or a bare caret. | compiles; same "not yet run live" caveat as above |
+| **—** | **Clarification approval gate** — a public clarification's answer no longer reaches the class the instant it's saved; an admin must explicitly approve it (`clarifications.approved`, V64, backfilled `true` for what was already answered+public pre-migration so nothing already-visible gets hidden). The asker always sees their own answer immediately either way. New `POST /api/admin/clarifications/{id}/approve`; admin panel gets a "Pending approval" badge + Approve/Unapprove button; JavaFX client shows "awaiting approval" on the asker's own unapproved entry. | live-verified end to end via curl + admin panel: asked public → answered → confirmed invisible to a second student account → approved → confirmed now visible; approve-before-answer correctly 409s |
 
 ## Next up — Sprint 2 remainder
 
@@ -95,10 +105,9 @@ submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoC
 
 ## Known issues / risks
 
-1. **The Linux sandbox has never actually run.** `sandbox-run.sh` is written and wired, but every verification
-   so far used the macOS fallback path (plain `ProcessBuilder`, no isolation, `peakMemoryKb = -1`).
-   **MLE, network isolation, and fork-bomb containment are unproven.** First task on a real Linux box:
-   `unshare -Urn true` must succeed, then `mvn test -pl arbitrator-server` — the two skipped tests must go green.
+1. ~~The Linux sandbox has never actually run.~~ **RESOLVED (S4-B1).** `sandbox-run.sh` and the unshare/ulimit
+   split are gone; every compile/run/checker execution goes through Docker, which is the same mechanism on
+   every platform. MLE, network isolation and fork-bomb containment are all verified — see S4-B1 in Done above.
 2. **Single live contest by design (was a bug, now enforced).** Starting a contest now ENDs any other
    ACTIVE/FROZEN one, and `requireCurrent()` prefers a live contest over a finished one. Previously two
    ACTIVE contests made "current" resolve to whichever had the higher id — orphaning the other's problems
@@ -117,19 +126,15 @@ submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoC
    kept returning true after the server process was killed on loopback, so the drop was never detected in that
    scenario. Chunk **S3-C7** must verify this properly on a real LAN (pull the cable, not `kill`) before
    NFR-R03 / FMEA-03 can be claimed. Until then, assume a genuine disconnect may still need a client restart.
-10. **Isolation is namespace-based, NOT a container — two gaps remain.**
-   The Linux path now uses `unshare -Urnpf --mount-proc`: user + network + **PID** namespaces, so every
-   process dies with the namespace and a fork bomb cannot outlive the kill. Still missing versus a real
-   container: (a) **filesystem isolation** — the program can read the host filesystem, which NFR-S03
-   forbids; fix by adding a mount namespace with `pivot_root` into the work dir, or by switching to
-   `bubblewrap` (`bwrap`), which does filesystem + PID + network unprivileged in one command;
-   (b) a **hard RSS cap** — `prlimit --as` bounds address space, not resident memory; cgroup v2
-   `memory.max` is the real limit. Docker-per-submission (the SRS's stated alternative for FR-10) would
-   cover both but adds daemon setup and ~200 ms per run.
-9. **Fork-bomb containment is implemented but NOT verified.** The relative `ulimit -u` cap is in place, but
-   testing it on macOS filled the process table and made the machine unable to fork at all, so the test was
-   abandoned rather than repeated. Verify on Linux, where `prlimit --nproc` in `sandbox-run.sh` bounds the
-   process *tree* and a bomb cannot reach the host. Until then assume a fork bomb is contained only on Linux.
+10. ~~Isolation is namespace-based, NOT a container — two gaps remain.~~ **RESOLVED (S4-B1).** Now an actual
+   container: `--read-only` root fs with only the work root bind-mounted (no host filesystem visibility), and
+   `--memory`/`--memory-swap` set equal for a real cgroup hard RSS cap (not `prlimit --as`'s address-space-only
+   bound). Deploying on Linux is no longer required for any of this to hold — Docker gives the same guarantees
+   on macOS/Windows dev machines too, which is strictly stronger than decision D2 required.
+9. ~~Fork-bomb containment is implemented but NOT verified.~~ **RESOLVED (S4-B1).** `--pids-limit` verified live
+   on this (macOS) dev machine: the fork-bomb fixture is reaped in well under a second with zero surviving
+   processes, and the same `SandboxExecutorTest.forkBombIsContained` case now runs unconditionally (previously
+   `@EnabledOnOs(OS.LINUX)`, never executed in this project until today).
 7. **The client UI has never been visually inspected.** Everything compiles and the data layer is proven,
    but no one has *looked* at the standings table, the self-row highlight, the freeze banner, or the
    verdict banner rendering. Two acceptance criteria in §4.8 are specifically visual —
@@ -154,3 +159,7 @@ submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoC
 - `@JdbcTypeCode(SqlTypes.VARCHAR)` added to all five `@Enumerated` fields — Hibernate 6 / MySQL dialect
   otherwise demands native `ENUM(...)` columns and fails schema validation.
 - `tomcat-websocket` given an explicit `${tomcat.version}` in the client pom (not in the Boot BOM).
+- **Docker must be running before the server starts judging anything** (S4-B1). `SandboxExecutor` checks this
+  loudly at startup (`docker version` + `docker image inspect arbitrator-judge:latest`) and logs an error
+  rather than crashing the app — but every submission comes back as a judge-error RE until Docker Desktop/
+  Engine is up and `scripts/docker/build-sandbox-image.sh` has been run at least once.

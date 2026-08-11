@@ -71,4 +71,13 @@ public class AdminCommunicationController {
 
     public record AnswerRequest(String answer) {
     }
+
+    /** The approval gate: publishes (or unpublishes) a public, answered clarification. */
+    @PostMapping(ApiPaths.ADMIN_CLARIFICATION_APPROVE)
+    public ClarificationDto setApproved(@PathVariable long id, @RequestBody ApprovalRequest req) {
+        return clarifications.setApproved(id, req.approved());
+    }
+
+    public record ApprovalRequest(boolean approved) {
+    }
 }

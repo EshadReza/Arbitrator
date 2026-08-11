@@ -109,7 +109,11 @@ public class AdminMonitorController {
         board.rows().forEach(r -> byUser.put(r.username(), r));
 
         Map<Long, String> userNames = new HashMap<>();
-        users.findAll().forEach(u -> userNames.put(u.getId(), u.getUsername()));
+        Map<String, User> byUsername = new HashMap<>();
+        users.findAll().forEach(u -> {
+            userNames.put(u.getId(), u.getUsername());
+            byUsername.put(u.getUsername(), u);
+        });
 
         Map<String, Integer> counts = new HashMap<>();
         Map<String, Long> latest = new HashMap<>();
@@ -130,8 +134,8 @@ public class AdminMonitorController {
         List<ParticipantDto> out = new ArrayList<>();
         for (String username : everyone) {
             LeaderboardRowDto row = byUser.get(username);
-            String display = users.findByUsername(username)
-                    .map(User::getDisplayName).orElse(username);
+            User u = byUsername.get(username);
+            String display = u == null ? username : u.getDisplayName();
             out.add(new ParticipantDto(
                     username,
                     display,
@@ -140,7 +144,9 @@ public class AdminMonitorController {
                     row == null ? 0 : row.solved(),
                     row == null ? 0 : row.penaltyMinutes(),
                     counts.getOrDefault(username, 0),
-                    latest.getOrDefault(username, -1L)));
+                    latest.getOrDefault(username, -1L),
+                    u == null ? null : u.getMacAddress(),
+                    u == null || u.getMacChangedAt() == null ? -1L : u.getMacChangedAt().toEpochMilli()));
         }
         // Connected first, then by rank; unranked entrants sink to the bottom.
         out.sort((a, b) -> {

@@ -59,7 +59,7 @@ public class FakeJudgeApi implements JudgeApi {
     private final List<ClarificationDto> fakeClarifications = new ArrayList<>();
 
     @Override
-    public LoginResponse login(String username, String password) {
+    public LoginResponse login(String username, String password, boolean force) {
         return new LoginResponse("fake-token", username,
                 username.substring(0, 1).toUpperCase() + username.substring(1), Role.STUDENT);
     }
@@ -279,15 +279,18 @@ public class FakeJudgeApi implements JudgeApi {
         ClarificationDto asked = new ClarificationDto(
                 ids.incrementAndGet(),
                 problemId == null ? null : "A", problemId == null ? null : "Two Sum",
-                question, null, System.currentTimeMillis(), -1, null, isPublic);
+                question, null, System.currentTimeMillis(), -1, null, isPublic, false);
         fakeClarifications.add(0, asked);
         // Answer it on a timer so the "answered" path is demoable without a server.
+        // Mock mode has no admin console to click Approve in, so the canned
+        // answer arrives pre-approved — otherwise the demo path would dead-end
+        // exactly where the real approval gate is meant to require a real admin.
         timer.schedule(() -> {
             fakeClarifications.remove(asked);
             fakeClarifications.add(0, new ClarificationDto(
                     asked.id(), asked.problemCode(), asked.problemTitle(), asked.question(),
                     "(mock) Yes — read the constraints again.",
-                    asked.askedAtMs(), System.currentTimeMillis(), null, asked.isPublic()));
+                    asked.askedAtMs(), System.currentTimeMillis(), null, asked.isPublic(), true));
             Runnable r = onClarifications;
             if (r != null) {
                 r.run();

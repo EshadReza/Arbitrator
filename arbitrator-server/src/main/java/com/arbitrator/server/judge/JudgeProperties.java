@@ -14,8 +14,21 @@ public class JudgeProperties {
     /** Parallel judging jobs (NFR-P04: >= 10). */
     private int threads = 10;
 
-    /** Path to sandbox-run.sh; used on Linux, bypassed elsewhere (dev fallback). */
-    private String sandboxScript = "scripts/sandbox-run.sh";
+    /**
+     * Docker CLI binary. Every compile and every test run is executed inside
+     * a container built from {@link #dockerImage} — see
+     * scripts/docker/Dockerfile and SandboxExecutor. Configurable purely so a
+     * non-PATH docker (e.g. a Docker Desktop symlink quirk) can be pointed at
+     * directly without a code change.
+     */
+    private String dockerBinary = "docker";
+
+    /**
+     * The sandbox image, built with scripts/docker/build-sandbox-image.sh.
+     * One shared image for every language in languages.yml — same design as
+     * this class itself, where the toolchain choice lives in config, not code.
+     */
+    private String dockerImage = "arbitrator-judge:latest";
 
     /** Root under which per-submission work dirs are created (NFR-S03). */
     private String workRoot = System.getProperty("java.io.tmpdir") + "/arbitrator";
@@ -75,12 +88,20 @@ public class JudgeProperties {
         this.threads = threads;
     }
 
-    public String getSandboxScript() {
-        return sandboxScript;
+    public String getDockerBinary() {
+        return dockerBinary;
     }
 
-    public void setSandboxScript(String sandboxScript) {
-        this.sandboxScript = sandboxScript;
+    public void setDockerBinary(String dockerBinary) {
+        this.dockerBinary = dockerBinary;
+    }
+
+    public String getDockerImage() {
+        return dockerImage;
+    }
+
+    public void setDockerImage(String dockerImage) {
+        this.dockerImage = dockerImage;
     }
 
     public String getWorkRoot() {

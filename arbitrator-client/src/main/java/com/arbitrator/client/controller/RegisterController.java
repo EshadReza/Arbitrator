@@ -37,7 +37,7 @@ public class RegisterController {
     private void initialize() {
         errorLabel.setVisible(false);
         if (themeButton != null) {
-            themeButton.setText(state.darkMode() ? "☀" : "🌙");
+            themeButton.setText(state.darkMode() ? "☼" : "☾");
         }
     }
 
@@ -47,7 +47,7 @@ public class RegisterController {
         state.setDarkMode(dark);
         SceneRouter.applyTheme(usernameField.getScene());
         if (themeButton != null) {
-            themeButton.setText(dark ? "☀" : "🌙");
+            themeButton.setText(dark ? "☼" : "☾");
         }
     }
 

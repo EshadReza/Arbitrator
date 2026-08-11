@@ -13,15 +13,17 @@ import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
 /**
  * Tracks who is connected to which contest, for the instructor's live view
- * (UIF-21 "connected client count") and for {@link OfflineAlertService}'s
+ * (UIF-21 "connected client count") and for the notification feed's
  * "this participant has been gone N minutes" escalation.
  *
  * Contest membership is inferred from the STOMP destination a client
@@ -33,6 +35,22 @@ public class PresenceTracker {
 
     private static final Pattern CONTEST_TOPIC =
             Pattern.compile("^/topic/contest/(\\d+)/.*$");
+
+    /**
+     * Grace period before a disconnect is treated as real (item 7). A
+     * heartbeat miss or a few-ms network blip produces a disconnect event
+     * immediately followed by a fresh reconnect; deciding "offline" from the
+     * disconnect alone fired a DISCONNECTED+RECONNECTED notification pair for
+     * every such blip. Waiting this long and rechecking means only a
+     * disconnect that's still true after 4s counts as genuine.
+     */
+    private static final long OFFLINE_GRACE_MS = 4000;
+
+    private final TaskScheduler scheduler;
+
+    public PresenceTracker(@Qualifier("heartbeatScheduler") TaskScheduler scheduler) {
+        this.scheduler = scheduler;
+    }
 
     /** sessionId -> username, so a disconnect can be attributed. */
     private final Map<String, String> sessionUser = new ConcurrentHashMap<>();
@@ -105,10 +123,19 @@ public class PresenceTracker {
         if (username == null || contestId == null) {
             return;
         }
-        // Only start the offline clock once ALL of this user's sessions in
-        // this contest are gone — a second browser tab, or a reconnect that
-        // opened a fresh session just before the old one timed out, must not
-        // mark someone offline while they still have a live connection.
+        // Don't decide "offline" from this one event — see OFFLINE_GRACE_MS.
+        // Recheck after the grace period instead of trusting the instant a
+        // disconnect happened; onSubscribe() reconnecting in the meantime
+        // means checkStillOffline() below simply finds another session and
+        // no-ops, so a blip shorter than the grace period produces zero
+        // notifications instead of one of each.
+        long cid = contestId;
+        scheduler.schedule(() -> checkStillOffline(cid, username),
+                Instant.now().plusMillis(OFFLINE_GRACE_MS));
+    }
+
+    /** Only start the offline clock if ALL of this user's sessions in this contest are STILL gone. */
+    private void checkStillOffline(long contestId, String username) {
         boolean stillHasAnother = sessionContest.entrySet().stream()
                 .anyMatch(e -> e.getValue() == contestId
                         && username.equals(sessionUser.get(e.getKey())));
@@ -147,9 +174,9 @@ public class PresenceTracker {
     }
 
     /**
-     * "contestId:username" -> since when they've had zero live sessions.
-     * Read by {@link OfflineAlertService}'s periodic sweep; a key vanishes
-     * the instant that pair reconnects.
+     * "contestId:username" -> since when they've had zero live sessions
+     * (after surviving the {@link #OFFLINE_GRACE_MS} grace period). A key
+     * vanishes the instant that pair reconnects.
      */
     public Map<String, Instant> offlineSince() {
         return Collections.unmodifiableMap(offlineSince);

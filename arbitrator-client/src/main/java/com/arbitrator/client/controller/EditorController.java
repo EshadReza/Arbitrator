@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 import org.fxmisc.richtext.CodeArea;
 import org.fxmisc.richtext.model.StyleSpans;
 import org.fxmisc.richtext.model.StyleSpansBuilder;
+import org.fxmisc.richtext.model.TwoDimensional.Bias;
 
 import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.enums.Language;
@@ -26,6 +27,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
@@ -44,22 +46,43 @@ import javafx.stage.Window;
  */
 public class EditorController {
 
-    private static final Pattern CPP_KEYWORDS = keywords(Set.of(
-            "int", "long", "double", "float", "char", "bool", "void", "auto",
-            "if", "else", "for", "while", "do", "switch", "case", "break",
-            "continue", "return", "struct", "class", "public", "private",
-            "const", "static", "using", "namespace", "include", "true", "false"));
+    // --- syntax highlighting: one combined named-group pattern per language,
+    // in place of the single un-grouped keyword regex this replaced. Group
+    // order in the alternation is significant — first match wins at a given
+    // position, so KEYWORD/TYPE are tried before the catch-all FUNCTION so
+    // "if(" or "int(" don't get misclassified as a function call.
+    private static final String COMMENT_LINE_OR_BLOCK = "//[^\\n]*|/\\*[\\s\\S]*?\\*/";
+    private static final String COMMENT_HASH = "#[^\\n]*";
+    /** Double- or single-quoted, with backslash escapes — covers strings and, for cpp/java, char literals too. */
+    private static final String STRING_LITERAL =
+            "\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'";
+    private static final String NUMBER_LITERAL = "\\b\\d+(?:\\.\\d+)?[fFlLuU]*\\b";
+    /** An identifier immediately followed by '(' — a function/method call or declaration. */
+    private static final String FUNCTION_CALL = "\\b[A-Za-z_]\\w*(?=\\()";
 
-    private static final Pattern JAVA_KEYWORDS = keywords(Set.of(
-            "int", "long", "double", "float", "char", "boolean", "void",
-            "if", "else", "for", "while", "do", "switch", "case", "break",
-            "continue", "return", "class", "public", "private", "protected",
-            "static", "final", "new", "import", "package", "true", "false", "null"));
+    private static final Pattern CPP_PATTERN = highlightPattern(COMMENT_LINE_OR_BLOCK,
+            Set.of("if", "else", "for", "while", "do", "switch", "case", "break",
+                    "continue", "return", "struct", "class", "public", "private",
+                    "const", "static", "using", "namespace", "include", "true", "false"),
+            Set.of("int", "long", "double", "float", "char", "bool", "void", "auto",
+                    "string", "size_t", "unsigned", "short"));
 
-    private static final Pattern PY_KEYWORDS = keywords(Set.of(
-            "def", "return", "if", "elif", "else", "for", "while", "break",
-            "continue", "import", "from", "as", "class", "print", "input",
-            "in", "not", "and", "or", "True", "False", "None", "lambda", "range"));
+    private static final Pattern JAVA_PATTERN = highlightPattern(COMMENT_LINE_OR_BLOCK,
+            Set.of("if", "else", "for", "while", "do", "switch", "case", "break",
+                    "continue", "return", "class", "public", "private", "protected",
+                    "static", "final", "new", "import", "package", "true", "false", "null"),
+            Set.of("int", "long", "double", "float", "char", "boolean", "void",
+                    "String", "Integer", "Long", "Double", "Boolean", "Object",
+                    "List", "Map", "Set"));
+
+    private static final Pattern PY_PATTERN = highlightPattern(COMMENT_HASH,
+            Set.of("def", "return", "if", "elif", "else", "for", "while", "break",
+                    "continue", "import", "from", "as", "class", "in", "not", "and",
+                    "or", "True", "False", "None", "lambda"),
+            // print/input/range etc. are left unclassified here on purpose —
+            // FUNCTION_CALL already colors them like any other call, which is
+            // how VSCode treats Python builtins too (not as keywords).
+            Set.of("int", "float", "str", "bool", "list", "dict", "tuple", "set"));
     private static final Map<Language, String> TEMPLATES = Map.of(
             Language.CPP17, """
                     #include <iostream>
@@ -173,7 +196,7 @@ public class EditorController {
     private void installEditingBehaviour() {
         codeArea.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             if (e.getCode() == KeyCode.TAB && !e.isControlDown()) {
-                codeArea.replaceSelection(INDENT);
+                handleTab(e.isShiftDown());
                 e.consume();
             } else if (e.getCode() == KeyCode.ENTER) {
                 autoIndentNewline();
@@ -213,22 +236,88 @@ public class EditorController {
         applyFontSize();
     }
 
-    /** Enter keeps the current indentation, and adds one level after '{'. */
+    /**
+     * Enter keeps the current indentation, and adds one level after '{'.
+     *
+     * If the caret sits directly between a freshly auto-closed pair (typing
+     * '{' inserts "{}" with the caret in between — see the KEY_TYPED filter
+     * below), a plain single-line insert would leave the closing bracket on
+     * the same line as the new cursor position. Splitting into three lines
+     * instead — opener, an indented blank line, the closer dedented back to
+     * the opener's level — is what every mainstream IDE does here.
+     */
     private void autoIndentNewline() {
         int caret = codeArea.getCaretPosition();
         int paragraph = codeArea.getCurrentParagraph();
         String line = codeArea.getParagraph(paragraph).getText();
+        String text = codeArea.getText();
 
         int spaces = 0;
         while (spaces < line.length() && line.charAt(spaces) == ' ') {
             spaces++;
         }
         String indent = " ".repeat(spaces);
+
+        char before = caret > 0 ? text.charAt(caret - 1) : 0;
+        char after = caret < text.length() ? text.charAt(caret) : 0;
+        String closer = PAIRS.get(String.valueOf(before));
+        if (closer != null && !closer.isEmpty() && closer.charAt(0) == after
+                && "([{".indexOf(before) >= 0) {
+            String inner = indent + INDENT;
+            codeArea.insertText(caret, "\n" + inner + "\n" + indent);
+            codeArea.moveTo(caret + 1 + inner.length());
+            return;
+        }
+
         String trimmed = line.strip();
         if (trimmed.endsWith("{") || trimmed.endsWith(":")) {
             indent += INDENT;
         }
         codeArea.insertText(caret, "\n" + indent);
+    }
+
+    /**
+     * Tab with a selection indents every selected line (Shift+Tab dedents);
+     * without one it's the plain 4-space insert as before (Shift+Tab dedents
+     * the current line instead). Previously Tab's whole body was
+     * {@code replaceSelection(INDENT)}, which — with text selected — replaced
+     * the entire selection with four spaces instead of shifting it, and
+     * Shift+Tab didn't dedent at all.
+     */
+    private void handleTab(boolean shiftDown) {
+        if (codeArea.getSelectedText().isEmpty()) {
+            if (shiftDown) {
+                dedentLine(codeArea.getCurrentParagraph());
+            } else {
+                codeArea.replaceSelection(INDENT);
+            }
+            return;
+        }
+        IndexRange sel = codeArea.getSelection();
+        int startPar = codeArea.offsetToPosition(sel.getStart(), Bias.Forward).getMajor();
+        int endPar = codeArea.offsetToPosition(sel.getEnd(), Bias.Backward).getMajor();
+        for (int p = startPar; p <= endPar; p++) {
+            if (shiftDown) {
+                dedentLine(p);
+            } else {
+                codeArea.insertText(p, 0, INDENT);
+            }
+        }
+        // Re-select the whole block at its new width — Tab/Shift+Tab on a
+        // multi-line selection is meant to be repeatable without reselecting.
+        codeArea.selectRange(startPar, 0, endPar, codeArea.getParagraphLength(endPar));
+    }
+
+    /** Removes up to one INDENT's worth of leading spaces from paragraph {@code p}, if any. */
+    private void dedentLine(int p) {
+        String text = codeArea.getParagraph(p).getText();
+        int remove = 0;
+        while (remove < INDENT.length() && remove < text.length() && text.charAt(remove) == ' ') {
+            remove++;
+        }
+        if (remove > 0) {
+            codeArea.deleteText(p, 0, p, remove);
+        }
     }
 
     private void zoom(int steps) {
@@ -487,23 +576,53 @@ public class EditorController {
     private StyleSpans<java.util.Collection<String>> highlight(String text) {
         Pattern pattern = switch (languageBox.getValue() == null
                 ? Language.CPP17 : languageBox.getValue()) {
-            case CPP17 -> CPP_KEYWORDS;
-            case JAVA17 -> JAVA_KEYWORDS;
-            case PYTHON310 -> PY_KEYWORDS;
+            case CPP17 -> CPP_PATTERN;
+            case JAVA17 -> JAVA_PATTERN;
+            case PYTHON310 -> PY_PATTERN;
         };
         StyleSpansBuilder<java.util.Collection<String>> spans = new StyleSpansBuilder<>();
         Matcher m = pattern.matcher(text);
         int last = 0;
         while (m.find()) {
             spans.add(Set.of(), m.start() - last);
-            spans.add(Set.of("keyword"), m.end() - m.start());
+            spans.add(Set.of(styleClassFor(m)), m.end() - m.start());
             last = m.end();
         }
         spans.add(Set.of(), text.length() - last);
         return spans.create();
     }
 
-    private static Pattern keywords(Set<String> words) {
-        return Pattern.compile("\\b(" + String.join("|", words) + ")\\b");
+    /** Which named group matched determines the CSS class — see the field-block comment above. */
+    private static String styleClassFor(Matcher m) {
+        if (m.group("COMMENT") != null) {
+            return "comment";
+        }
+        if (m.group("STRING") != null) {
+            return "string";
+        }
+        if (m.group("NUMBER") != null) {
+            return "number";
+        }
+        if (m.group("KEYWORD") != null) {
+            return "keyword";
+        }
+        if (m.group("TYPE") != null) {
+            return "type";
+        }
+        return "function";
+    }
+
+    private static Pattern highlightPattern(String commentRegex, Set<String> keywords, Set<String> types) {
+        return Pattern.compile(
+                "(?<COMMENT>" + commentRegex + ")"
+                        + "|(?<STRING>" + STRING_LITERAL + ")"
+                        + "|(?<NUMBER>" + NUMBER_LITERAL + ")"
+                        + "|(?<KEYWORD>" + wordAlternation(keywords) + ")"
+                        + "|(?<TYPE>" + wordAlternation(types) + ")"
+                        + "|(?<FUNCTION>" + FUNCTION_CALL + ")");
+    }
+
+    private static String wordAlternation(Set<String> words) {
+        return "\\b(?:" + String.join("|", words) + ")\\b";
     }
 }

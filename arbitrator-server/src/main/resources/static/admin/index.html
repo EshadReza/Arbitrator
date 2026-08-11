@@ -399,6 +399,12 @@ pre.code{background:var(--surface2);border:1px solid var(--border);border-radius
        animation:modalCardIn .22s cubic-bezier(.16,1,.3,1)}
 /* Code and statements need room; a 560px column makes both unreadable. */
 .modal>.card.wide{width:min(1080px,100%)}
+/* The statement fills the whole popup by default; test cases are collapsed
+   behind a toggle and only reclaim space from it once actually opened. */
+#problemViewModal.modal>.card{height:88vh;display:flex;flex-direction:column}
+#problemViewModal .body{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+#problemViewModal #pvStatement{flex:1;min-height:0}
+#problemViewModal #pvTestCases{flex:none;max-height:38vh;overflow:auto;margin-top:8px}
 .opt{display:flex;align-items:flex-start;gap:9px;padding:6px 0;cursor:pointer}
 .opt input{margin-top:4px;flex:none}
 .opt .d{display:block;color:var(--muted);font-size:12px;font-weight:400}
@@ -804,7 +810,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
             <table id="partTable"><thead><tr><th style="width:44px"></th><th>Participant</th>
               <th style="width:64px">Rank</th><th style="width:70px">Solved</th>
               <th style="width:78px">Penalty</th><th style="width:100px">Submissions</th>
-              <th style="width:92px">Last</th></tr></thead><tbody></tbody></table>
+              <th style="width:92px">Last</th><th style="width:150px">MAC address</th></tr></thead><tbody></tbody></table>
           </div>
         </div>
       </div>
@@ -909,8 +915,8 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
     <section id="sec-clarify" class="hide">
       <h1>Clarifications</h1>
       <div class="lede">
-        Questions from participants. Answers are public — everyone sees them.
-        <b>You</b> see who asked; participants do not.
+        Questions from participants. A public answer reaches everyone only once you approve it —
+        until then only the asker sees it. <b>You</b> see who asked; participants do not.
       </div>
       <div class="dash-stack">
         <div class="dash-card">
@@ -1097,6 +1103,24 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
         <button class="btn primary" id="peSave" onclick="saveProblem()">Save changes</button>
         <span class="hint" id="peStatus"></span>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hide" id="problemViewModal">
+  <div class="card wide">
+    <header><span id="problemViewTitle">View problem</span><span class="spacer"></span>
+      <button class="btn sm" onclick="closeModal('problemViewModal')">Close</button></header>
+    <div class="body">
+      <div class="hint" style="margin-bottom:5px;flex:none">Statement, rendered exactly as the client shows it</div>
+      <iframe id="pvStatement" style="width:100%;border:1px solid var(--border);
+              border-radius:8px;background:#fff"></iframe>
+      <div class="row" id="pvTestToggle" onclick="toggleProblemViewTests()"
+           style="cursor:pointer;user-select:none;flex:none;margin:12px 0 0;gap:6px">
+        <span id="pvTestToggleIcon">▸</span>
+        <span class="hint">Test cases (<span id="pvTestCount">0</span>) — click to show, read-only</span>
+      </div>
+      <div id="pvTestCases" class="hide"></div>
     </div>
   </div>
 </div>
@@ -1304,12 +1328,24 @@ function go(sec){
   if(sec==='notifications'){ refreshNotifications(); renderActionLogTab(); }
 }
 
-async function login(){
+async function login(force){
   const res=await fetch('/api/auth/login',{method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:$('u').value,password:$('p').value})});
+    body:JSON.stringify({username:$('u').value,password:$('p').value,force:!!force})});
   const body=await res.json().catch(()=>({}));
-  if(!res.ok){ $('gateMsg').textContent=body.message||'Sign in failed'; return; }
+  if(!res.ok){
+    // 409 = correct credentials, but this account is already signed in
+    // elsewhere (item 5) — not a failure, just needs confirming, same as the
+    // JavaFX client's login screen.
+    if(res.status===409 && body.message==='ALREADY_LOGGED_IN' && !force){
+      if(confirm('This account is already logged in elsewhere. Disconnect that session and continue?')){
+        return login(true);
+      }
+      $('gateMsg').textContent='';
+      return;
+    }
+    $('gateMsg').textContent=body.message||'Sign in failed'; return;
+  }
   if(body.role!=='ADMIN'){ $('gateMsg').textContent='That account is not an ADMIN.'; return; }
   token=body.token; $('whoami').textContent='Signed in as '+body.displayName;
   $('gate').classList.add('hide'); $('app').classList.remove('hide');
@@ -1340,15 +1376,20 @@ let lastNotifId=-1, notifFirstPoll=true;
     regardless of how many others are showing. */
 let liveNotifs=[];
 
-function notifIcon(n){ return n.type==='RECONNECTED' ? '🟢' : '🔴'; }
+function notifIcon(n){
+  if(n.type==='RECONNECTED') return '🟢';
+  if(n.type==='MAC_CHANGED') return '💻';
+  return '🔴';
+}
 function notifWhat(n){
   if(n.type==='RECONNECTED'){
     return n.minutesOffline<1 ? 'reconnected — offline briefly' : `reconnected after ${n.minutesOffline} min`;
   }
+  if(n.type==='MAC_CHANGED') return 'signed in from a different device (MAC changed) — see Participants';
   return 'disconnected';
 }
 function notifCardHtml(n){
-  return `<div class="alert-card ${n.type==='DISCONNECTED'?'severe':'good'}">
+  return `<div class="alert-card ${n.type==='RECONNECTED'?'good':'severe'}">
     <div class="body">
       <div class="who">${notifIcon(n)} ${esc(n.displayName)}</div>
       <div class="what">${notifWhat(n)} &middot; ${esc(n.contestTitle)}</div>
@@ -1726,6 +1767,7 @@ async function listProblems(){
         <td class="drag-handle" title="Drag to reorder">&#8942;&#8942;</td>
         <td><span class="chip">${esc(p.code)}</span></td><td>${esc(p.title)}</td>
         <td style="white-space:nowrap">
+          <button class="btn sm" onclick="viewProblem(${p.id})">View</button>
           <button class="btn sm" onclick="editProblem(${p.id})">Edit</button>
           <button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
       </tr>`).join('')
@@ -1784,10 +1826,42 @@ function renderProblemRows(){
       <td class="drag-handle" title="Drag to reorder">&#8942;&#8942;</td>
       <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
       <td style="white-space:nowrap">
+        <button class="btn sm" onclick="viewProblem(${p.id})">View</button>
         <button class="btn sm" onclick="editProblem(${p.id})">Edit</button>
         <button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
     </tr>`).join('');
   wireProblemDragAndDrop();
+}
+
+/** Read-only look at a problem's statement + full test suite — previously the
+    console could only edit or delete, with no way to just check what's there. */
+async function viewProblem(id){
+  const {status,body}=await api('GET',`/api/admin/problems/${id}/testcases`,null,true);
+  if(status>=300||!body) return;
+  $('problemViewTitle').textContent=`View problem ${body.code} — ${body.title}`;
+  $('pvStatement').srcdoc=body.statementHtml||'<i>No HTML statement (PDF-backed problem).</i>';
+  $('pvTestCount').textContent=body.testCases.length;
+  $('pvTestCases').innerHTML = body.testCases.length ? body.testCases.map(tc=>`
+    <div style="margin-bottom:12px">
+      <div class="hint" style="margin-bottom:4px">Test ${tc.idx}</div>
+      <div class="row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1"><div class="hint" style="margin-bottom:3px">Input</div>
+          <pre class="code" style="margin:0;max-height:160px;overflow:auto">${esc(tc.inputData||'')}</pre></div>
+        <div style="flex:1"><div class="hint" style="margin-bottom:3px">Expected output</div>
+          <pre class="code" style="margin:0;max-height:160px;overflow:auto">${esc(tc.expectedOutput||'')}</pre></div>
+      </div>
+    </div>`).join('') : '<div class="empty">No test cases.</div>';
+  // Collapsed by default every time — the statement gets the full popup
+  // height until the instructor actually asks for the test cases.
+  $('pvTestCases').classList.add('hide');
+  $('pvTestToggleIcon').textContent='▸';
+  openModal('problemViewModal');
+}
+
+/** Test cases reclaim the space they take from the statement only while open. */
+function toggleProblemViewTests(){
+  const hidden=$('pvTestCases').classList.toggle('hide');
+  $('pvTestToggleIcon').textContent = hidden ? '▸' : '▾';
 }
 
 /* Editing a statement used to mean deleting the problem and re-uploading the
@@ -1904,7 +1978,18 @@ async function loadMonitor(){
       <td>${x.rank||'—'}</td><td>${x.solved}</td><td>${x.penaltyMinutes}</td>
       <td>${x.submissionCount}</td>
       <td>${x.lastSubmissionMs>0?new Date(x.lastSubmissionMs).toLocaleTimeString():'—'}</td>
-    </tr>`).join('') : '<tr><td colspan="7" class="empty">Nobody has joined yet.</td></tr>';
+      <td>${macCell(x)}</td>
+    </tr>`).join('') : '<tr><td colspan="8" class="empty">Nobody has joined yet.</td></tr>';
+}
+
+/** Flags a recent change (last 10 min) so a device swap mid-contest stands out. */
+function macCell(x){
+  if(!x.macAddress) return '<span class="hint">—</span>';
+  const recentlyChanged = x.macChangedAtMs>0 && (Date.now()-x.macChangedAtMs) < 10*60*1000;
+  const mac = `<span class="mono">${esc(x.macAddress)}</span>`;
+  return recentlyChanged
+    ? `${mac} <span title="Changed ${new Date(x.macChangedAtMs).toLocaleTimeString()}" style="color:var(--red)">⚠</span>`
+    : mac;
 }
 
 /* Three levels: participant → problem → that problem's attempts.
@@ -2214,7 +2299,7 @@ async function loadClarifications(){
 
   $('clarifyList').innerHTML = body.length ? body.map(c=>{
     const scope=c.problemCode ? `${esc(c.problemCode)}. ${esc(c.problemTitle||'')}` : 'General';
-    const answerReach=c.isPublic ? 'everyone will see it' : 'private \u2014 only the asker will see it';
+    const answerReach=c.isPublic ? 'you approve it before everyone sees it' : 'private \u2014 only the asker will see it';
     return `
     <div class="list-row" style="border-left:3px solid ${c.isPublic?'var(--border)':'var(--purple)'}">
       <div class="ic">${c.isPublic?'\u2753':'\ud83d\udd12'}</div>
@@ -2222,6 +2307,7 @@ async function loadClarifications(){
       <div class="row" style="margin-bottom:6px;gap:10px">
         <b>${scope}</b>
         ${c.isPublic ? '' : '<span class="badge" style="background:var(--purple)">PRIVATE</span>'}
+        ${c.isPublic && c.answer && !c.approved ? '<span class="badge" style="background:var(--amber)">PENDING APPROVAL</span>' : ''}
         <span class="hint">asked by <b>${esc(c.askedBy||'unknown')}</b></span>
         <span class="hint">${esc(new Date(c.askedAtMs).toLocaleString())}</span>
         <span class="spacer"></span>
@@ -2235,6 +2321,11 @@ async function loadClarifications(){
            </div>
            <div class="row" style="margin-top:8px">
              <button class="btn sm" onclick="answerClarification(${c.id},true)">Revise answer</button>
+             ${c.isPublic
+               ? (c.approved
+                   ? `<button class="btn sm" onclick="setClarificationApproved(${c.id},false)">Unapprove</button>`
+                   : `<button class="btn primary sm" onclick="setClarificationApproved(${c.id},true)">Approve \u2014 show to everyone</button>`)
+               : ''}
            </div>`
         : `<div class="row">
              <input type="text" id="ans-${c.id}" placeholder="Your answer \u2014 ${answerReach}"
@@ -2275,7 +2366,23 @@ async function answerClarification(id, revise){
     log(res.status, err.message||'Could not answer');
     return;
   }
-  log(200,'Answered \u2014 the board updated for everyone');
+  const body=await res.json().catch(()=>({}));
+  log(200, body.isPublic ? 'Answered \u2014 click Approve to show it to everyone' : 'Answered \u2014 the asker can see it now');
+  await loadClarifications();
+}
+
+/** The approval gate (item: "approval system") \u2014 publishes or unpublishes a public answer. */
+async function setClarificationApproved(id, approved){
+  const res=await fetch(`/api/admin/clarifications/${id}/approve`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},
+    body:JSON.stringify({approved})});
+  if(!res.ok){
+    const err=await res.json().catch(()=>({}));
+    log(res.status, err.message||'Could not update approval');
+    return;
+  }
+  log(200, approved ? 'Approved \u2014 now visible to everyone' : 'Unapproved \u2014 hidden from the class again');
   await loadClarifications();
 }
 
@@ -2352,7 +2459,7 @@ function cellText(row,code){
    "Code A", "Code B" \u2026 column per problem, so a participant's whole contest
    stays on the line with their name. */
 function buildCsv(rows,codes,problems,o){
-  const head=['Username','Display Name'];
+  const head=['Student ID','Display Name'];
   if(o.summary)  head.push('Solved','Penalty (min)','Marks');
   if(o.problems) problems.forEach(c=>head.push('Problem '+c));
   if(o.best)     head.push('Best Verdict','Best Time (ms)','Best Language','Best Submission Id');
@@ -2407,7 +2514,7 @@ function buildReport(rows,codes,problems,o){
   <div class="meta">Exported ${esc(new Date().toLocaleString())} \u00B7 ${rows.length} participant(s)</div>`;
 
   if(o.summary||o.problems||o.best){
-    h+='<h2>Standings</h2><table><thead><tr><th>#</th><th>Username</th><th>Name</th>';
+    h+='<h2>Standings</h2><table><thead><tr><th>#</th><th>Student ID</th><th>Name</th>';
     if(o.summary)  h+='<th>Solved</th><th>Penalty</th><th>Marks</th>';
     if(o.problems) problems.forEach(c=>h+=`<th>${esc(c)}</th>`);
     if(o.best)     h+='<th>Best verdict</th><th>Best time</th><th>Language</th>';
@@ -2454,7 +2561,7 @@ function download(filename,text,mime){
 
 /* Backdrop click and Escape dismiss whichever dialog is open. There are four
    now, and one that traps you until you find its Close button feels broken. */
-const MODALS=['exportModal','sourceModal','bestSourceModal','problemModal'];
+const MODALS=['exportModal','sourceModal','bestSourceModal','problemModal','problemViewModal'];
 MODALS.forEach(id=>{
   const el=$(id);
   if(el) el.addEventListener('click',e=>{ if(e.target===el) closeModal(id); });

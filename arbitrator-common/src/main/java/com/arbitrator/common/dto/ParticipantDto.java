@@ -12,6 +12,8 @@ public record ParticipantDto(
         int solved,
         long penaltyMinutes,
         int submissionCount,
-        long lastSubmissionMs    // -1 when they have never submitted
+        long lastSubmissionMs,   // -1 when they have never submitted
+        String macAddress,       // null if never reported
+        long macChangedAtMs      // -1 if it has never changed since first seen
 ) {
 }

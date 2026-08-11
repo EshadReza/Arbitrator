@@ -3,3 +3,10 @@ spring:
   datasource:
     username: arbitrator
     password: Changeme123!
+
+arbitrator:
+  judge:
+    # Eclipse's "Run As -> Java Application" doesn't inherit this shell's
+    # PATH, so a bare "docker" fails with "No such file or directory" even
+    # though `which docker` works fine in a terminal — see `which docker`.
+    docker-binary: /usr/local/bin/docker

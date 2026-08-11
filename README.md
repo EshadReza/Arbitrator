@@ -1,7 +1,7 @@
 # Arbitrator
 
 Offline, LAN-only Online Judge for university programming labs.
-Spring Boot 3.2 judge server + JavaFX 21 student client + MySQL 8. Linux only.
+Spring Boot 3.2 judge server + JavaFX 21 student client + MySQL 8, judging inside Docker. Linux only for real deployment.
 
 **Team:** Eshad (Platform & Data) · Mahir (Judge & Real-time) · Zahin (JavaFX Client)
 
@@ -12,14 +12,21 @@ Spring Boot 3.2 judge server + JavaFX 21 student client + MySQL 8. Linux only.
 ## Prerequisites (Ubuntu 22.04)
 
 ```bash
-sudo apt install openjdk-17-jdk maven mysql-server g++ python3.10 util-linux time
+sudo apt install openjdk-17-jdk maven mysql-server
 ```
 
-Verify the sandbox works on your machine (risk #2 in the plan):
+No compiler toolchain (`g++`, `python3.10`, etc.) is needed on the host itself —
+every compile and every submission run happens inside a Docker container (see
+`scripts/docker/`), never as a direct child process of the server. Install
+Docker instead:
 
 ```bash
-unshare -Urn true && echo "user namespaces OK"
+# Ubuntu 22.04 — Docker Engine (see https://docs.docker.com/engine/install/ubuntu/)
+# ... then add the account running arbitrator-server to the docker group:
+sudo usermod -aG docker $USER    # log out/in for this to take effect
 ```
+
+On a macOS/Windows dev machine, install Docker Desktop and make sure it's running instead.
 
 ## First-time setup (each developer, ~10 minutes)
 
@@ -32,8 +39,21 @@ cp arbitrator-server/src/main/resources/application-local.yml.example \
    arbitrator-server/src/main/resources/application-local.yml
 # edit the password to match what you set in init-db.sql
 
-# 3. build everything
+# 3. build the sandbox image (once per machine; rebuild after scripts/docker/Dockerfile changes)
+bash scripts/docker/build-sandbox-image.sh
+
+# 4. build everything
 mvn clean install
+```
+
+If you run the server from an IDE launcher (Eclipse "Run As → Java
+Application") rather than a terminal, the launched process may not inherit
+your shell's `PATH` and can fail to find `docker`. If so, add to
+`application-local.yml`:
+```yaml
+arbitrator:
+  judge:
+    docker-binary: /usr/local/bin/docker   # wherever `which docker` points
 ```
 
 ## Run
@@ -56,7 +76,8 @@ lock + ADMIN JWT, decision D3).
 ## Verify the vertical slice
 
 1. `mvn test -pl arbitrator-server` — VerdictEvaluator tests pass anywhere;
-   the sandbox fixture suite (6 verdicts + fork bomb) passes on Linux.
+   the sandbox fixture suite (6 verdicts + fork bomb) passes wherever Docker
+   runs, not just Linux, since Docker is the only execution path now.
 2. Start server, start client, log in as `alice`.
 3. Open problem A, paste the reference solution, submit:
 

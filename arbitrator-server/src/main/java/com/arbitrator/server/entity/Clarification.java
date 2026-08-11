@@ -47,12 +47,28 @@ public class Clarification {
     @Column(name = "is_public", nullable = false)
     private boolean isPublic = true;
 
+    /**
+     * An admin's explicit sign-off that a public question+answer may be shown
+     * to everyone, not just the asker — see V64. Irrelevant for a private
+     * clarification (already only visible to the asker and admins regardless).
+     */
+    @Column(nullable = false)
+    private boolean approved = false;
+
     public boolean isPublic() {
         return isPublic;
     }
 
     public void setPublic(boolean isPublic) {
         this.isPublic = isPublic;
+    }
+
+    public boolean isApproved() {
+        return approved;
+    }
+
+    public void setApproved(boolean approved) {
+        this.approved = approved;
     }
 
     public Long getId() {

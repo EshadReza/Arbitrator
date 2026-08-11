@@ -81,7 +81,7 @@
                         <HBox alignment="CENTER_RIGHT" spacing="6" styleClass="topbar-actions">
                             <Button text="%main.refresh" onAction="#onRefresh"
                                     styleClass="refresh-button"/>
-                            <Button fx:id="themeButton" text="🌙" onAction="#onToggleTheme"
+                            <Button fx:id="themeButton" text="☾" onAction="#onToggleTheme"
                                     styleClass="icon-button"/>
                             <Button text="%main.switchContest" onAction="#onSwitchContest" styleClass="btn-outline"/>
                             <Button text="%main.signOut" onAction="#onSignOut" styleClass="btn-ghost"/>

@@ -25,7 +25,7 @@ Everything project-related lives in **this folder** — there are no docs one le
 | Dev | Track | Owns |
 |---|---|---|
 | **Eshad** | Platform & Data | `server/{config,security,entity,repo}`, contest/problem/user services + controllers, Flyway `V1`–`V49`, admin panel |
-| **Mahir** | Judge & Real-time | `server/{judge,realtime,leaderboard}`, submission + announcement services/controllers, `languages.yml`, `scripts/sandbox-run.sh`, Flyway `V50`–`V79` |
+| **Mahir** | Judge & Real-time | `server/{judge,realtime,leaderboard}`, submission + announcement services/controllers, `languages.yml`, `scripts/docker/**`, Flyway `V50`–`V79` |
 | **Zahin** | JavaFX Client | all of `arbitrator-client/**` including `arbitrator.css` |
 
 **Rule 1 is not advisory.** Before editing, check who owns the file. Cross-track changes go through a `contract-change` issue, not a quiet edit.
@@ -35,7 +35,7 @@ Everything project-related lives in **this folder** — there are no docs one le
 | # | Decision |
 |---|---|
 | D1 | **MySQL 8** only. Not PostgreSQL (the SRS says Postgres in five places; that's a doc bug to fix, not a design choice). |
-| D2 | **Linux only** for real deployment. macOS/Windows work for dev via a fallback path, but MLE, network isolation, and fork-bomb containment only hold on Linux. |
+| D2 | **Linux only** for real deployment (lab machines are Linux). No longer load-bearing for sandbox safety, though: since S4-B1, `SandboxExecutor` runs every compile/run/checker inside Docker, and MLE/network isolation/fork-bomb containment all hold identically on macOS/Windows dev machines too — see `scripts/docker/`. |
 | D3 | Admin surface = **loopback filter AND ADMIN JWT**, both layers. |
 | D4 | **HTTPS deferred** to post-v1.0. Plain HTTP/WS over the closed LAN. `server.scheme` stays configurable so enabling TLS later is one line. |
 
@@ -51,6 +51,7 @@ When starting work, say which chunk. When finishing, update `STATUS.md`.
 ## Build and run
 
 ```bash
+bash scripts/docker/build-sandbox-image.sh            # once per machine — Docker must be running
 mvn clean install                                    # all three modules
 mvn -pl arbitrator-server spring-boot:run              # server (port 8080)
 mvn -pl arbitrator-client exec:java -Dexec.mainClass=com.arbitrator.client.app.Launcher
@@ -89,18 +90,30 @@ class itself extends `Application`. Net effect: no `--module-path`, no machine-s
   `javap -p -c arbitrator-server/target/classes/<Class>.class | grep "Unresolved compilation"`.
   **Always run `mvn clean install` after an Alt+F5**, and prefer Maven over Eclipse launchers when a change
   spans modules.
-- **Untrusted-process containment has three layers; do not remove any of them.**
-  (1) `ulimit` in a shell wrapper around BOTH compile and run — sandboxing only the run step let
-  `#include </dev/urandom>` drive the *preprocessor* to eat all host RAM. (2) A **relative** `ulimit -u`
-  (current user process count + 32) on the run phase only: `RLIMIT_NPROC` is **per-UID** on macOS/BSD, so an
-  absolute value like 64 breaks even the compiler (`posix_spawn failed: Resource temporarily unavailable`),
-  and no cap at all lets a fork bomb fill the process table until the whole machine stops forking.
-  (3) A `pkill -f <workDir>` sweep in `cleanup()` and at startup — `ProcessHandle.descendants()` is only a
-  *snapshot*, so a rapidly forking program outruns it and children survive as orphaned `prog` processes
-  that no longer belong to the JVM and are never reaped.
-  **Never test a fork bomb on a dev machine** — use a bounded fork loop whose children `_exit(0)`, or the
-  Linux box where `prlimit --nproc` bounds the process tree properly.
-- **`peakMemoryKb` is `-1` on macOS.** Expected — real peak RSS only comes from the Linux sandbox script.
+- **Docker Desktop/Engine must be running before the server (or `mvn test` on the judge package) will judge
+  anything.** `SandboxExecutor` compiles and runs *everything* — contestant code, checkers, the compile step
+  too — inside a container from `scripts/docker/Dockerfile`; there is no host-process fallback left, on any
+  OS. First-time setup: `bash scripts/docker/build-sandbox-image.sh` once per machine. If Docker isn't up,
+  `SandboxExecutorTest`/`JudgeWorkerTest` skip themselves (same `assumeTrue` pattern as the old `gppAvailable`
+  check) and the live server logs a loud error instead of silently running code unsandboxed.
+- **`--memory-swap` must always equal `--memory` in every `docker run` call.** Leaving `--memory-swap` unset
+  lets the container use up to 2x `--memory` in swap, silently doubling the effective RSS cap; setting them
+  equal is what makes it a real hard limit.
+- **Every container mounts the whole work root read-only (`/base`) *and* its own call's work dir read-write
+  (`/sandbox`) — don't "simplify" to a single mount.** `CheckerRunner` invokes a checker binary that's cached
+  outside the submission's own work dir (`workRoot/checkers/problem-N/`), while reading input/expected/actual
+  files that live in the *parent* of the checker's own call-specific dir (`__checker`). A single mount scoped
+  to just the immediate call's dir breaks checker judging; see `SandboxExecutor.translatePath`.
+- **Exit code 137 from a container is NOT proof of a timeout — it can be an OOM kill just as easily**, and
+  they need different verdicts (TLE vs MLE). Only exit 124 (GNU `timeout`'s own deadline firing) is trusted as
+  the timeout signal; verified empirically that a memory-hog fixture hits 137 in milliseconds, nowhere near
+  its wall-clock deadline. See the javadoc on `SandboxExecutor.parseContainerResult`.
+- **`peakMemoryKb` is `-1` when a run times out** (the in-container `/usr/bin/time` never gets to write its
+  report if it's killed mid-wait) — expected, not a bug; `JudgeWorker`'s MLE check already guards on `> 0`.
+  It's a real number on every other platform now, including macOS dev, via Docker — no longer Linux-only.
+- **Never test a fork bomb by running it directly on a dev machine's shell** — always go through
+  `SandboxExecutor`/the sandbox image, where `--pids-limit` contains it. A bare fork loop outside Docker can
+  still fill the host's real process table.
 - **Raw SQL touching times must use `UTC_TIMESTAMP()`, never `NOW()`.** `contests.start_time` is a zoneless
   `DATETIME` and the JDBC url sets `serverTimezone=UTC`, so Java reads stored values as UTC. `NOW()` writes
   machine-local time; on a +06 machine that puts the contest six hours in the future and **every submission

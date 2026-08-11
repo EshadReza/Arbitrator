@@ -16,23 +16,27 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
 
 /**
- * S1-B3 fixture suite: each fixture program must produce its verdict signal
- * (Bundle 1 definition of done). No Spring context — plain construction.
+ * S1-B3 / S4-B1 fixture suite: each fixture program must produce its verdict
+ * signal (Bundle 1 definition of done). No Spring context — plain
+ * construction.
  *
- * Compile/run/TLE/CE/RE tests need only g++ and run on any OS (dev fallback).
- * MLE and fork-bomb tests exercise the real sandbox and are Linux-only —
- * they are the ones that MUST pass on the lab image before Sprint 2 starts.
+ * Every case here compiles and runs inside the Docker sandbox (see
+ * SandboxExecutor), so the host itself needs no toolchain at all — only
+ * Docker plus the built arbitrator-judge image
+ * (scripts/docker/build-sandbox-image.sh). MLE and fork-bomb used to be
+ * Linux-only because they depended on kernel namespaces/prlimit; a cgroup
+ * memory/pids limit works identically wherever Docker runs, so they're no
+ * longer OS-gated — this is the first time this suite has actually verified
+ * them (STATUS.md known issues 1 and 9).
  */
 class SandboxExecutorTest {
 
     private static final int TL_MS = 1000;
     private static final int MEM_KB = 65536;   // 64 MiB
 
-    private static boolean gppAvailable;
+    private static boolean dockerReady;
 
     private SandboxExecutor sandbox;
     private VerdictEvaluator evaluator;
@@ -40,13 +44,13 @@ class SandboxExecutorTest {
 
     @BeforeAll
     static void detectToolchain() {
-        gppAvailable = runsCleanly("g++", "--version");
+        dockerReady = runsCleanly("docker", "version")
+                && runsCleanly("docker", "image", "inspect", "arbitrator-judge:latest");
     }
 
     @BeforeEach
     void setUp() throws IOException {
         JudgeProperties props = new JudgeProperties();
-        props.setSandboxScript(locateScript());
         props.setWorkRoot(Files.createTempDirectory("arbitrator-test").toString());
         sandbox = new SandboxExecutor(props);
         evaluator = new VerdictEvaluator();
@@ -62,7 +66,7 @@ class SandboxExecutorTest {
 
     @Test
     void acFixtureProducesCorrectOutput() throws Exception {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path exe = compileFixture("ac.cpp");
         ExecutionResult r = runWithInput(exe, "2 3\n");
         assertTrue(r.ok(), "expected clean exit, got: " + r);
@@ -71,7 +75,7 @@ class SandboxExecutorTest {
 
     @Test
     void waFixtureProducesWrongOutput() throws Exception {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path exe = compileFixture("wa.cpp");
         ExecutionResult r = runWithInput(exe, "2 3\n");
         assertTrue(r.ok());
@@ -80,7 +84,7 @@ class SandboxExecutorTest {
 
     @Test
     void tleFixtureIsKilledWithinTwiceTheLimit() throws Exception {   // NFR-R04
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path exe = compileFixture("tle.cpp");
         long start = System.currentTimeMillis();
         ExecutionResult r = runWithInput(exe, "");
@@ -93,7 +97,7 @@ class SandboxExecutorTest {
 
     @Test
     void ceFixtureFailsToCompileWithDiagnostics() throws Exception {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path src = copyFixture("ce.cpp");
         Path exe = workDir.resolve("prog");
         ExecutionResult r = sandbox.compile(workDir,
@@ -104,7 +108,7 @@ class SandboxExecutorTest {
 
     @Test
     void reFixtureExitsNonZero() throws Exception {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path exe = compileFixture("re.cpp");
         ExecutionResult r = runWithInput(exe, "");
         assertFalse(r.timedOut());
@@ -112,9 +116,8 @@ class SandboxExecutorTest {
     }
 
     @Test
-    @EnabledOnOs(OS.LINUX)
     void mleFixtureReportsPeakAboveLimit() throws Exception {   // TBD-02 resolved
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path exe = compileFixture("mle.cpp");
         ExecutionResult r = runWithInput(exe, "");
         assertTrue(r.peakMemoryKb() > MEM_KB,
@@ -122,9 +125,8 @@ class SandboxExecutorTest {
     }
 
     @Test
-    @EnabledOnOs(OS.LINUX)
     void forkBombIsContained() throws Exception {               // FMEA-08
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path exe = compileFixture("forkbomb.cpp");
         long start = System.currentTimeMillis();
         ExecutionResult r = runWithInput(exe, "");
@@ -158,12 +160,6 @@ class SandboxExecutorTest {
         Path in = workDir.resolve("__input.txt");
         Files.writeString(in, input, StandardCharsets.UTF_8);
         return sandbox.run(workDir, List.of(exe.toString()), in, TL_MS, MEM_KB);
-    }
-
-    private static String locateScript() {
-        // repo layout: arbitrator/scripts/sandbox-run.sh, tests run in arbitrator-server/
-        Path p = Path.of("..", "scripts", "sandbox-run.sh").toAbsolutePath().normalize();
-        return p.toString();
     }
 
     private static boolean runsCleanly(String... cmd) {

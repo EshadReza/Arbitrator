@@ -47,7 +47,11 @@ arbitrator:
     expiry-hours: 12
   judge:
     threads: 10                # NFR-P04: >= 10 parallel judging jobs
-    sandbox-script: ${ARBITRATOR_SANDBOX:scripts/sandbox-run.sh}
+    # Every compile and every test run happens inside a container built from
+    # this image (scripts/docker/build-sandbox-image.sh) — no participant
+    # code ever runs directly on this machine. See SandboxExecutor.
+    docker-binary: ${ARBITRATOR_DOCKER_BIN:docker}
+    docker-image: ${ARBITRATOR_DOCKER_IMAGE:arbitrator-judge:latest}
     work-root: ${java.io.tmpdir}/arbitrator
     compile-timeout-ms: 30000
     # BR-01. SRS says 30 s; the team asked for 10 s in production and 0

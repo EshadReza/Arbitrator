@@ -31,6 +31,14 @@ sudo -u arbitrator-sandbox \
 - Hard kill at 2× time limit satisfies NFR-R04.
 - No Windows Defender/AV exclusion needed (TBD-08 resolved).
 
+> **Superseded (S4-B1, see STATUS.md).** The design above — `unshare`/`prlimit` run directly on the host —
+> is what Sprint 1 actually shipped, but it was replaced in Sprint 4 by running every compile and every
+> submission inside a Docker container instead (`scripts/docker/`, `SandboxExecutor`). The rationale for D2
+> (namespaces/cgroups make real sandboxing possible) still holds — Docker is built on the same kernel
+> primitives — but the *mechanism* is no longer a bare `unshare`/`prlimit` wrapper, and it is no longer
+> Linux-exclusive: the same containment now holds on macOS/Windows dev machines too. Do not follow the
+> command block above as current instructions; see `CLAUDE.md` and `STATUS.md` for what's actually running.
+
 ### UI direction — Codeforces, not the SRS's dark theme
 
 SRS §4 opens with *"dark-themed, high-contrast design."* You've chosen the Codeforces look, which is **light**: white content boxes with a thin border, a colored header strip per box (`#E1E1E1` bar, bold title), blue links (`#0000EE`-ish), Verdana/sans body text, monospace sample blocks with a copy button, and a right-hand sidebar. **Edit §4's opening sentence to "light, information-dense theme modeled on Codeforces"** or the UI will contradict the SRS at acceptance. Zahin builds one `codeforces.css` in Sprint 1 and every screen inherits it.
@@ -91,7 +99,9 @@ Zahin never opens a file under `arbitrator-server`. Eshad and Mahir never open a
 - `.gitignore` must exclude `target/`, `.classpath`, `.project`, `.settings/`, `application-local.yml`, `.env`. Committed Eclipse metadata is the number-one source of junk merge conflicts on student teams.
 - Everyone imports `config/eclipse-formatter.xml` and enables *Save Actions → format source code*. This eliminates whitespace-only diffs, which is half of all false conflicts.
 
-Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-jdk`, `python3.10`, `util-linux` (for `prlimit`/`unshare`).
+Local prerequisites on each machine: `mysql-server-8.0`, `openjdk-17-jdk`, Docker (Engine on Linux, Desktop on
+macOS/Windows for dev) — see README.md. No host-side `g++`/`python3.10`/toolchain needed since S4-B1: judging
+runs inside a container, not on the host.
 
 ---
 
@@ -103,7 +113,7 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 |---|---|---|
 | Shared contract | **All three** (co-designed day 2, frozen day 3) | `arbitrator-common/**` |
 | **A — Platform, Data & Admin** | **Eshad** | `server/config`, `server/security`, `server/entity`, `server/repo`, `server/service/{user,contest,problem,report}`, `server/controller/{auth,admin,contest,problem,user}`, `resources/db/migration`, `resources/static/admin` |
-| **B — Judge Engine & Real-time** | **Mahir** | `server/judge/**`, `server/realtime/**`, `server/leaderboard/**`, `server/service/{submission,announcement}`, `server/controller/{submission,announcement}`, `resources/languages.yml`, `scripts/sandbox-run.sh` |
+| **B — Judge Engine & Real-time** | **Mahir** | `server/judge/**`, `server/realtime/**`, `server/leaderboard/**`, `server/service/{submission,announcement}`, `server/controller/{submission,announcement}`, `resources/languages.yml`, `scripts/docker/**` |
 | **C — JavaFX Client** | **Zahin** | `arbitrator-client/**` (entire project, including `codeforces.css`) |
 | Build, CI, docs | **Eshad** (PR-reviewed) | root `pom.xml`, `README.md`, `.github/` |
 
@@ -190,7 +200,7 @@ Local prerequisites on each machine: `mysql-server-8.0`, `g++ 11`, `openjdk-17-j
 | Dev | Chunks |
 |---|---|
 | **Eshad** | `S4-A1` HikariCP 5/20, DB-level FKs, soft-delete (DBR-04/06/07) · `S4-A2` deployment: single fat JAR + `install-server.md`, pre-contest disk-space check (FMEA-04) · `S4-A3` JaCoCo ≥ 70 % on server · `S4-A4` OWASP dependency-check + `NOTICES` file (NFR-C03, LRR-03) · `S4-A5` systemd unit with auto-restart (FMEA-01) |
-| **Mahir** | `S4-B1` sandbox hardening review: dedicated `arbitrator-sandbox` user, sudoers entry, process-group kill, verify no network from inside (NFR-S03/S04, FMEA-02/08) · `S4-B2` crash recovery — requeue `PENDING` submissions on startup (NFR-R02, FMEA-01) · `S4-B3` JMeter, 30 virtual users, P95 ≤ 500 ms (NFR-P01) · `S4-B4` admin dashboard metrics feed: queue depth, submission rate, connected clients (UIF-23) |
+| **Mahir** | `S4-B1` sandbox hardening — **delivered as a Docker-backed sandbox instead of the sudoers/process-group design sketched here** (stronger: real filesystem isolation + cgroup memory cap, see STATUS.md) — verified no network from inside (NFR-S03/S04, FMEA-02/08) · `S4-B2` crash recovery — requeue `PENDING` submissions on startup (NFR-R02, FMEA-01) · `S4-B3` JMeter, 30 virtual users, P95 ≤ 500 ms (NFR-P01) · `S4-B4` admin dashboard metrics feed: queue depth, submission rate, connected clients (UIF-23) |
 | **Zahin** | `S4-C1` i18n resource bundle, UTF-8 throughout (I18N-01/02) · `S4-C2` silent installer script for lab machines + `server.properties` (host, port, **scheme**) · `S4-C3` TestFX automated tests for UIF-01/08/10 · `S4-C4` smoke test on Ubuntu 22.04 · `S4-C5` one-page student quick-start (NFR-U01) |
 | **All** | `S4-X` dress rehearsal: 20+ machines, 6 problems, 2-hour mock contest, then bug triage |
 
@@ -276,7 +286,7 @@ Bundle 1 is a single coherent tree that must compile as a unit. Splitting it acr
 # 2. unpack the bundle into an empty folder
 mkdir labjudge && cd labjudge
 # place ARBITRATOR_BUNDLE.txt here and run the python3 snippet embedded in
-# its header — it writes all 96 files and chmods scripts/sandbox-run.sh
+# its header — it writes all files and chmods scripts/docker/build-sandbox-image.sh
 
 # 3. sanity-check BEFORE the first commit
 mvn clean install           # must be green
@@ -302,7 +312,7 @@ Then invite Mahir and Zahin as collaborators and post the clone command in the g
 ```bash
 git clone git@github.com:<org>/<repo>.git && cd <repo>
 mvn clean install                                    # must be green before Eclipse
-sudo apt install mysql-server-8.0 g++ openjdk-17-jdk python3.10 util-linux
+sudo apt install mysql-server-8.0 openjdk-17-jdk   # + Docker — see README.md prerequisites
 sudo mysql < scripts/init-db.sql
 cp arbitrator-server/src/main/resources/application-local.yml.example \
    arbitrator-server/src/main/resources/application-local.yml   # git-ignored; put your password here
@@ -333,7 +343,11 @@ Three branches, three disjoint file sets, zero possible conflict. That's the pat
 ## 9. Risk watchlist
 
 1. **STOMP + JWT handshake** is where student teams lose three days. Mahir spikes it in Sprint 1 slack (`S1-B4`), not in Sprint 2 under pressure.
-2. **`unshare -Urn` needs unprivileged user namespaces enabled.** Ubuntu 22.04 ships them on, but a hardened lab image may set `kernel.unprivileged_userns_clone=0`. Verify on the **actual lab machines** in week 1 — the fallback (a setuid helper or a `nftables` rule per uid) costs Mahir two days if discovered late.
+2. ~~`unshare -Urn` needs unprivileged user namespaces enabled.~~ **Superseded (S4-B1):** judging runs inside
+   Docker now, not a bare `unshare` wrapper. The equivalent risk is **Docker itself being available and usable**
+   on the lab image — daemon installed and running, and the account running `arbitrator-server` in the `docker`
+   group (or otherwise able to reach the daemon socket without `sudo`). Verify on the **actual lab machines**
+   in week 1: `docker run --rm hello-world` as that account must succeed.
 3. **Don't embed Monaco in JavaFX.** RichTextFX `CodeArea` — SRS §4.2 explicitly permits it.
 4. **Scope creep from XorOJ.** Blogs, ratings, recommendations are not in the SRS. Deleting them is a feature.
 5. **Bus factor on the client.** Zahin owns a whole project alone. Pair Zahin with Eshad for one day in Sprint 2 so someone else can build and run it.

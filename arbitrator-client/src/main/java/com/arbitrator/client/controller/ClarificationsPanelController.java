@@ -29,10 +29,16 @@ import javafx.scene.layout.VBox;
  * The clarification board, contestant side.
  *
  * Public by default: every question and answer that isn't marked private is
- * visible to everyone, which is the point of a clarification — a private
- * answer would be an advantage handed to one team. Who asked is not shown on
- * a public question, and is not even sent: the server withholds the name from
- * this view rather than trusting the UI to hide it.
+ * *meant* to reach everyone, which is the point of a clarification — a
+ * private answer would be an advantage handed to one team. Who asked is not
+ * shown on a public question, and is not even sent: the server withholds the
+ * name from this view rather than trusting the UI to hide it.
+ *
+ * A public one doesn't actually reach the rest of the class the instant it's
+ * answered, though — the instructor has to approve it first. The asker still
+ * sees their own answer immediately either way, same as a private one, with a
+ * note if the class can't see it yet — see the "awaiting approval" branch in
+ * {@link #card}.
  *
  * A question the asker marks private is between them and the instructor —
  * this list still shows it to them (so asking privately isn't a black hole
@@ -126,6 +132,17 @@ public class ClarificationsPanelController {
             answer.setWrapText(true);
             answer.getStyleClass().add("clarify-answer");
             card.getChildren().addAll(answerLabel, answer);
+            // Only ever reachable for the caller's own entry — anyone else's
+            // unapproved public clarification never reaches this list at all
+            // (server-filtered, same as a private one), so getting this far
+            // with isPublic()&&!approved() means "you're seeing this early."
+            if (c.isPublic() && !c.approved()) {
+                Label pendingApproval = new Label(
+                        "Awaiting the instructor's approval to appear publicly");
+                pendingApproval.getStyleClass().add("clarify-pending");
+                pendingApproval.setWrapText(true);
+                card.getChildren().add(pendingApproval);
+            }
         } else {
             Label pending = new Label("Awaiting an answer");
             pending.getStyleClass().add("clarify-pending");

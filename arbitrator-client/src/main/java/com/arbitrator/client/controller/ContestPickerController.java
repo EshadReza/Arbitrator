@@ -69,7 +69,7 @@ public class ContestPickerController {
         errorLabel.setVisible(false);
         enterButton.setDisable(true);
         if (themeButton != null) {
-            themeButton.setText(state.darkMode() ? "☀" : "🌙");
+            themeButton.setText(state.darkMode() ? "☼" : "☾");
         }
         contestList.setCellFactory(v -> new ContestCell());
         contestList.getSelectionModel().selectedItemProperty().addListener(
@@ -128,7 +128,7 @@ public class ContestPickerController {
         state.setDarkMode(dark);
         SceneRouter.applyTheme(contestList.getScene());
         if (themeButton != null) {
-            themeButton.setText(dark ? "☀" : "🌙");
+            themeButton.setText(dark ? "☼" : "☾");
         }
     }
 

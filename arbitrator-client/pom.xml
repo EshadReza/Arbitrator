@@ -21,7 +21,25 @@
        NOTE: `mvn javafx:run` puts JavaFX on the MODULE path, where javafx-web
        cannot resolve — jdk.jsobject was dropped from the JDK in 11 and is not
        on Maven Central. Classpath launching avoids the module graph entirely.
-       Mock mode: mvn -pl arbitrator-client javafx:run -Darbitrator.mock=true -->
+       Mock mode: mvn -pl arbitrator-client javafx:run -Darbitrator.mock=true
+
+       Cross-platform packaging (rules.md Rule 1 — build config, not app code):
+       JavaFX publishes separate native libraries per OS/arch, so a jar built
+       on one platform silently only runs on that platform — plain `mvn
+       package` on the build machine only bundles e.g. mac-aarch64 natives.
+       The javafx.platform property below controls which classifier's
+       natives get bundled; its default matches this team's dev machines
+       (mac-aarch64). Override with -Djavafx.platform=<x> to cross-build a
+       jar for a DIFFERENT target OS — valid values: win, mac, mac-aarch64,
+       linux, linux-aarch64. (Maven's OS-family profile activation was tried
+       here first and rejected: Plexus classifies macOS as BOTH "mac" and
+       "unix", so a mac-only and a unix-catch-all profile activated at the
+       same time and raced over which one set the property — a single
+       explicit default is unambiguous instead.) -->
+
+  <properties>
+    <javafx.platform>mac-aarch64</javafx.platform>
+  </properties>
 
   <dependencies>
     <dependency>
@@ -32,14 +50,24 @@
     <dependency>
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-controls</artifactId>
+      <!-- dependencyManagement in the parent pom only has an entry keyed
+           WITHOUT a classifier, and Maven does not match that to a
+           classified variant — so the managed version has to be repeated
+           here explicitly, not just the classifier. -->
+      <version>${javafx.version}</version>
+      <classifier>${javafx.platform}</classifier>
     </dependency>
     <dependency>
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-fxml</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>${javafx.platform}</classifier>
     </dependency>
     <dependency>
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-web</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>${javafx.platform}</classifier>
     </dependency>
 
     <!-- Code editor (SRS §4.2 permits CodeArea; do not attempt Monaco) -->
@@ -95,6 +123,7 @@
   </dependencies>
 
   <build>
+    <finalName>arbitrator-client-${javafx.platform}</finalName>
     <plugins>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>

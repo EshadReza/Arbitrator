@@ -41,6 +41,14 @@ public class User {
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
 
+    /** Best-effort hardware MAC of whichever machine last logged in as this user. */
+    @Column(name = "mac_address", length = 17)
+    private String macAddress;
+
+    /** When macAddress last changed from a different non-null value (not the first-ever login). */
+    @Column(name = "mac_changed_at")
+    private Instant macChangedAt;
+
     public Long getId() {
         return id;
     }
@@ -79,5 +87,21 @@ public class User {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getMacAddress() {
+        return macAddress;
+    }
+
+    public void setMacAddress(String macAddress) {
+        this.macAddress = macAddress;
+    }
+
+    public Instant getMacChangedAt() {
+        return macChangedAt;
+    }
+
+    public void setMacChangedAt(Instant macChangedAt) {
+        this.macChangedAt = macChangedAt;
     }
 }

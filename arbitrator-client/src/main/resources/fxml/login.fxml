@@ -35,7 +35,7 @@
                 </ImageView>
                 <Region HBox.hgrow="ALWAYS"/>
                 <Button fx:id="themeButton" onAction="#onToggleTheme" styleClass="icon-button"
-                        text="🌙" focusTraversable="false"/>
+                        text="☾" focusTraversable="false"/>
             </HBox>
 
             <VBox alignment="CENTER" spacing="26" VBox.vgrow="ALWAYS">

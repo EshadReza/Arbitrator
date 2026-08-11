@@ -5,9 +5,12 @@ import java.util.ResourceBundle;
 
 import javafx.animation.FadeTransition;
 import javafx.fxml.FXMLLoader;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.DialogPane;
+import javafx.scene.input.KeyCode;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
@@ -24,6 +27,18 @@ public final class SceneRouter {
 
     public static void init(Stage primaryStage) {
         stage = primaryStage;
+        // Wired on the Stage (Window), not the Scene, so it survives every
+        // setScene() below and works on every screen — login, register, the
+        // contest picker, main — not just wherever a controller happens to
+        // install its own accelerators. Real OS-level fullscreen, not the
+        // in-app pane-collapse toggle those screens' F11-adjacent buttons do.
+        stage.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.F11) {
+                stage.setFullScreen(!stage.isFullScreen());
+                e.consume();
+            }
+        });
+        stage.setFullScreenExitHint("");
     }
 
     public static void showLogin() {
@@ -80,12 +95,19 @@ public final class SceneRouter {
     }
 
     private static void setScene(Parent root, boolean maximized) {
-        Scene scene = new Scene(root, 1280, 768);
+        // Clamp to the actual usable screen area — a bare 1280x768 request on
+        // a smaller or scaled display (common on Ubuntu) forced a window
+        // larger than the screen with no way to see or move the rest of it.
+        Rectangle2D bounds = Screen.getPrimary().getVisualBounds();
+        double width = Math.min(1280, bounds.getWidth());
+        double height = Math.min(768, bounds.getHeight());
+        Scene scene = new Scene(root, width, height);
         scene.getStylesheets().add(
                 SceneRouter.class.getResource("/css/arbitrator.css").toExternalForm());
         applyTheme(scene);
         stage.setScene(scene);
         stage.setMaximized(maximized);
+        stage.centerOnScreen();
     }
 
     /**
