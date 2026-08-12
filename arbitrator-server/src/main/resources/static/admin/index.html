@@ -27,6 +27,15 @@
   /* Login gate only — same "card inverts, frame/hero stay constant" split
      as the JavaFX client's login screen (arbitrator.css's -lc-* variables). */
   --gate-accent:#101012; --gate-accent-ink:#fff;
+  /* Without this, native form controls AND scrollbars ignore data-theme
+     entirely and render using the OS/browser's OWN light-or-dark
+     preference — so toggling this page to dark while the OS is set to
+     light left every scrollbar rendering in its light-scheme style: a pale
+     grey thumb on a dark track, functionally invisible against the .code
+     panels' dark background (the exact "scrollbar is hidden" report).
+     "light dark" here means "either is fine, pick per prefers-color-scheme"
+     for whichever state isn't pinned by the two data-theme overrides below. */
+  color-scheme: light dark;
 }
 @media (prefers-color-scheme:dark){
   :root{
@@ -48,6 +57,7 @@
   --green:#21a366; --red:#d64545; --amber:#e5a50a; --purple:#8257c7; --grey:#8b95a3;
   --shadow:0 4px 16px rgba(16,24,40,.08),0 1px 3px rgba(16,24,40,.05);
   --gate-accent:#101012; --gate-accent-ink:#fff;
+  color-scheme: light;
 }
 :root[data-theme="dark"]{
   --bg:#0f1319; --surface:#171d26; --surface2:#1e2530; --surface3:#273040;
@@ -56,6 +66,7 @@
   --green:#35c98a; --red:#ef6a6a; --amber:#f2c14e; --purple:#a883ee; --grey:#7d8796;
   --shadow:0 4px 18px rgba(0,0,0,.4);
   --gate-accent:#f0f1f4; --gate-accent-ink:#14141a;
+  color-scheme: dark;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font:14px/1.5 'Inter',-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);
@@ -298,7 +309,16 @@ details.info[open] summary::before{content:'▾ '}
 details.info .body-txt{margin-top:9px;color:var(--muted);font-size:12.5px;line-height:1.6}
 pre.code{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:13px;
          overflow:auto;max-height:360px;white-space:pre;tab-size:4;
-         font:12px/1.5 ui-monospace,Menlo,monospace}
+         font:12px/1.5 ui-monospace,Menlo,monospace;
+         scrollbar-color:var(--border) transparent}
+/* Belt-and-suspenders on top of color-scheme above (Firefox reads
+   scrollbar-color directly; Chromium/Safari want the pseudo-elements
+   instead) — a themed, always-visible thumb regardless of either browser's
+   own light/dark scrollbar defaults. */
+pre.code::-webkit-scrollbar{width:10px;height:10px}
+pre.code::-webkit-scrollbar-track{background:transparent}
+pre.code::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
+pre.code::-webkit-scrollbar-thumb:hover{background:var(--muted)}
 .ok{color:var(--green)} .err{color:var(--red)}
 .hide{display:none!important}
 

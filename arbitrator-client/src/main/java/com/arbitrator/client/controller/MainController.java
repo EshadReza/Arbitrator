@@ -275,12 +275,29 @@ public class MainController {
         // fullscreen (or restored windowed) size. Since applyZoom() cements
         // that instant's dimensions into contentRoot's min/pref/max, landing
         // on one of those transitional values froze the layout distorted —
-        // reachable exactly the reported "zoom, F11, zoom again" sequence —
-        // with no further resize event ever arriving to correct it. Re-apply
-        // once more, one pulse after the transition itself is reported done,
-        // as a correction pass on top of the width/height listeners above.
+        // reported as the app's own background gradient (rootStack sits
+        // behind contentRoot) showing through where contentRoot no longer
+        // covered the full window — reachable via the reported "zoom, F11,
+        // zoom again" sequence, with no further resize event ever arriving
+        // to correct it.
+        //
+        // A single Platform.runLater (one pulse later) was not enough: the
+        // native OS fullscreen transition — sliding to/from a new Space on
+        // macOS, similar animated transitions elsewhere — runs as a
+        // multi-hundred-millisecond system animation, not a single JavaFX
+        // pulse, so one runLater can itself land mid-animation. Re-applying
+        // several times over a window comfortably longer than that
+        // animation is the correction pass on top of the width/height
+        // listeners above; each call is cheap (a resize computation, no
+        // visible flicker) so over-correcting costs nothing.
         if (rootStack.getScene() != null && rootStack.getScene().getWindow() instanceof javafx.stage.Stage stage) {
-            stage.fullScreenProperty().addListener((o, a, b) -> Platform.runLater(this::applyZoom));
+            stage.fullScreenProperty().addListener((o, a, b) -> {
+                for (long delayMs : new long[] {0, 80, 180, 350, 600}) {
+                    PauseTransition pt = new PauseTransition(Duration.millis(delayMs));
+                    pt.setOnFinished(ev -> applyZoom());
+                    pt.play();
+                }
+            });
         }
         applyZoom();
     }

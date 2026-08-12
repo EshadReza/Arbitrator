@@ -148,10 +148,15 @@ class VerdictPushIntegrationTest {
                 });
 
         // --- submit a correct solution
+        // Unique per run (a nonce comment) — the duplicate-submission guard
+        // (a contestant can't submit byte-for-byte identical code for the
+        // same problem twice) would otherwise reject this fixed literal on
+        // any repeat run against a test DB that isn't wiped between them.
         SubmitAckDto ack = submit(token, new SubmitRequest(problemId, Language.CPP17, """
+                // nonce:%s
                 #include <iostream>
                 int main(){ long long a,b; std::cin >> a >> b; std::cout << a + b << "\\n"; }
-                """));
+                """.formatted(java.util.UUID.randomUUID())));
         assertNotNull(ack, "submission should be accepted");
 
         // --- the actual assertion: the push arrives, unprompted, on the socket

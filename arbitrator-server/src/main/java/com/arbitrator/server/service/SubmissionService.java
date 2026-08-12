@@ -56,6 +56,24 @@ public class SubmissionService {
     /** userId -> last accepted submission instant (BR-01). */
     private final Map<Long, Instant> lastSubmit = new ConcurrentHashMap<>();
 
+    /**
+     * Queue-flooding guard (hysteresis, not a hard per-user cap): once a
+     * user reaches {@link #QUEUE_BLOCK_AT} submissions still PENDING/JUDGING,
+     * every further submit() is rejected until that count drops back down to
+     * {@link #QUEUE_UNBLOCK_BELOW}. Without the gap between the trip point
+     * and the release point, a user sitting exactly at the boundary would
+     * flip blocked/unblocked on every single verdict — the gap is what makes
+     * this a real circuit breaker instead of a hair-trigger. Stops the
+     * "submit 2,000 infinite loops" attack: the shared judge pool can never
+     * hold more than QUEUE_BLOCK_AT submissions from any one user at a time,
+     * however many times they hit submit.
+     */
+    private static final int QUEUE_BLOCK_AT = 20;
+    private static final int QUEUE_UNBLOCK_BELOW = 5;
+
+    /** userId -> currently tripped by the hysteresis guard above. */
+    private final Map<Long, Boolean> queueBlocked = new ConcurrentHashMap<>();
+
     public SubmissionService(SubmissionRepository submissions,
                              ProblemRepository problems,
                              ContestService contestService,
@@ -93,15 +111,25 @@ public class SubmissionService {
                     "Please wait " + cooldown.toSeconds() + " seconds between submissions");
         }
 
-        // Queue-flooding guard: one in-flight (PENDING/JUDGING) submission per
-        // user. The cooldown above bounds submission RATE but not backlog
-        // depth — without this, one user submitting hundreds of infinite
-        // loops back-to-back (waiting only the cooldown between each) fills
-        // the shared judge pool for the rest of the contest, starving
-        // everyone else of verdicts.
-        if (submissions.existsByUserIdAndStatusNot(user.getId(), Submission.Status.DONE)) {
+        // Queue-flooding guard: the cooldown above bounds submission RATE but
+        // not backlog DEPTH — without this, one user submitting hundreds of
+        // infinite loops back-to-back (waiting only the cooldown between
+        // each) fills the shared judge pool for the rest of the contest,
+        // starving everyone else of verdicts. See QUEUE_BLOCK_AT's javadoc
+        // for why this is a hysteresis band, not a flat cap.
+        long inFlight = submissions.countByUserIdAndStatusNot(user.getId(), Submission.Status.DONE);
+        if (Boolean.TRUE.equals(queueBlocked.get(user.getId()))) {
+            if (inFlight >= QUEUE_UNBLOCK_BELOW) {
+                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                        "You have too many submissions already queued (" + inFlight + ") — wait for that "
+                                + "backlog to clear below " + QUEUE_UNBLOCK_BELOW + " before submitting more");
+            }
+            queueBlocked.remove(user.getId());
+        } else if (inFlight >= QUEUE_BLOCK_AT) {
+            queueBlocked.put(user.getId(), Boolean.TRUE);
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Your previous submission is still being judged — wait for its verdict before submitting again");
+                    "You have too many submissions already queued (" + inFlight + ") — wait for that "
+                            + "backlog to clear below " + QUEUE_UNBLOCK_BELOW + " before submitting more");
         }
 
         Problem problem = problems.findById(req.problemId()).orElseThrow(() ->
@@ -114,6 +142,19 @@ public class SubmissionService {
 
         // BR-02: the server clock decides whether that contest is still open.
         contestService.assertAcceptingSubmissions(contest);
+
+        // A contestant resubmitting byte-for-byte identical code for the same
+        // problem gains nothing (the verdict cannot change) and only spends a
+        // slot in the shared judge queue and another tick of the cooldown —
+        // most often an accidental double-submit or a retry after a UI hiccup
+        // rather than a deliberate resubmission. Scoped to (user, problem):
+        // the same code against a DIFFERENT problem is a legitimate, separate
+        // attempt (e.g. two problems sharing an I/O template).
+        if (submissions.existsByUserIdAndProblemIdAndSourceCodeAndActiveTrue(
+                user.getId(), problem.getId(), req.sourceCode())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "You already submitted this exact code for this problem");
+        }
 
         Submission sub = new Submission();
         sub.setUserId(user.getId());

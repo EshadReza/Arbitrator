@@ -21,7 +21,6 @@ import org.fxmisc.richtext.model.TwoDimensional.Bias;
 import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.enums.Language;
 
-import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
@@ -159,20 +158,27 @@ public class EditorController {
         codeArea.replaceText(TEMPLATES.getOrDefault(Language.CPP17, ""));   // <-- new
 
 
-        codeArea.textProperty().addListener((obs, old, text) -> {
-            updateCount(text);
-            // Deferred, and re-reading the live text at apply time rather than
-            // closing over this listener's `text` snapshot: applying
-            // StyleSpans synchronously here re-enters the CodeArea from
-            // inside its own change notification — e.g. the auto-close-pair
-            // KEY_TYPED filter is still mid-insertText() when this fires — and
-            // that reentrancy was corrupting the buffer a few keystrokes in
-            // (typed characters landing on, and eating into, the line below).
-            // Applying on the next pulse against whatever the text is BY THEN
-            // keeps the spans length always in sync with the document, even
-            // if more keystrokes land before this runs.
-            Platform.runLater(() -> codeArea.setStyleSpans(0, highlight(codeArea.getText())));
-        });
+        // Counting is cheap and safe to do on every keystroke directly.
+        codeArea.textProperty().addListener((obs, old, text) -> updateCount(text));
+
+        // Highlighting is debounced via RichTextFX's own documented pattern
+        // (multiPlainChanges().successionEnds — the same shape as their
+        // JavaKeywordsDemo) instead of running on every keystroke. Two
+        // problems this fixes over calling setStyleSpans() straight from a
+        // textProperty listener: (1) reentrancy — a synchronous
+        // setStyleSpans() call fired while, say, the auto-close-pair
+        // KEY_TYPED filter below is still mid-insertText() was reported to
+        // corrupt the buffer a few keystrokes in (typed characters landing
+        // on, and eating into, the line below); (2) a growing backlog —
+        // recomputing the regex highlight on every single keystroke during a
+        // fast typing burst can fall behind and queue up, which is its own
+        // way of desyncing what's displayed from where edits actually land.
+        // Waiting for a short pause in typing before restyling sidesteps
+        // both: it always runs outside any input-handling call stack, and
+        // only once per burst rather than once per character.
+        codeArea.multiPlainChanges()
+                .successionEnds(java.time.Duration.ofMillis(75))
+                .subscribe(ignore -> codeArea.setStyleSpans(0, highlight(codeArea.getText())));
         languageBox.valueProperty().addListener((obs, old, lang) -> {
             // Load the new language's boilerplate only when nothing has been
             // written yet. Replacing unconditionally threw away a half-finished

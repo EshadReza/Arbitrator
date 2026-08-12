@@ -79,6 +79,28 @@
   </dependencies>
 
   <build>
+    <!--
+      application-local.yml is git-ignored (rules.md Rule 6) precisely so a
+      developer's machine-specific overrides and real credentials never enter
+      version control — but .gitignore has no effect on Maven, which just
+      walks src/main/resources on disk regardless of what git tracks. Left
+      unexcluded, whichever developer's machine happened to run the build
+      that produced a shipped jar had THEIR local overrides baked directly
+      into BOOT-INF/classes, active on every machine that jar is deployed to
+      (spring.profiles.include: local loads it unconditionally). This is
+      exactly how a Mac-only docker-binary path and a testing-only 0s
+      submit-cooldown ended up hardcoded into every lab deployment package,
+      regardless of what application.yml's real defaults said. Excluded here
+      so a packaged jar can never contain it, no matter who builds it.
+    -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <excludes>
+          <exclude>application-local.yml</exclude>
+        </excludes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>

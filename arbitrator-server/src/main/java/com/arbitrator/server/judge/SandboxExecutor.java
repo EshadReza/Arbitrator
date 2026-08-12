@@ -430,15 +430,32 @@ public class SandboxExecutor {
             cmd.add(translatePath(workDir, token));
         }
 
+        // No real stdin needed for the compile step (and some checker
+        // invocations) — `docker run -i` still needs SOME stdin source, or
+        // its process just blocks reading from whatever this JVM's own
+        // stdin happens to be. "/dev/null" was the fix, but that path
+        // doesn't exist on Windows — every compile failed there with
+        // "Cannot run program ... \dev\null (The system cannot find the
+        // path specified)" (Windows has no single portable null-device
+        // path; NUL is a reserved device name, not a real filesystem path,
+        // and isn't valid input to java.io.File the same way). Leaving
+        // stdin on the default PIPE and closing our end of it immediately
+        // after start() gives the same "stdin is at EOF right away" result
+        // without depending on any OS-specific path at all.
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(workDir.toFile());
         if (inputFile != null) {
             pb.redirectInput(inputFile.toFile());
-        } else {
-            pb.redirectInput(new File("/dev/null"));
         }
 
         long start = System.nanoTime();
         Process p = pb.start();
+        if (inputFile == null) {
+            try {
+                p.getOutputStream().close();
+            } catch (IOException ignored) {
+                // best effort; the container's own timeout still bounds worst case
+            }
+        }
         LIVE.add(name);
 
         CompletableFuture<String> out = readAsync(p.getInputStream());
@@ -457,7 +474,26 @@ public class SandboxExecutor {
             }
 
             int exit = p.exitValue();
-            if (exit == 125) {
+            // 125 is docker's own documented code for "the daemon received
+            // the request but failed to create/start the container" — but
+            // it is NOT the only way docker can fail before anything inside
+            // the container ever ran. "permission denied ... docker.sock"
+            // (not in the docker group yet) and "cannot connect to the
+            // Docker daemon" (daemon not running) both exit 1, the CLI's
+            // generic client-side failure code, indistinguishable from a
+            // real compile/runtime failure by exit code alone. Left
+            // unhandled, that raw docker error text was landing in
+            // Outcome.ce() and shown to the student as if it were THEIR
+            // compile error — a judge-infrastructure problem reported as
+            // their own mistake. The reliable signal instead: /usr/bin/time
+            // runs INSIDE the container wrapping the real command, and
+            // writes its report even when that command fails (a genuine
+            // compile error still produces a rusage file) — the only
+            // legitimate case it does NOT is a timeout kill (exit 124,
+            // handled on its own above, /usr/bin/time killed mid-write).
+            // So: non-zero, not a timeout, and no rusage file at all means
+            // docker itself never got a container running, full stop.
+            if (exit == 125 || (exit != 0 && exit != 124 && !Files.exists(rusageFile))) {
                 throw new IOException("docker run failed before the sandbox container started: "
                         + safeJoin(err));
             }
