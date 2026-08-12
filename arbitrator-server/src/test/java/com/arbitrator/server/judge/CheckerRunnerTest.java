@@ -25,7 +25,18 @@ import com.arbitrator.server.entity.Problem;
  */
 class CheckerRunnerTest {
 
-    private static boolean gppAvailable;
+    /**
+     * Stale guard fixed: the checker compiles and runs INSIDE the Docker
+     * sandbox now (S4-B1), same as every submission — a host g++ has had
+     * nothing to do with it since Docker sandboxing replaced the old
+     * unshare/ulimit split. Checking "g++ on PATH" instead of Docker
+     * readiness meant these tests ran (and failed for real reasons, not a
+     * skip) on any machine with g++ installed but Docker not yet configured
+     * — exactly SandboxExecutorTest's own dockerReady check, duplicated here
+     * rather than shared, since these are plain unit tests with no shared
+     * base class.
+     */
+    private static boolean dockerReady;
 
     private SandboxExecutor sandbox;
     private JudgeProperties props;
@@ -34,7 +45,8 @@ class CheckerRunnerTest {
 
     @BeforeAll
     static void detectToolchain() {
-        gppAvailable = runsCleanly("g++", "--version");
+        dockerReady = runsCleanly("docker", "version")
+                && runsCleanly("docker", "image", "inspect", "arbitrator-judge:latest");
     }
 
     @BeforeEach
@@ -53,7 +65,7 @@ class CheckerRunnerTest {
 
     @Test
     void multipleValidOutputsAccepted() throws Exception {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
 
         // Checker that accepts either "10 20" or "20 10" (permutation of multiset)
         String source = """
@@ -87,7 +99,7 @@ class CheckerRunnerTest {
 
     @Test
     void checkerCrashReturnsRuntimeError() throws Exception {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
 
         String source = """
                 int main() {
@@ -106,7 +118,7 @@ class CheckerRunnerTest {
 
     @Test
     void checkerHangsKilledByTimeoutReturnsRuntimeError() throws Exception {
-        assumeTrue(gppAvailable, "g++ not on PATH");
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
 
         String source = """
                 int main() {

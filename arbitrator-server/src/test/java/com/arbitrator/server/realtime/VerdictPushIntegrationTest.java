@@ -105,7 +105,14 @@ class VerdictPushIntegrationTest {
     @Test
     @DisplayName("verdict reaches the submitting client over STOMP within 30s")
     void verdictIsPushedToTheSubmittingClient() throws Exception {
-        assumeTrue(commandWorks("g++", "--version"), "g++ not on PATH");
+        // Compiling and running now happens INSIDE the Docker sandbox (S4-B1),
+        // not via a host g++ — checking g++ here was stale and let this test
+        // run for real (and fail for real reasons, not skip) on a machine
+        // with g++ installed but Docker not yet configured. Same dockerReady
+        // check SandboxExecutorTest uses.
+        assumeTrue(commandWorks("docker", "version")
+                        && commandWorks("docker", "image", "inspect", "arbitrator-judge:latest"),
+                "docker (with arbitrator-judge image) not available");
 
         String token = login("alice", "alice123").token();
         long problemId = firstProblemId();

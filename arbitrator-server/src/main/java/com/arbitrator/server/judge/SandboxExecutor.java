@@ -167,21 +167,34 @@ public class SandboxExecutor {
     /**
      * If the configured binary already runs, use it as-is — this covers both
      * an explicit operator override (e.g. {@code ARBITRATOR_DOCKER_BIN}) and
-     * the common case where a bare "docker" already resolves via PATH. Only
-     * when the UNMODIFIED default fails do we go looking in the usual
-     * per-OS install locations, and only ever return one of those if it
-     * actually runs — never guess silently past that.
+     * the common case where a bare "docker" already resolves via PATH.
+     *
+     * If it does NOT run, always fall through to the per-OS candidate list —
+     * including when {@code configured} is itself an explicit absolute path,
+     * not just the unmodified default. An earlier version of this method
+     * trusted an explicit override completely and skipped the fallback
+     * search entirely, on the theory that "an operator who pointed at a
+     * specific path wants exactly that path." In practice that's backwards:
+     * this override almost always comes from a personal, git-ignored
+     * application-local.yml (rules.md Rule 6) that one developer set up by
+     * copying a path that worked on THEIR machine (see this same file's
+     * history — the exact bug this comment is about: a macOS Homebrew path,
+     * {@code /usr/local/bin/docker}, hardcoded here and then copied onto a
+     * Linux machine where Docker actually lives at {@code /usr/bin/docker}).
+     * Nobody is intentionally pointing at a path they know is wrong; trying
+     * the standard candidates too can only help, never mask a real problem —
+     * verifyDockerReady() still reports the true failure reason if every
+     * candidate, including the configured one, comes up empty.
      */
     private static String resolveDockerBinary(String configured) {
         if (runsCleanly(configured, "version")) {
             return configured;
         }
-        if (!"docker".equals(configured)) {
-            return configured;   // an explicit override that doesn't work — surface the real reason, don't second-guess it
-        }
         for (String candidate : DOCKER_CANDIDATES) {
-            if (Files.isExecutable(Path.of(candidate)) && runsCleanly(candidate, "version")) {
-                log.info("'docker' was not on PATH for this process; found a working one at {}", candidate);
+            if (!candidate.equals(configured) && Files.isExecutable(Path.of(candidate))
+                    && runsCleanly(candidate, "version")) {
+                log.info("Configured docker binary '{}' did not run; found a working one at {} instead",
+                        configured, candidate);
                 return candidate;
             }
         }
