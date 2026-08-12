@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import com.arbitrator.common.dto.VerdictEventDto;
 import com.arbitrator.common.enums.CheckerType;
+import com.arbitrator.common.enums.Language;
 import com.arbitrator.common.enums.Verdict;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.Submission;
@@ -114,6 +117,11 @@ public class JudgeWorker {
                     + "imported via spring.config.import in application.yml",
                     sub.getLanguage().configKey());
             return Outcome.internalError("Language not configured: " + sub.getLanguage());
+        }
+
+        String banned = forbiddenApiMessage(sub.getLanguage(), sub.getSourceCode());
+        if (banned != null) {
+            return Outcome.ce(banned);
         }
 
         Path src = workDir.resolve(spec.getSourceFile());
@@ -224,6 +232,76 @@ public class JudgeWorker {
             return null;
         }
         return out.length() <= STORED_OUTPUT_LIMIT ? out : out.substring(0, STORED_OUTPUT_LIMIT);
+    }
+
+    /**
+     * Threading and process-spawning APIs are disallowed for every
+     * submission, on every language — a plain source-text scan run before
+     * anything is written to disk or compiled, so a violation costs nothing
+     * (no container, no compiler) and reports as a normal CE. Sandboxing
+     * already contains the *blast radius* of these calls (no network,
+     * --pids-limit, read-only rootfs, the container is thrown away either
+     * way), but they're still banned outright: they're not something a
+     * contest solution legitimately needs, and disallowing them removes an
+     * entire class of "did the checker actually see what I think it saw"
+     * questions (a background thread finishing after the main one returns,
+     * a shelled-out command reading something it shouldn't).
+     */
+    private record Ban(Pattern pattern, String description) { }
+
+    private static final List<Ban> CPP_BANS = List.of(
+            new Ban(Pattern.compile("#\\s*include\\s*<thread>"), "threading (<thread>)"),
+            new Ban(Pattern.compile("\\bstd::thread\\b|\\bstd::jthread\\b"), "threading (std::thread)"),
+            new Ban(Pattern.compile("#\\s*include\\s*<future>"), "threading (<future> / std::async)"),
+            new Ban(Pattern.compile("\\bstd::async\\b"), "threading (std::async)"),
+            new Ban(Pattern.compile("#\\s*include\\s*<omp\\.h>|\\b_Pragma\\s*\\(\\s*\"omp"), "threading (OpenMP)"),
+            new Ban(Pattern.compile("\\bsystem\\s*\\("), "process execution (system())"),
+            new Ban(Pattern.compile("\\bpopen\\s*\\("), "process execution (popen())"),
+            new Ban(Pattern.compile("\\bfork\\s*\\("), "process spawning (fork())"),
+            new Ban(Pattern.compile("\\bexec[lv]p?e?\\s*\\("), "process execution (the exec family)"));
+
+    private static final List<Ban> JAVA_BANS = List.of(
+            new Ban(Pattern.compile("\\bnew\\s+Thread\\b"), "threading (Thread)"),
+            new Ban(Pattern.compile("\\bextends\\s+Thread\\b"), "threading (Thread subclass)"),
+            new Ban(Pattern.compile("\\bExecutors\\."), "threading (Executors)"),
+            new Ban(Pattern.compile("\\bExecutorService\\b"), "threading (ExecutorService)"),
+            new Ban(Pattern.compile("\\bCompletableFuture\\b"), "threading (CompletableFuture)"),
+            new Ban(Pattern.compile("\\bForkJoinPool\\b"), "threading (ForkJoinPool)"),
+            new Ban(Pattern.compile("\\bnew\\s+Timer\\s*\\("), "threading (java.util.Timer)"),
+            new Ban(Pattern.compile("\\bRuntime\\s*\\.\\s*getRuntime\\s*\\(\\s*\\)\\s*\\.\\s*exec\\b"),
+                    "process execution (Runtime.exec)"),
+            new Ban(Pattern.compile("\\bProcessBuilder\\b"), "process execution (ProcessBuilder)"));
+
+    private static final List<Ban> PY_BANS = List.of(
+            new Ban(Pattern.compile("(?m)^\\s*import\\s+threading\\b"), "threading (threading module)"),
+            new Ban(Pattern.compile("(?m)^\\s*from\\s+threading\\s+import\\b"), "threading (threading module)"),
+            new Ban(Pattern.compile("(?m)^\\s*import\\s+multiprocessing\\b"), "threading (multiprocessing module)"),
+            new Ban(Pattern.compile("(?m)^\\s*from\\s+multiprocessing\\s+import\\b"),
+                    "threading (multiprocessing module)"),
+            new Ban(Pattern.compile("(?m)^\\s*import\\s+concurrent\\.futures\\b"), "threading (concurrent.futures)"),
+            new Ban(Pattern.compile("(?m)^\\s*from\\s+concurrent\\.futures\\s+import\\b"),
+                    "threading (concurrent.futures)"),
+            new Ban(Pattern.compile("\\bos\\.system\\s*\\("), "process execution (os.system())"),
+            new Ban(Pattern.compile("\\bos\\.popen\\s*\\("), "process execution (os.popen())"),
+            new Ban(Pattern.compile("\\bos\\.exec[lv]p?e?\\s*\\("), "process execution (the os.exec family)"),
+            new Ban(Pattern.compile("\\bos\\.fork\\s*\\("), "process spawning (os.fork())"),
+            new Ban(Pattern.compile("(?m)^\\s*import\\s+subprocess\\b"), "process execution (subprocess module)"),
+            new Ban(Pattern.compile("(?m)^\\s*from\\s+subprocess\\s+import\\b"),
+                    "process execution (subprocess module)"));
+
+    private static final Map<Language, List<Ban>> BANS_BY_LANGUAGE = Map.of(
+            Language.CPP17, CPP_BANS,
+            Language.JAVA17, JAVA_BANS,
+            Language.PYTHON310, PY_BANS);
+
+    private static String forbiddenApiMessage(Language language, String source) {
+        for (Ban ban : BANS_BY_LANGUAGE.getOrDefault(language, List.of())) {
+            if (ban.pattern().matcher(source).find()) {
+                return "Not allowed in submissions: " + ban.description() + ". "
+                        + "Threading and process-spawning APIs are disabled on this judge.";
+            }
+        }
+        return null;
     }
 
     /** Fills {src} {exe} {dir} into a whitespace-separated command template. */

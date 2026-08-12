@@ -1844,11 +1844,11 @@ async function viewProblem(id){
   $('pvTestCases').innerHTML = body.testCases.length ? body.testCases.map(tc=>`
     <div style="margin-bottom:12px">
       <div class="hint" style="margin-bottom:4px">Test ${tc.idx}</div>
-      <div class="row" style="align-items:flex-start;gap:10px">
-        <div style="flex:1"><div class="hint" style="margin-bottom:3px">Input</div>
-          <pre class="code" style="margin:0;max-height:160px;overflow:auto">${esc(tc.inputData||'')}</pre></div>
-        <div style="flex:1"><div class="hint" style="margin-bottom:3px">Expected output</div>
-          <pre class="code" style="margin:0;max-height:160px;overflow:auto">${esc(tc.expectedOutput||'')}</pre></div>
+      <div class="row" style="align-items:flex-start;gap:10px;flex-wrap:nowrap">
+        <div style="flex:1;min-width:0"><div class="hint" style="margin-bottom:3px">Input</div>
+          <pre class="code" style="margin:0;max-height:160px;overflow:auto;max-width:100%">${esc(tc.inputData||'')}</pre></div>
+        <div style="flex:1;min-width:0"><div class="hint" style="margin-bottom:3px">Expected output</div>
+          <pre class="code" style="margin:0;max-height:160px;overflow:auto;max-width:100%">${esc(tc.expectedOutput||'')}</pre></div>
       </div>
     </div>`).join('') : '<div class="empty">No test cases.</div>';
   // Collapsed by default every time — the statement gets the full popup

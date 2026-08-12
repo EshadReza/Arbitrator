@@ -9,4 +9,10 @@ arbitrator:
     # Eclipse's "Run As -> Java Application" doesn't inherit this shell's
     # PATH, so a bare "docker" fails with "No such file or directory" even
     # though `which docker` works fine in a terminal — see `which docker`.
+    # SandboxExecutor now auto-detects common install paths on its own when
+    # this stays at the default "docker", so this override is no longer
+    # required, but it's left here since it's harmless and one line faster.
     docker-binary: /usr/local/bin/docker
+    # Production default is 10s (application.yml); 0 here so rapid manual
+    # testing against a locally-run server isn't rate-limited.
+    submit-cooldown-seconds: 0

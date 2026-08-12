@@ -86,11 +86,22 @@ public class SubmissionService {
 
         User user = userService.requireByUsername(username);
 
-        // BR-01: at most one submission per 30 s -> 429 (UC-04 exception)
+        // BR-01: at most one submission per cooldown window -> 429 (UC-04 exception)
         Instant last = lastSubmit.get(user.getId());
         if (last != null && Duration.between(last, Instant.now()).compareTo(cooldown) < 0) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                     "Please wait " + cooldown.toSeconds() + " seconds between submissions");
+        }
+
+        // Queue-flooding guard: one in-flight (PENDING/JUDGING) submission per
+        // user. The cooldown above bounds submission RATE but not backlog
+        // depth — without this, one user submitting hundreds of infinite
+        // loops back-to-back (waiting only the cooldown between each) fills
+        // the shared judge pool for the rest of the contest, starving
+        // everyone else of verdicts.
+        if (submissions.existsByUserIdAndStatusNot(user.getId(), Submission.Status.DONE)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Your previous submission is still being judged — wait for its verdict before submitting again");
         }
 
         Problem problem = problems.findById(req.problemId()).orElseThrow(() ->

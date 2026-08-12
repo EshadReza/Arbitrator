@@ -21,6 +21,7 @@ import org.fxmisc.richtext.model.TwoDimensional.Bias;
 import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.enums.Language;
 
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
@@ -160,7 +161,17 @@ public class EditorController {
 
         codeArea.textProperty().addListener((obs, old, text) -> {
             updateCount(text);
-            codeArea.setStyleSpans(0, highlight(text));
+            // Deferred, and re-reading the live text at apply time rather than
+            // closing over this listener's `text` snapshot: applying
+            // StyleSpans synchronously here re-enters the CodeArea from
+            // inside its own change notification — e.g. the auto-close-pair
+            // KEY_TYPED filter is still mid-insertText() when this fires — and
+            // that reentrancy was corrupting the buffer a few keystrokes in
+            // (typed characters landing on, and eating into, the line below).
+            // Applying on the next pulse against whatever the text is BY THEN
+            // keeps the spans length always in sync with the document, even
+            // if more keystrokes land before this runs.
+            Platform.runLater(() -> codeArea.setStyleSpans(0, highlight(codeArea.getText())));
         });
         languageBox.valueProperty().addListener((obs, old, lang) -> {
             // Load the new language's boilerplate only when nothing has been

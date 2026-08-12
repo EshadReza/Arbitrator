@@ -60,10 +60,16 @@ public class ProblemPackageService {
     /** A statement is a few pages; anything larger is a mistake, not a problem. */
     private static final long MAX_STATEMENT_PDF_BYTES = 16L * 1024 * 1024;
 
-    private static final int MIN_TIME_LIMIT_MS = 100;
-    private static final int MAX_TIME_LIMIT_MS = 30_000;
-    private static final int MIN_MEMORY_KB = 1024;            // 1 MiB
-    private static final int MAX_MEMORY_KB = 1024 * 1024;     // 1 GiB
+    // Public: AdminProblemController.update() enforces the same range on an
+    // in-place edit, which otherwise had no upper bound at all (see there).
+    // A time/memory limit this service would reject on upload must be
+    // rejected on edit too, or the bound is trivially bypassed by uploading
+    // a valid package and then editing it into something the sandbox and
+    // the shared judge pool were never sized for.
+    public static final int MIN_TIME_LIMIT_MS = 100;
+    public static final int MAX_TIME_LIMIT_MS = 30_000;
+    public static final int MIN_MEMORY_KB = 1024;            // 1 MiB
+    public static final int MAX_MEMORY_KB = 1024 * 1024;     // 1 GiB
 
     private final ProblemRepository problems;
     private final TestCaseRepository testCases;

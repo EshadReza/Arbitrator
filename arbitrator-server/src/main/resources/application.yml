@@ -54,9 +54,10 @@ arbitrator:
     docker-image: ${ARBITRATOR_DOCKER_IMAGE:arbitrator-judge:latest}
     work-root: ${java.io.tmpdir}/arbitrator
     compile-timeout-ms: 30000
-    # BR-01. SRS says 30 s; the team asked for 10 s in production and 0
-    # while developing, so it stays configurable and defaults to 0 here.
-    submit-cooldown-seconds: ${ARBITRATOR_SUBMIT_COOLDOWN:0}
+    # BR-01. SRS says 30 s; the team settled on 10 s for production. Stays
+    # configurable — set ARBITRATOR_SUBMIT_COOLDOWN=0 for local dev/testing,
+    # but do NOT ship a real contest with it at 0 (see application-local.yml).
+    submit-cooldown-seconds: ${ARBITRATOR_SUBMIT_COOLDOWN:10}
 
   contest:
     reset-on-boot: ${ARBITRATOR_RESET_ON_BOOT:false}

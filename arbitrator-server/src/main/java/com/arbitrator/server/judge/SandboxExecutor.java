@@ -10,6 +10,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -120,12 +121,32 @@ public class SandboxExecutor {
     private static final AtomicLong SEQ = new AtomicLong();
 
     /**
-     * Mirrors {@code arbitrator.judge.docker-binary} for the shutdown hook
-     * and other static contexts that run without a {@link JudgeProperties}
-     * reference. Set once from the constructor; every Spring context has
-     * exactly one {@link SandboxExecutor}, so there is no multi-value race.
+     * Mirrors the resolved docker binary for the shutdown hook and other
+     * static contexts that run without a {@link SandboxExecutor} reference.
+     * Set once from the constructor; every Spring context has exactly one
+     * {@link SandboxExecutor}, so there is no multi-value race.
      */
     private static volatile String dockerBinaryStatic = "docker";
+
+    /**
+     * Absolute paths tried, in order, when the configured binary is still the
+     * unmodified default ({@code "docker"}) and a bare PATH lookup fails.
+     * GUI/IDE-launched processes (Eclipse's "Run As", a desktop .desktop
+     * launcher, double-clicking a jar) very often inherit a minimal PATH —
+     * {@code /usr/bin:/bin} on some Linux desktop environments, or nothing
+     * useful at all — even though "docker" resolves fine from an interactive
+     * terminal on the very same machine. Checking these candidates removes
+     * the need for a machine-specific {@code docker-binary} override on every
+     * platform this server is ever deployed to (macOS, Ubuntu, Windows).
+     */
+    private static final List<String> DOCKER_CANDIDATES = List.of(
+            "/usr/bin/docker",                                                  // Linux (apt/dnf, Docker Engine)
+            "/usr/local/bin/docker",                                            // macOS Homebrew; some Linux installs
+            "/snap/bin/docker",                                                 // Ubuntu snap package
+            "/opt/homebrew/bin/docker",                                         // macOS Homebrew, Apple Silicon
+            "/Applications/Docker.app/Contents/Resources/bin/docker",           // macOS Docker Desktop
+            "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",    // Windows Docker Desktop
+            "C:\\ProgramData\\DockerDesktop\\version-bin\\docker.exe");
 
     static {
         Runtime.getRuntime().addShutdownHook(
@@ -134,9 +155,37 @@ public class SandboxExecutor {
 
     private final JudgeProperties props;
 
+    /** Resolved once at startup — see {@link #resolveDockerBinary}. Used for every docker invocation. */
+    private final String dockerBinary;
+
     public SandboxExecutor(JudgeProperties props) {
         this.props = props;
-        dockerBinaryStatic = props.getDockerBinary();
+        this.dockerBinary = resolveDockerBinary(props.getDockerBinary());
+        dockerBinaryStatic = this.dockerBinary;
+    }
+
+    /**
+     * If the configured binary already runs, use it as-is — this covers both
+     * an explicit operator override (e.g. {@code ARBITRATOR_DOCKER_BIN}) and
+     * the common case where a bare "docker" already resolves via PATH. Only
+     * when the UNMODIFIED default fails do we go looking in the usual
+     * per-OS install locations, and only ever return one of those if it
+     * actually runs — never guess silently past that.
+     */
+    private static String resolveDockerBinary(String configured) {
+        if (runsCleanly(configured, "version")) {
+            return configured;
+        }
+        if (!"docker".equals(configured)) {
+            return configured;   // an explicit override that doesn't work — surface the real reason, don't second-guess it
+        }
+        for (String candidate : DOCKER_CANDIDATES) {
+            if (Files.isExecutable(Path.of(candidate)) && runsCleanly(candidate, "version")) {
+                log.info("'docker' was not on PATH for this process; found a working one at {}", candidate);
+                return candidate;
+            }
+        }
+        return configured;
     }
 
     /**
@@ -148,15 +197,16 @@ public class SandboxExecutor {
      */
     @PostConstruct
     void verifyDockerReady() {
-        if (!runsCleanly(props.getDockerBinary(), "version")) {
-            log.error("Docker is not available ({} version failed). No submission can be judged until "
-                    + "Docker Desktop/Engine is running — this server never runs participant code "
-                    + "outside a container.", props.getDockerBinary());
-        } else if (!runsCleanly(props.getDockerBinary(), "image", "inspect", props.getDockerImage())) {
-            log.error("Sandbox image '{}' not found. Run scripts/docker/build-sandbox-image.sh before "
+        String failure = runCapture(dockerBinary, "version");
+        if (failure != null) {
+            log.error("Docker sandbox is NOT ready — every submission will fail (as a judge-error RE) "
+                    + "until this is fixed.\n  Tried to run: {} version\n  Result: {}\n{}",
+                    dockerBinary, failure, remediationFor(failure));
+        } else if (!runsCleanly(dockerBinary, "image", "inspect", props.getDockerImage())) {
+            log.error("Sandbox image '{}' not found. Run this platform's image-load/build script before "
                     + "judging any submission.", props.getDockerImage());
         } else {
-            log.info("Docker sandbox ready: image {}", props.getDockerImage());
+            log.info("Docker sandbox ready: image {} via {}", props.getDockerImage(), dockerBinary);
         }
 
         Path root = Path.of(props.getWorkRoot());
@@ -180,6 +230,62 @@ public class SandboxExecutor {
         } catch (IOException ignored) {
             // root does not exist yet on a first run — nothing to sweep
         }
+        warnIfMemoryOversubscribed();
+    }
+
+    /**
+     * Pure diagnostic, log-only: {@code arbitrator.judge.threads} concurrent
+     * runs can each demand up to {@code MAX_MEMORY_KB * MEMORY_HEADROOM_MULTIPLIER}
+     * (a problem's own upper bound, doubled for headroom — see
+     * ProblemPackageService and MEMORY_HEADROOM_MULTIPLIER) at the same
+     * time. Each container's own {@code --memory} is a hard per-container
+     * cap, so no single run can overshoot it — but nothing relates the
+     * THREAD COUNT to how much RAM is actually on the box, so a lab PC with
+     * modest RAM and a full judge pool of high-memory-limit problems could
+     * still be driven into real host-level swapping/OOM by ordinary
+     * (non-malicious) contest load. This can't safely auto-correct itself —
+     * NFR-P04 requires >= 10 parallel jobs as a product requirement, and
+     * silently shrinking the pool would just make the contest slower with no
+     * explanation — so it only logs, loud, once, at startup.
+     */
+    private void warnIfMemoryOversubscribed() {
+        long totalPhysicalBytes;
+        try {
+            var os = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+            if (!(os instanceof com.sun.management.OperatingSystemMXBean sunOs)) {
+                return;                          // non-HotSpot JVM — nothing to report
+            }
+            totalPhysicalBytes = sunOs.getTotalMemorySize();
+        } catch (Throwable ignored) {
+            return;                              // best-effort diagnostic only
+        }
+        if (totalPhysicalBytes <= 0) {
+            return;
+        }
+        // Duplicated from ProblemPackageService.MAX_MEMORY_KB rather than
+        // imported — that class already depends on this package (CheckerRunner
+        // et al.), and this is a one-line diagnostic, not worth introducing a
+        // package cycle over. Keep the two in sync if either changes.
+        long maxProblemMemoryKb = 1024 * 1024;   // 1 GiB — matches ProblemPackageService.MAX_MEMORY_KB
+        long worstCaseBytes = (long) props.getThreads() * maxProblemMemoryKb * 1024L * MEMORY_HEADROOM_MULTIPLIER;
+        double totalGiB = totalPhysicalBytes / (1024.0 * 1024 * 1024);
+        double worstCaseGiB = worstCaseBytes / (1024.0 * 1024 * 1024);
+        if (worstCaseBytes > totalPhysicalBytes * 0.7) {
+            log.warn("Judge capacity check: {} threads x this judge's max allowed problem memory limit "
+                    + "({} MiB, doubled for headroom) = {} GiB worst case, against {} GiB of RAM on this "
+                    + "machine. A contest that actually hits that ceiling (several concurrent high-memory-"
+                    + "limit submissions) risks real host-level swapping or an OOM kill outside any "
+                    + "container. If problems here don't need memory limits anywhere near the {} MiB "
+                    + "maximum, this is nothing to act on — but if this machine's RAM is genuinely tight, "
+                    + "lower arbitrator.judge.threads or keep problem memory limits well under the max.",
+                    props.getThreads(), maxProblemMemoryKb / 1024,
+                    String.format("%.1f", worstCaseGiB), String.format("%.1f", totalGiB),
+                    maxProblemMemoryKb / 1024);
+        } else {
+            log.info("Judge capacity check: {} threads x worst-case per-submission memory = {} GiB against "
+                    + "{} GiB RAM — comfortable headroom.", props.getThreads(),
+                    String.format("%.1f", worstCaseGiB), String.format("%.1f", totalGiB));
+        }
     }
 
     /** Every container this process has ever started is named with this prefix. */
@@ -187,13 +293,13 @@ public class SandboxExecutor {
 
     private void sweepStaleContainers() {
         try {
-            Process ps = new ProcessBuilder(props.getDockerBinary(), "ps", "-aq",
+            Process ps = new ProcessBuilder(dockerBinary, "ps", "-aq",
                     "--filter", "name=" + NAME_PREFIX)
                     .redirectErrorStream(true).start();
             String ids = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             ps.waitFor(10, TimeUnit.SECONDS);
             if (!ids.isBlank()) {
-                List<String> cmd = new ArrayList<>(List.of(props.getDockerBinary(), "rm", "-f"));
+                List<String> cmd = new ArrayList<>(List.of(dockerBinary, "rm", "-f"));
                 cmd.addAll(List.of(ids.split("\\s+")));
                 new ProcessBuilder(cmd).redirectErrorStream(true).start().waitFor(15, TimeUnit.SECONDS);
                 log.info("Removed {} stale sandbox container(s) from a previous run", ids.split("\\s+").length);
@@ -241,9 +347,40 @@ public class SandboxExecutor {
 
     // ------------------------------------------------------------------
 
+    /**
+     * Below this much free space on the filesystem backing {@code workRoot},
+     * refuse to start another container rather than let it run.
+     *
+     * {@code --tmpfs /tmp:...,size=64m} caps the container's OWN scratch
+     * space, but {@code /sandbox} (this call's work dir) is a plain host
+     * bind-mount with no size limit at all — Docker has no portable,
+     * driver-independent way to cap a bind mount's total size the way it
+     * caps a tmpfs. A submission's own {@code fsize} ulimit only bounds a
+     * SINGLE file (64 MiB); nothing stopped one from writing many such files
+     * as fast as the disk allows for the full length of its time limit —
+     * multiplied by up to {@code RUN_PIDS_LIMIT} processes doing it at once,
+     * and again by every concurrent submission across the thread pool. On a
+     * lab PC with limited free disk, that is a real path to filling it
+     * entirely, which does not fail cleanly: MySQL, the OS, and this very
+     * process can all start erroring or hanging once there is nowhere left
+     * to write. Checking free space before every run turns that into a
+     * same-submission RE instead — cheap (one syscall) and checked often
+     * enough that a burst gets stopped within a run or two, not after the
+     * disk is actually gone.
+     */
+    private static final long MIN_FREE_BYTES = 1L * 1024 * 1024 * 1024;   // 1 GiB
+
     private ExecutionResult runInContainer(Path workDir, List<String> command, Path inputFile,
                                            long timeLimitMs, long memoryLimitKb, int pidsLimit)
             throws IOException, InterruptedException {
+
+        long freeBytes = Files.getFileStore(workDir).getUsableSpace();
+        if (freeBytes < MIN_FREE_BYTES) {
+            throw new IOException("Judge work disk is nearly full (" + (freeBytes / (1024 * 1024))
+                    + " MiB free, need at least " + (MIN_FREE_BYTES / (1024 * 1024))
+                    + " MiB) — refusing to start another sandbox run rather than risk filling the host disk. "
+                    + "Free up space under the judge work root or increase its filesystem.");
+        }
 
         permitContainerAccess(workDir);
 
@@ -256,7 +393,7 @@ public class SandboxExecutor {
         String name = NAME_PREFIX + workDir.getFileName() + "-" + seq;
 
         List<String> cmd = new ArrayList<>(List.of(
-                props.getDockerBinary(), "run", "--rm", "-i",
+                dockerBinary, "run", "--rm", "-i",
                 "--name", name,
                 "--network", "none",
                 "--memory", memoryLimitKb + "k",
@@ -437,13 +574,57 @@ public class SandboxExecutor {
     }
 
     private static boolean runsCleanly(String... cmd) {
+        return runCapture(cmd) == null;
+    }
+
+    /** @return null on success, or the combined stdout/stderr (or exception message) on failure. */
+    private static String runCapture(String... cmd) {
         try {
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            p.getInputStream().readAllBytes();
-            return p.waitFor(10, TimeUnit.SECONDS) && p.exitValue() == 0;
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            boolean finished = p.waitFor(10, TimeUnit.SECONDS);
+            if (finished && p.exitValue() == 0) {
+                return null;
+            }
+            String reason = finished ? "exit " + p.exitValue() : "timed out waiting for it";
+            return out.isBlank() ? "(no output, " + reason + ")" : out;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "interrupted";
         } catch (Exception e) {
-            return false;
+            return e.getClass().getSimpleName() + ": " + e.getMessage();
         }
+    }
+
+    /**
+     * Turns whatever {@code docker version} printed on failure into an actual
+     * next step, instead of a bare "Docker is not available" that sends
+     * whoever set up the lab PC hunting through Docker's own docs. The three
+     * cases below are what actually happens on a fresh machine, in the order
+     * a first-time setup usually hits them: not installed/not on PATH, not
+     * running, and — the Linux-specific one that trips people up because the
+     * fix needs a fresh login, not just a new terminal — installed and
+     * running but this user was only just added to the docker group.
+     */
+    private static String remediationFor(String failureOutput) {
+        String lower = failureOutput.toLowerCase(Locale.ROOT);
+        if (lower.contains("permission denied") && lower.contains("docker.sock")) {
+            return "  Fix: this user isn't in the 'docker' group yet. Run:\n"
+                    + "    sudo usermod -aG docker $USER\n"
+                    + "  then fully LOG OUT and back in (a new terminal window is not enough — group\n"
+                    + "  membership only takes effect on a fresh login session) and try again.";
+        }
+        if (lower.contains("cannot connect") || lower.contains("is the docker daemon running")) {
+            return "  Fix: Docker is installed but not running. Start Docker Desktop, or on Linux run:\n"
+                    + "    sudo systemctl start docker";
+        }
+        if (lower.contains("no such file or directory") || lower.contains("cannot run program")
+                || lower.contains("not recognized")) {
+            return "  Fix: docker isn't installed, or isn't reachable from however this server was "
+                    + "launched.\n  Install Docker, or set ARBITRATOR_DOCKER_BIN to its full path.";
+        }
+        return "  Check that Docker is installed, running, and this user can run 'docker version' "
+                + "from a terminal.";
     }
 
     /** Kill anything still running when the Spring context closes. */

@@ -268,6 +268,20 @@ public class MainController {
         // matching the frame.
         rootStack.widthProperty().addListener((o, a, b) -> applyZoom());
         rootStack.heightProperty().addListener((o, a, b) -> applyZoom());
+
+        // F11 fullscreen (SceneRouter.init) is a Stage-level transition, not
+        // a plain resize: some platforms fire rootStack's width/height
+        // changes mid-animation, before the Stage has settled at its true
+        // fullscreen (or restored windowed) size. Since applyZoom() cements
+        // that instant's dimensions into contentRoot's min/pref/max, landing
+        // on one of those transitional values froze the layout distorted —
+        // reachable exactly the reported "zoom, F11, zoom again" sequence —
+        // with no further resize event ever arriving to correct it. Re-apply
+        // once more, one pulse after the transition itself is reported done,
+        // as a correction pass on top of the width/height listeners above.
+        if (rootStack.getScene() != null && rootStack.getScene().getWindow() instanceof javafx.stage.Stage stage) {
+            stage.fullScreenProperty().addListener((o, a, b) -> Platform.runLater(this::applyZoom));
+        }
         applyZoom();
     }
 

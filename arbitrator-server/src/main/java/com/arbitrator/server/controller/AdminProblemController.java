@@ -153,10 +153,27 @@ public class AdminProblemController {
         }
         // Limits are optional in the payload; 0 or negative means "leave alone"
         // rather than "set to zero", which would make the problem unjudgeable.
+        // The upper bound matters just as much as the lower one: nothing else
+        // stood between an in-place edit and, say, a 30-minute time limit or a
+        // 64 GB memory limit — both go straight into SandboxExecutor's
+        // container flags and the shared judge pool has no idea one slot is
+        // now going to sit occupied far longer, or demand far more host RAM,
+        // than every other problem. Same range ProblemPackageService enforces
+        // on upload (FR-05) — an edit must not be a back door around it.
         if (edit.timeLimitMs() != null && edit.timeLimitMs() > 0) {
+            if (edit.timeLimitMs() < ProblemPackageService.MIN_TIME_LIMIT_MS
+                    || edit.timeLimitMs() > ProblemPackageService.MAX_TIME_LIMIT_MS) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "timeLimitMs must be between "
+                        + ProblemPackageService.MIN_TIME_LIMIT_MS + " and " + ProblemPackageService.MAX_TIME_LIMIT_MS);
+            }
             p.setTimeLimitMs(edit.timeLimitMs());
         }
         if (edit.memoryLimitKb() != null && edit.memoryLimitKb() > 0) {
+            if (edit.memoryLimitKb() < ProblemPackageService.MIN_MEMORY_KB
+                    || edit.memoryLimitKb() > ProblemPackageService.MAX_MEMORY_KB) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "memoryLimitKb must be between "
+                        + ProblemPackageService.MIN_MEMORY_KB + " and " + ProblemPackageService.MAX_MEMORY_KB);
+            }
             p.setMemoryLimitKb(edit.memoryLimitKb());
         }
         problems.save(p);
