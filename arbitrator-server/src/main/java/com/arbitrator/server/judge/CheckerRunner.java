@@ -84,6 +84,7 @@ public class CheckerRunner {
         // rest of the submission's directory.
         Path workDir = contestantOutputFile.toAbsolutePath().getParent().resolve("__checker");
         Files.createDirectories(workDir);
+        SandboxExecutor.permitContainerAccess(workDir);
         int timeLimitMs = (int) props.getCheckerTimeLimitMs();
         int memoryLimitKb = (int) props.getCheckerMemoryLimitKb();
 
@@ -121,9 +122,13 @@ public class CheckerRunner {
     public void validateChecker(String source) throws CheckerCompilationException {
         Path tempDir = null;
         try {
-            Path root = Path.of(props.getWorkRoot(), "checkers");
+            Path workRoot = Path.of(props.getWorkRoot());
+            Path root = workRoot.resolve("checkers");
             Files.createDirectories(root);
+            SandboxExecutor.permitContainerAccess(workRoot);
+            SandboxExecutor.permitContainerAccess(root);
             tempDir = Files.createTempDirectory(root, "checker-val-");
+            SandboxExecutor.permitContainerAccess(tempDir);
             Path src = tempDir.resolve("checker.cpp");
             Path exe = tempDir.resolve("checker_bin");
             Files.writeString(src, source, StandardCharsets.UTF_8);
@@ -154,13 +159,17 @@ public class CheckerRunner {
             return existing.binaryPath();
         }
 
-        Path root = Path.of(props.getWorkRoot(), "checkers");
+        Path workRoot = Path.of(props.getWorkRoot());
+        Path root = workRoot.resolve("checkers");
         try {
             Files.createDirectories(root);
+            SandboxExecutor.permitContainerAccess(workRoot);
+            SandboxExecutor.permitContainerAccess(root);
             Path problemDir = (problemId != null)
                     ? root.resolve("problem-" + problemId)
                     : Files.createTempDirectory(root, "checker-compile-");
             Files.createDirectories(problemDir);
+            SandboxExecutor.permitContainerAccess(problemDir);
 
             Path src = problemDir.resolve("checker.cpp");
             Path exe = problemDir.resolve("checker_bin");

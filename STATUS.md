@@ -1,9 +1,14 @@
 # STATUS
 
-**Last updated:** 2026-08-13
+**Last updated:** 2026-08-14
 **Product name:** Arbitrator — rename COMPLETE: packages `com.arbitrator.*`, modules `arbitrator-*`, classes `ArbitratorApp` / `ArbitratorServerApplication`, config prefix `arbitrator.*`, MySQL schema `arbitrator`, project folder `Arbitrator/arbitrator/`.
-**Current phase:** Sprint 2 complete, checkpoint **I2 closed**. Leaderboard end-to-end (engine + client view).
-Next: announcements (S3-B5), freeze controls (S3-B4), submission history UI (S3-C4).
+**Current phase:** Sprint 3 substantially done — this file had fallen behind the code. An audit against the actual
+source (2026-08-14) found leaderboard, freeze/unfreeze, announcements (FR-07), custom checkers (FR-14), all-3-language
+judging, deadline enforcement (BR-02), problem-list status badges, and the statement renderer were all already
+implemented and verified but still listed below as "Next up" / "Not started" — those stale entries are now corrected.
+A full clarifications ask/answer/approve system exists too and was never documented here at all; it's now in Done.
+Next: float-tolerance judging (FR-13), rejudge (UC-14), and the still-unverified items in Known issues (LAN
+reconnect, client visual pass).
 
 > Update this file whenever a chunk lands. It is the first thing read at the start of a session.
 
@@ -94,29 +99,33 @@ Roughly **Sprint 1 + half of Sprint 2** of the 4-sprint plan in `WORKFLOW_PLAN.m
 | — | **Every compile was failing on Windows** — `SandboxExecutor.runInContainer` redirected the `docker run -i` process's stdin from `new File("/dev/null")` whenever no test-input file applies (always true during compile). `/dev/null` doesn't exist on Windows — there's no single portable null-device path Java's `File` accepts the same way on every OS — so this failed on every Windows admin PC, unconditionally, independent of whether the docker binary itself resolved correctly. Reported live from a real Windows box: `Cannot run program "..." : \dev\null (The system cannot find the path specified)`. Fixed to not redirect at all and instead close the child process's own stdin stream immediately after `start()` — same "stdin is EOF right away" effect, no OS-specific path involved. | `CheckerRunnerTest` (compiles a real checker binary every run, exercising exactly this code path) passes; 39/39 total against a real Docker daemon |
 | — | **Docker infrastructure failures were shown to students as their own Compile Error** — `permission denied ... docker.sock` (or any other docker-CLI-level failure that never gets a container running) exits the `docker run` process with code 1 — the CLI's generic client-side failure code — which `runInContainer` only ever specifically caught as 125 (docker's own "daemon received the request but failed to start the container" code). Everything else, including exit 1, fell through to a normal `ExecutionResult`, and `JudgeWorker` treated any non-zero compile exit as a real `Outcome.ce(...)`, showing the raw Docker permission error to the student as if it were their own mistake. Fixed with a more general, exit-code-independent signal: `/usr/bin/time` runs *inside* the container wrapping the real command and writes its report even when that command fails — a genuine compile error still produces a rusage file, so "non-zero exit, not a timeout (124), and no rusage file at all" now reliably means docker itself never started a container, regardless of which specific exit code that particular failure mode happens to use. |
 | — | **Duplicate-submission guard** (FR request) — a contestant can no longer submit byte-for-byte identical source code twice for the same problem; `SubmissionService.submit()` now checks `SubmissionRepository.existsByUserIdAndProblemIdAndSourceCodeAndActiveTrue` and rejects with 409 before persisting. Scoped to `active=true` so a fresh contest run (DOC-9 archives the previous run's submissions on restart/clone) never treats a prior run's attempt as a duplicate. The client needed no changes — it already surfaces any server error message generically via toast. |
+| **FR-07** | **Announcements** — instructor publishes, all clients on the contest get it pushed live. `AnnouncementController`/`AnnouncementService`/`AnnouncementRepository`/`Announcement` entity server-side (write-row-then-broadcast, same FMEA-01 ordering as verdicts); `AdminCommunicationController` for the instructor side; client has a dedicated `AnnouncementsPanelController` + `AnnouncementPopup` + fxml/CSS. Found undocumented in this file — STATUS.md still listed this as "Next: S3-B5" while it was already shipped. |
+| **FR-14** | **Custom checkers** — `CheckerRunner` compiles and runs an admin-supplied checker binary per problem (cached at `workRoot/checkers/problem-N/`), wired into `JudgeWorker` (`checkerRunner.check(...)`) as an alternative to `VerdictEvaluator`'s exact match; `V53__checkers.sql`. Actively being hardened as of this update (uncommitted work-in-progress adds `SandboxExecutor.permitContainerAccess` calls for the checker's own temp/compile dirs so validation and per-problem compilation both get correct container mount permissions). Found undocumented — STATUS.md still listed FR-14 as "not started." |
+| — | **Clarifications** — full ask/answer flow (`ClarificationController`/`ClarificationService`/`ClarificationRepository`/`Clarification` entity, V58/V60/V61/V64 migrations) with a public/private toggle, plus client `ClarificationsPanelController`. Predates and underlies the already-documented "Clarification approval gate" entry above, but the base feature itself was never written down here until now. |
+| S2-B6 | **Deadline enforcement (BR-02)** — `SubmissionService` rejects a submission once the server clock says the contest is no longer open, explicit BR-02 comment at the check site. Previously listed as "partially in `ContestService`" under Next up; it's complete. |
+| S2-C1/S2-C2 | **Problem list status badges + statement renderer** — `MainController` renders a `badge-solved` style badge per problem from submission history, and the statement panel is a `WebView` rendering the uploaded HTML statement (with copy-to-clipboard on sample blocks, dark-mode fill fix noted elsewhere in this table). Previously listed as outstanding Zahin work under "Next up"; both are done. |
 
-## Next up — Sprint 2 remainder
+## Next up
 
-Three parallel branches, disjoint files, no conflicts possible:
+Sprint 2's remainder table (S2-A1, S2-B6, S2-C1, S2-C2) is gone from this file — an audit against the actual
+source on 2026-08-14 found all four already implemented and verified (now folded into the Done table above).
+What's genuinely left:
 
-| Dev | Chunk | Branch | Work |
-|---|---|---|---|
-| Eshad | `S2-A1` | `feat/eshad-S2-A1-contest-lifecycle` | Contest CRUD polish + multi-contest support (see Known issue 2) |
-| Mahir | `S2-B6` | — | Reject submissions after deadline by server clock (BR-02) — partially in `ContestService` |
-| Zahin | `S2-C1` | `feat/zahin-S2-C1-problem-list` | Problem list panel polish, Codeforces status badges |
-| Zahin | `S2-C2` | — | Statement renderer + copy-to-clipboard sample blocks |
+- **Float-tolerance judging (FR-13)** — `VerdictEvaluator` is still exact-match only; the class-level comment
+  says float tolerance was meant to slot in beside it as a Sprint 3 chunk, and nothing does yet.
+- **Rejudge (UC-14)** — no controller, service, or repository method for it anywhere in `arbitrator-server`.
+- The still-open items in **Known issues** below: LAN reconnect (issue 8) genuinely unverified, and the
+  client visual pass (issue 7) still hasn't happened on real hardware.
 
-`S2-A2` and `S2-A4` landed — see the Done table above.
+## Not started
 
-**Checkpoint I2** (`WORKFLOW_PLAN.md` §6) is nearly met — the submit→judge→verdict chain works. What remains
-is confirming the live WebSocket banner in the client UI, then Sprint 2's breadth items above.
+Confirmed absent from the codebase as of the 2026-08-14 audit (grepped for controllers/services/config, not
+just doc claims): **i18n** beyond a single `messages_en.properties` scaffold (no locale switcher, nothing
+else consumes it besides `SceneRouter`), **installer**, **TestFX**, **JMeter**, **JaCoCo**.
 
-## Not started — Sprint 3 and 4
-
-Everything in `WORKFLOW_PLAN.md` §6 Sprint 3/4. The big absent pieces:
-leaderboard + penalty engine (FR-17/18), freeze (FR-19), announcements (FR-07), float judging (FR-13),
-custom checkers (FR-14), rejudge (UC-14), Java/Python judging paths (only C++ exercised so far),
-submission history UI, reconnect/backoff, i18n, installer, TestFX, JMeter, JaCoCo.
+Previously this section also listed leaderboard+penalty engine, freeze, announcements, custom checkers,
+Java/Python judging paths, and submission history UI as "not started" — all six are implemented and are now
+in the Done table above; that was this file lagging the code, not a gap in the code.
 
 ## Known issues / risks
 

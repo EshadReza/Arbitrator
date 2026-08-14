@@ -328,6 +328,7 @@ public class SandboxExecutor {
     public Path createWorkDir(long submissionId) throws IOException {
         Path root = Path.of(props.getWorkRoot());
         Files.createDirectories(root);
+        permitContainerAccess(root);
         Path dir = Files.createTempDirectory(root, "sub-" + submissionId + "-");
         permitContainerAccess(dir);
         return dir;
@@ -395,6 +396,10 @@ public class SandboxExecutor {
                     + "Free up space under the judge work root or increase its filesystem.");
         }
 
+        Path root = Path.of(props.getWorkRoot());
+        if (Files.exists(root)) {
+            permitContainerAccess(root);
+        }
         permitContainerAccess(workDir);
 
         long hardKillS = Math.max(1, (timeLimitMs * 2 + 999) / 1000);   // SIGKILL at 2x, NFR-R04
@@ -607,7 +612,7 @@ public class SandboxExecutor {
      * sensitive — so this costs nothing on either native Linux Docker or
      * Docker Desktop's file-sharing layer.
      */
-    private static void permitContainerAccess(Path dir) {
+    static void permitContainerAccess(Path dir) {
         try {
             Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwxrwxrwx"));
         } catch (UnsupportedOperationException | IOException ignored) {
