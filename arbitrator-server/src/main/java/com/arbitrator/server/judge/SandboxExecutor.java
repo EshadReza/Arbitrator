@@ -575,15 +575,27 @@ public class SandboxExecutor {
      * CheckerRunner) maps to the read-only mount ({@code /base}). Anything
      * else (flags like {@code -O2}, relative binary names) passes through
      * unchanged.
+     *
+     * The container is always Linux regardless of host OS, so the result
+     * must always use forward slashes — but only the matched PREFIX was
+     * being replaced with {@code /sandbox}/{@code /base}; the remainder of
+     * the token was left exactly as {@link Path#toString()} produced it,
+     * which on Windows means backslashes (Windows' own separator). That
+     * gave the compiler a literal path like {@code /sandbox\main.cpp} —
+     * {@code \m} is not a path separator to a Linux shell, just two
+     * characters, so g++ reported the whole thing as one nonexistent
+     * filename. Normalizing the suffix's separators fixes it on Windows and
+     * is a no-op everywhere else (macOS/Linux never produce backslashes
+     * here in the first place).
      */
     private String translatePath(Path workDir, String token) {
         String wd = workDir.toString();
         if (token.equals(wd) || token.startsWith(wd + File.separator)) {
-            return "/sandbox" + token.substring(wd.length());
+            return "/sandbox" + token.substring(wd.length()).replace('\\', '/');
         }
         String root = Path.of(props.getWorkRoot()).toString();
         if (token.equals(root) || token.startsWith(root + File.separator)) {
-            return "/base" + token.substring(root.length());
+            return "/base" + token.substring(root.length()).replace('\\', '/');
         }
         return token;
     }

@@ -11,6 +11,17 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 IMAGE="${ARBITRATOR_DOCKER_IMAGE:-arbitrator-judge:latest}"
 
-docker build -t "$IMAGE" -f Dockerfile .
+# A plain `docker build` targets whatever architecture the machine running
+# THIS script happens to be — on an Apple Silicon Mac that's linux/arm64,
+# silently. Every real lab PC (Windows or Linux, virtually always x86_64) is
+# linux/amd64, so an image built on an ARM Mac and shipped as-is forces
+# QEMU emulation on every target machine at best ("requested image's
+# platform (linux/arm64) does not match the detected host platform") and
+# broke compiles outright at worst in practice. Always target linux/amd64
+# explicitly unless the deployment target genuinely is ARM (rare enough to
+# be an opt-in override, not the default).
+PLATFORM="${ARBITRATOR_DOCKER_PLATFORM:-linux/amd64}"
 
-echo "Built $IMAGE"
+docker buildx build --platform "$PLATFORM" -t "$IMAGE" -f Dockerfile --load .
+
+echo "Built $IMAGE for $PLATFORM"
