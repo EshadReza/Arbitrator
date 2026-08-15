@@ -7,9 +7,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.arbitrator.client.app.AppState;
+import com.arbitrator.client.app.SceneRouter;
+import com.arbitrator.client.net.JudgeApi.ApiException;
+import com.arbitrator.common.dto.AttemptSummaryDto;
 import com.arbitrator.common.dto.LeaderboardCellDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
+import com.arbitrator.common.enums.Verdict;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -18,12 +22,18 @@ import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.css.PseudoClass;
 import javafx.fxml.FXML;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Cursor;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 /**
@@ -53,6 +63,12 @@ public class LeaderboardPanelController {
 
     private static final DateTimeFormatter CLOCK =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
+
+    /** Full date, not just time-of-day, for the attempts dialog — a board
+        (and a "no submissions in the last day" gap between them) can span
+        more than one day even for a lab contest, let alone a practice set. */
+    private static final DateTimeFormatter ATTEMPT_CLOCK =
+            DateTimeFormatter.ofPattern("MMM d, HH:mm:ss").withZone(ZoneId.systemDefault());
 
     private static final PseudoClass SELF = PseudoClass.getPseudoClass("self");
 
@@ -84,6 +100,10 @@ public class LeaderboardPanelController {
      */
     private static final double ROW_HEIGHT = 60;
 
+    /** Row height for the attempts-drill-down dialog's table (matches the
+        Submissions tab's own ROW_HEIGHT so the two look like one design). */
+    private static final double ATTEMPT_ROW_HEIGHT = 42;
+
     @FXML private TableView<LeaderboardRowDto> table;
     @FXML private Label freezeBanner;
     @FXML private Label updatedLabel;
@@ -97,6 +117,9 @@ public class LeaderboardPanelController {
     /** Recomputed on resize and whenever the problem set changes. */
     private DoubleBinding problemWidth;
     private DoubleBinding participantWidth;
+    /** Which contest the current board is for — problemAttempts() needs it and
+        the row/cell data alone doesn't carry it. */
+    private long currentContestId = -1;
 
     @FXML
     private void initialize() {
@@ -183,7 +206,157 @@ public class LeaderboardPanelController {
         Platform.runLater(() -> apply(board));
     }
 
+    /**
+     * Standings box click: every attempt this participant made on this
+     * problem. Network call, so off the FX thread — same pattern LoginController
+     * uses for its own background calls, this controller has no shared
+     * async-task infra to reuse.
+     */
+    private void showAttempts(LeaderboardRowDto row, String problemCode) {
+        if (currentContestId < 0) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            List<AttemptSummaryDto> result;
+            try {
+                result = state.api().problemAttempts(currentContestId, row.username(), problemCode);
+            } catch (ApiException e) {
+                result = List.of();
+            }
+            List<AttemptSummaryDto> attempts = result;
+            Platform.runLater(() -> renderAttemptsDialog(row, problemCode, attempts));
+        }, "leaderboard-attempts");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * Every attempt this participant made on this problem, laid out like the
+     * Submissions tab's own table so the two views read as one design.
+     * Click-through to source code is only wired up when {@code row} is the
+     * viewer's own — for anyone else's row the "Open" column is simply never
+     * added, so there is no control to click in the first place. That is a
+     * belt to {@code submissionSource}/{@code submissionTests}'s own
+     * server-side owner check (LRR-02, 403 for non-owners), not a substitute
+     * for it.
+     */
+    private void renderAttemptsDialog(LeaderboardRowDto row, String problemCode,
+                                      List<AttemptSummaryDto> attempts) {
+        boolean mine = state.session() != null
+                && row.username().equals(state.session().username());
+
+        TableView<AttemptSummaryDto> attemptsTable = new TableView<>();
+        attemptsTable.setPlaceholder(new Label("No attempts to show."));
+        attemptsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        attemptsTable.setFixedCellSize(ATTEMPT_ROW_HEIGHT);
+        attemptsTable.getStyleClass().add("attempts-table");
+        attemptsTable.setItems(FXCollections.observableArrayList(attempts));
+
+        TableColumn<AttemptSummaryDto, String> when = new TableColumn<>("Time");
+        when.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(
+                ATTEMPT_CLOCK.format(Instant.ofEpochMilli(c.getValue().submittedAtMs()))));
+        when.setPrefWidth(150);
+
+        TableColumn<AttemptSummaryDto, Verdict> verdict = new TableColumn<>("Verdict");
+        verdict.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(c.getValue().verdict()));
+        verdict.setCellFactory(c -> new AttemptVerdictCell());
+        verdict.setPrefWidth(150);
+
+        TableColumn<AttemptSummaryDto, String> tests = new TableColumn<>("Tests Passed");
+        tests.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(
+                c.getValue().totalTestCases() > 0
+                        ? c.getValue().passedTestCount() + "/" + c.getValue().totalTestCases() + " passed"
+                        : "—"));
+        tests.setPrefWidth(120);
+
+        TableColumn<AttemptSummaryDto, String> time = new TableColumn<>("Time used");
+        time.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(
+                c.getValue().execTimeMs() >= 0 ? c.getValue().execTimeMs() + " ms" : "—"));
+        time.setPrefWidth(110);
+
+        List<TableColumn<AttemptSummaryDto, ?>> columns = new ArrayList<>(List.of(when, verdict, tests, time));
+
+        if (mine) {
+            TableColumn<AttemptSummaryDto, Void> open = new TableColumn<>("");
+            open.setSortable(false);
+            open.setCellFactory(c -> new OpenAttemptCell(problemCode));
+            open.setPrefWidth(140);
+            open.setMinWidth(140);
+            open.setMaxWidth(140);
+            columns.add(open);
+        }
+        attemptsTable.getColumns().setAll(columns);
+
+        Label header = new Label(row.displayName() + " — Problem " + problemCode);
+        header.getStyleClass().add("box-head");
+
+        VBox content = new VBox(10, header, attemptsTable);
+        content.setPadding(new Insets(12));
+        content.setPrefWidth(mine ? 760 : 620);
+        content.setPrefHeight(Math.min(480, Math.max(200, attempts.size() * ATTEMPT_ROW_HEIGHT + 140)));
+        VBox.setVgrow(attemptsTable, Priority.ALWAYS);
+
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Attempts");
+        dialog.setResizable(true);
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        SceneRouter.styleDialog(dialog.getDialogPane());
+        if (table.getScene() != null) {
+            dialog.initOwner(table.getScene().getWindow());
+        }
+        dialog.showAndWait();
+    }
+
+    /** Opens the full submission detail — only ever built for the viewer's own row. */
+    private final class OpenAttemptCell extends TableCell<AttemptSummaryDto, Void> {
+
+        private final Button button = new Button("View code");
+
+        OpenAttemptCell(String problemCode) {
+            button.getStyleClass().add("view-code-button");
+            button.setOnAction(e -> {
+                AttemptSummaryDto a = getTableRow() == null ? null : getTableRow().getItem();
+                if (a != null) {
+                    SubmissionDetailDialog.open(
+                            getScene() == null ? null : getScene().getWindow(),
+                            a.submissionId(), problemCode, a.language(), a.verdict(),
+                            a.submittedAtMs(), a.execTimeMs());
+                }
+            });
+        }
+
+        @Override
+        protected void updateItem(Void unused, boolean empty) {
+            super.updateItem(unused, empty);
+            setGraphic(empty || getTableRow() == null || getTableRow().getItem() == null
+                    ? null : button);
+        }
+    }
+
+    /** Same colour language as the Submissions tab's own verdict column. */
+    private static final class AttemptVerdictCell extends TableCell<AttemptSummaryDto, Verdict> {
+
+        @Override
+        protected void updateItem(Verdict verdict, boolean empty) {
+            super.updateItem(verdict, empty);
+            getStyleClass().removeIf(c -> c.startsWith("v-"));
+            if (empty) {
+                setText(null);
+                return;
+            }
+            if (verdict == null) {
+                setText("judging…");
+                getStyleClass().add("v-pending");
+                return;
+            }
+            setText(verdict.name() + " — " + verdict.label());
+            getStyleClass().add("v-" + verdict.name());
+        }
+    }
+
     private void apply(LeaderboardDto board) {
+        currentContestId = board.contestId();
         if (!board.problemCodes().equals(currentColumns)) {
             currentColumns = List.copyOf(board.problemCodes());
             rebuildProblemColumns(currentColumns);
@@ -317,8 +490,18 @@ public class LeaderboardPanelController {
      * attempt count can be sized and coloured independently, and so the second
      * line can be dropped entirely (unmanaged) rather than left as a blank line
      * that pushes the time off centre.
+     *
+     * Non-static (needs the outer controller's state/currentContestId): a
+     * touched cell is clickable, opening every attempt this participant made
+     * on this problem — same drill-down the admin console's standings boxes
+     * got. From there, a further click-through to the actual source code
+     * (renderAttemptsDialog's "Open" column) exists only when the row is the
+     * viewer's own; for anyone else's row the column is never built in the
+     * first place. AttemptSummaryDto never carrying source code or compiler
+     * output is what makes the list itself safe regardless — the "View code"
+     * gate is an added convenience boundary, not the only one.
      */
-    private static final class ProblemCell
+    private final class ProblemCell
             extends TableCell<LeaderboardRowDto, LeaderboardCellDto> {
 
         private final Label headline = new Label();
@@ -331,6 +514,17 @@ public class LeaderboardPanelController {
             box.setAlignment(Pos.CENTER);
             box.getStyleClass().add("standings-cell-box");
             setText(null);
+            box.setOnMouseClicked(e -> {
+                LeaderboardCellDto cell = getItem();
+                LeaderboardRowDto row = getTableRow() == null ? null : getTableRow().getItem();
+                if (cell == null || row == null) {
+                    return;
+                }
+                boolean nothing = !cell.solved() && cell.failedAttempts() == 0;
+                if (!nothing) {
+                    showAttempts(row, cell.problemCode());
+                }
+            });
         }
 
         @Override
@@ -342,6 +536,7 @@ public class LeaderboardPanelController {
                     || (!cell.solved() && cell.failedAttempts() == 0);
             if (nothing) {
                 setGraphic(null);
+                box.setCursor(Cursor.DEFAULT);
                 return;
             }
 
@@ -355,6 +550,7 @@ public class LeaderboardPanelController {
                 show(attempts, null);
                 getStyleClass().add("cell-failed");
             }
+            box.setCursor(Cursor.HAND);
             setGraphic(box);
         }
 

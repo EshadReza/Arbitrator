@@ -27,6 +27,13 @@ public record LeaderboardCellDto(
          * on the exact submission instant, because minute (or even second)
          * granularity can tie and the client has no way to break it.
          */
-        boolean firstSolve
+        boolean firstSolve,
+        /**
+         * Compile-error attempts on this problem (BR-04: never a rejected
+         * attempt, never penalty). Tracked separately so a problem nobody
+         * ever got past compiling still shows as touched instead of blank —
+         * blank reads as "never attempted," which a CE-only history is not.
+         */
+        int ceAttempts
 ) {
 }

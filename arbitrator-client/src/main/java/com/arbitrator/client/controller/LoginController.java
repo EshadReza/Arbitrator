@@ -74,11 +74,26 @@ public class LoginController {
             clip.widthProperty().bind(heroPane.widthProperty());
             clip.heightProperty().bind(heroPane.heightProperty());
             heroPane.setClip(clip);
-            if (heroImage != null) {
-                heroImage.fitWidthProperty().bind(heroPane.widthProperty());
-                heroImage.fitHeightProperty().bind(heroPane.heightProperty());
-            }
         }
+        // heroImage deliberately gets no fitWidth/fitHeight wiring here.
+        // ImageView.isResizable() is true (has been since JavaFX 8) and
+        // preserveRatio="false" is already set in the FXML, so the StackPane
+        // parent already resizes it to fill the pane on every layout pass —
+        // no extra code needed. An earlier version bound (and, when that was
+        // found to be the culprit, later listened for) heroPane's own
+        // width/height to drive heroImage's fitWidth/fitHeight explicitly.
+        // Confirmed live with a repro harness (drove stage.setFullScreen(true)
+        // then false, exactly what F11 does, and diffed computed widths
+        // before/after): EITHER form — bind() or an addListener() doing the
+        // identical assignment — froze heroPane at its fullscreen-era width
+        // forever after exiting fullscreen, starving the card column next to
+        // it down to a sliver with no further resize ever correcting it. A
+        // Rectangle clip bound the same way (see above) does NOT trigger it —
+        // isolated with the same harness — so the bug is specific to an
+        // ImageView's fit size reacting to its own containing pane's size
+        // while that pane is itself mid layout. Letting StackPane's own
+        // native resize() handling do it sidesteps the whole reactive-binding
+        // class of bug rather than finding a safe way to hand-roll it.
     }
 
     /** Wired to both the button and the password field's onAction (UIF-02). */

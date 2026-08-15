@@ -168,6 +168,47 @@ input:disabled{opacity:.45;cursor:not-allowed;background:var(--surface2)}
   border-radius:7px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);
   font-size:12px;font-weight:750}
 
+/* ── standings problem boxes — same colour language as the JavaFX client's
+   ProblemCell (LeaderboardPanelController): dark green for the first accepted
+   solution in the whole contest, light green for any other accepted one, pink
+   for attempted-but-unsolved, blank for untouched. Clickable (unless blank —
+   nothing to show) instead of a separate "View code" column: the box itself
+   opens that participant's attempts on that one problem. */
+.standings-box{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1px;min-width:60px;width:100%;height:40px;box-sizing:border-box;padding:6px 4px;border-radius:8px;
+  font-size:11px;line-height:1.3;cursor:pointer;user-select:none;transition:filter .12s,transform .12s}
+.standings-box:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.standings-box:active{transform:translateY(0)}
+.standings-box .sb-time{font-size:11.5px;font-weight:750}
+.standings-box .sb-tries{font-size:10px;opacity:.85}
+.standings-box.sb-empty{cursor:default;color:var(--muted)}
+.standings-box.sb-empty:hover{filter:none;transform:none}
+.standings-box.sb-first{background:color-mix(in srgb,var(--green) 62%,var(--surface2));color:#fff}
+.standings-box.sb-solved{background:color-mix(in srgb,var(--green) 22%,var(--surface2));color:var(--green)}
+.standings-box.sb-failed{background:color-mix(in srgb,var(--red) 20%,var(--surface2));color:var(--red)}
+.standings-box.sb-ce{background:color-mix(in srgb,var(--purple) 22%,var(--surface2));color:var(--purple)}
+
+/* Standings' # / Participant / Solved / Penalty / Marks columns stay put while
+   the problem columns (A, B, C, ...) scroll — a contest with many problems
+   made the whole row, participant name included, slide out of view together,
+   so there was no way to tell whose row you were even looking at once
+   scrolled. Each column pins at the running sum of every sticky column's own
+   width before it (44 / 220 / 60 / 150 / 100, from the header's inline
+   widths) — table-layout:fixed guarantees those widths hold exactly, which
+   position:sticky's left offset depends on. An explicit background is
+   required (sticky cells must paint over whatever scrolls underneath them),
+   which is why the hover rule below exists — without it, hovering a row
+   changes tbody tr's background but these five cells, having their own
+   opaque fill, would visibly stay behind while the rest of the row lit up. */
+#standingsTable .standings-sticky{position:sticky;z-index:2;background:var(--surface)}
+#standingsTable thead .standings-sticky{z-index:3}
+#standingsTable tbody tr:hover .standings-sticky{background:var(--surface2)}
+#standingsTable .sticky-0{left:0}
+#standingsTable .sticky-1{left:44px}
+#standingsTable .sticky-2{left:264px}
+#standingsTable .sticky-3{left:324px}
+#standingsTable .sticky-4{left:474px;border-right:1px solid var(--border)}
+
 /* ── icon-row list items: announcements / clarifications ──────────────────── */
 .list-row{display:flex;gap:12px;border:1px solid var(--border);border-radius:14px;
   padding:12px 14px;margin-bottom:10px;transition:.15s}
@@ -244,6 +285,34 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-m
 table{width:100%;border-collapse:collapse}
 th{text-align:left;padding:8px 10px;font-size:10.5px;text-transform:uppercase;
    letter-spacing:.05em;color:var(--muted);border-bottom:1px solid var(--border)}
+/* Clickable column headers (Feed table) — a plain <th> gives no affordance
+   that clicking it does anything, so sortable ones get a pointer cursor and
+   a hover colour shift; the indicator span stays reserved-but-empty on an
+   unsorted column so the header text doesn't shift sideways the moment a
+   sort is first applied. */
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--ink)}
+th.sortable .sort-ind{display:inline-block;width:9px;margin-left:2px;color:var(--accent)}
+/* Feed table headers: vertical-align:middle on the <th> itself centers the
+   text's LINE BOX within the cell, and that line box's own height/baseline
+   depends on exactly what inline content is in it — measured live, headers
+   carrying the sort-ind span centered a couple pixels off from the one that
+   didn't, even with the span perfectly matched (bug report: "Best Verdict"
+   sat visibly lower than the other three). A flex wrapper sidesteps line-box
+   arithmetic entirely: align-items:center centers the label's children
+   deterministically regardless of what they are, so every header — with or
+   without a sort indicator, sortable or not — centers identically. */
+.th-label{display:flex;align-items:center;height:100%}
+/* Default table-layout:auto recomputes every column's width from the widest
+   content in ANY row, header included — fragile here specifically: three of
+   Feed's five headers carry the sort-indicator span and one doesn't, and
+   sub-rows put a "View code" button in the column group/problem rows show a
+   verdict badge in, so the widest-content-wins algorithm has every reason to
+   size that column differently than its 140px header hint depending on
+   fonts/zoom/browser. table-layout:fixed makes column widths come ONLY from
+   this row's declared widths, so Best Verdict (and every other column)
+   lines up with its header no matter what any row underneath contains. */
+#feedTable{table-layout:fixed}
 td{padding:9px 10px;border-bottom:1px solid var(--border)}
 tr:last-child td{border-bottom:none}
 tbody tr:hover{background:var(--surface2)}
@@ -310,15 +379,24 @@ details.info .body-txt{margin-top:9px;color:var(--muted);font-size:12.5px;line-h
 pre.code{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:13px;
          overflow:auto;max-height:360px;white-space:pre;tab-size:4;
          font:12px/1.5 ui-monospace,Menlo,monospace;
-         scrollbar-color:var(--border) transparent}
+         scrollbar-color:var(--muted) transparent}
 /* Belt-and-suspenders on top of color-scheme above (Firefox reads
    scrollbar-color directly; Chromium/Safari want the pseudo-elements
    instead) — a themed, always-visible thumb regardless of either browser's
-   own light/dark scrollbar defaults. */
+   own light/dark scrollbar defaults.
+   Resting colour is --muted, not --border: the thumb rendered at rest in
+   --border (the same colour as pre.code's own 1px border, on a --surface2
+   background barely different from it either) was technically always
+   present but had almost no contrast against the box around it — on a long
+   line the thumb shrinks too, so a low-contrast sliver becomes genuinely
+   hard to locate without first hovering blind to trigger the (higher-
+   contrast) hover colour. --muted has real contrast against --surface2 in
+   both themes, so the thumb is actually visible without hovering; hover
+   goes to --ink (full text contrast) as a still-stronger affordance. */
 pre.code::-webkit-scrollbar{width:10px;height:10px}
 pre.code::-webkit-scrollbar-track{background:transparent}
-pre.code::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
-pre.code::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+pre.code::-webkit-scrollbar-thumb{background:var(--muted);border-radius:6px}
+pre.code::-webkit-scrollbar-thumb:hover{background:var(--ink)}
 .ok{color:var(--green)} .err{color:var(--red)}
 .hide{display:none!important}
 
@@ -614,6 +692,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
     <button class="nav"    data-sec="feed"     onclick="go('feed')"><span class="ic">📊</span>Submissions</button>
     <button class="nav" data-sec="standings" onclick="go('standings')"><span class="ic">📝</span>Standings & Marks</button>
     <button class="nav" data-sec="announce" onclick="go('announce')"><span class="ic">📢</span>Announcements</button>
+    <button class="nav" data-sec="materials" onclick="go('materials')"><span class="ic">📁</span>Materials</button>
     <button class="nav" data-sec="clarify"  onclick="go('clarify')"><span class="ic">❓</span>Clarifications
       <span class="pill hide" id="clarifyBadge">0</span></button>
     <button class="nav" data-sec="notifications" onclick="go('notifications')"><span class="ic">🔔</span>Notifications
@@ -855,9 +934,11 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
             <span class="spacer"></span><button class="btn icon" onclick="loadFeed()" title="Refresh">⟳</button></div>
           <div class="table-flush">
             <table id="feedTable"><thead><tr>
-              <th style="width:36px"></th><th>Participant</th>
-              <th style="width:100px">Submissions</th><th style="width:80px">Accepted</th>
-              <th style="width:140px">Best Verdict</th>
+              <th style="width:36px"></th>
+              <th class="sortable" onclick="sortFeed('name')"><span class="th-label">Participant<span class="sort-ind" id="feedSortInd-name"></span></span></th>
+              <th class="sortable" style="width:100px" onclick="sortFeed('submissions')"><span class="th-label">Submissions<span class="sort-ind" id="feedSortInd-submissions"></span></span></th>
+              <th class="sortable" style="width:80px" onclick="sortFeed('accepted')"><span class="th-label">Accepted<span class="sort-ind" id="feedSortInd-accepted"></span></span></th>
+              <th style="width:140px"><span class="th-label">Best Verdict</span></th>
             </tr></thead><tbody></tbody></table>
           </div>
         </div>
@@ -881,12 +962,17 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
         <div class="dash-card">
           <div class="hd"><div class="ic" style="--tile-hue:var(--hue-amber)">🏁</div><h3>Standings</h3>
             <span class="spacer"></span><button class="btn icon" onclick="loadStandings()" title="Refresh">⟳</button></div>
+          <div class="lede" style="margin:0 0 10px">Click a problem box to see that participant's attempts on it, then a specific attempt for the full submission.</div>
           <div class="table-flush" style="overflow-x:auto">
-            <table id="standingsTable"><thead><tr>
-              <th style="width:44px">#</th><th>Participant</th>
-              <th style="width:60px">Solved</th><th style="width:150px">Penalty</th>
-              <th style="width:90px">Best Time</th><th style="width:90px">Language</th>
-              <th style="width:100px">Marks</th><th style="width:90px"></th>
+            <!-- Fixed columns are hand-written; problem columns vary per contest
+                 so the header row is rebuilt in JS (renderStandingsHeader) every
+                 load, same reasoning as feedTable's table-layout — see there. -->
+            <table id="standingsTable" style="table-layout:fixed"><thead><tr id="standingsHeadRow">
+              <th class="standings-sticky sticky-0" style="width:44px">#</th>
+              <th class="standings-sticky sticky-1" style="width:220px">Participant</th>
+              <th class="standings-sticky sticky-2" style="width:60px">Solved</th>
+              <th class="standings-sticky sticky-3" style="width:150px">Penalty</th>
+              <th class="standings-sticky sticky-4" style="width:100px">Marks</th>
             </tr></thead><tbody></tbody></table>
           </div>
         </div>
@@ -928,6 +1014,36 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
             <span class="spacer"></span><span class="badge" id="annCountBadge" style="background:var(--purple)">0</span>
             <button class="btn icon" onclick="loadAnnouncements()" title="Refresh">⟳</button></div>
           <div id="annList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sec-materials" class="hide">
+      <h1>Materials</h1>
+      <div class="lede">Downloadable files for this contest — slides, PDFs, anything. Participants see these
+        in their own Materials tab and just download the file, nothing is rendered in the app.</div>
+
+      <div class="dash-stack">
+        <div class="dash-card">
+          <div class="hd"><div class="ic" style="--tile-hue:var(--hue-blue)">📁</div><h3>Uploaded</h3>
+            <span class="spacer"></span><span class="badge" id="matCountBadge" style="background:var(--accent)">0</span>
+            <button class="btn icon" onclick="loadMaterials()" title="Refresh">⟳</button></div>
+          <div id="matList"></div>
+        </div>
+
+        <div class="dash-card">
+          <div class="hd"><div class="ic" style="--tile-hue:var(--hue-green)">⬆️</div><h3>Upload files</h3></div>
+          <div class="row"><input type="file" id="matFile" multiple>
+            <button class="btn primary" onclick="uploadMaterial()">Upload</button></div>
+          <div id="matUploadResults" class="hide">
+            <div style="font-weight:600;margin-bottom:8px">Upload Results</div>
+            <div id="matUploadResultsList"></div>
+          </div>
+          <p class="hint">
+            Any file type — PDF, PPTX, images, archives. Select several at once to upload them together.
+            Stored on this machine's disk (not the database), so large files are fine. Every connected
+            participant sees each one appear immediately.
+          </p>
         </div>
       </div>
     </section>
@@ -993,7 +1109,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
 
     <section id="sec-notifications" class="hide">
       <h1>Notifications</h1>
-      <div class="lede">Every disconnect and reconnect, in order — one entry each, nothing repeats on its own. Delete what you've dealt with.</div>
+      <div class="lede">Every disconnect and reconnect, in order — one entry each, nothing repeats on its own. Grouped one row per participant so a flaky connection doesn't bury everyone else; click a row for that person's full history. Delete what you've dealt with.</div>
       <div class="dash-stack">
         <div class="dash-card">
           <div class="hd"><div class="ic" style="--tile-hue:var(--hue-red)">🔔</div><h3>All notifications</h3>
@@ -1072,11 +1188,27 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
   </div>
 </div>
 
+<!-- Repurposed from a "best submission per problem" view into a standings-box
+     drill-down (all attempts on one problem for one participant) — the id
+     stays bestSourceModal/bestSourceTitle/bestSourceContainer since nothing
+     else needs renaming, just what openParticipantProblemSubmissions() fills it with. -->
 <div class="modal hide" id="bestSourceModal">
   <div class="card wide">
-    <header><span id="bestSourceTitle">Best Submissions</span><span class="spacer"></span>
+    <header><span id="bestSourceTitle">Attempts</span><span class="spacer"></span>
       <button class="btn sm" onclick="closeModal('bestSourceModal')">Close</button></header>
     <div class="body" id="bestSourceContainer"></div>
+  </div>
+</div>
+
+<!-- One participant's full disconnect/reconnect history — the Notifications
+     tab collapses that history to one summary row per user, so a flaky
+     connection doesn't bury everyone else's entries; this is where all of
+     it still lives, opened by clicking that row. -->
+<div class="modal hide" id="userNotifModal">
+  <div class="card wide">
+    <header><span id="userNotifTitle">History</span><span class="spacer"></span>
+      <button class="btn sm" onclick="closeModal('userNotifModal')">Close</button></header>
+    <div class="body" id="userNotifContainer"></div>
   </div>
 </div>
 
@@ -1330,7 +1462,7 @@ async function api(method,path,params,quiet){
 }
 
 function go(sec){
-  ['dashboard','control','problems','people','feed','standings','announce','clarify','contests','notifications']
+  ['dashboard','control','problems','people','feed','standings','announce','materials','clarify','contests','notifications']
     .forEach(s=>$('sec-'+s).classList.toggle('hide',s!==sec));
   document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('on',n.dataset.sec===sec));
   if(sec==='dashboard') loadDashboard();
@@ -1343,6 +1475,7 @@ function go(sec){
   // this tab fresh (or after switching contests) showed a stale confirmation
   // for something that hadn't happened yet this time.
   if(sec==='announce'){ $('annStatus').textContent=''; loadAnnouncements(); }
+  if(sec==='materials') loadMaterials();
   if(sec==='clarify')  loadClarifications();
   if(sec==='contests') loadContests();
   if(sec==='notifications'){ refreshNotifications(); renderActionLogTab(); }
@@ -1395,6 +1528,14 @@ let lastNotifId=-1, notifFirstPoll=true;
     just not in this live strip). Each entry times out on its own 5s clock
     regardless of how many others are showing. */
 let liveNotifs=[];
+/** Full flat feed from the last poll, newest first — kept around so
+    openUserNotifHistory() can slice out one user's entries without a
+    separate fetch. */
+let lastNotifBody=[];
+/** Username whose full-history modal is currently open, if any — so a
+    delete (from anywhere) can refresh that modal in place instead of
+    leaving it showing stale/removed entries. */
+let openNotifUser=null;
 
 function notifIcon(n){
   if(n.type==='RECONNECTED') return '🟢';
@@ -1430,14 +1571,61 @@ function pushLiveNotification(n){
   },5000);
 }
 
+/**
+ * One user reconnecting 500 times used to mean 500 rows in this list,
+ * burying everyone else's entries under one flaky connection. Grouped by
+ * username instead — one summary row per participant (their most recent
+ * event), full per-user history one click away in userNotifModal. The
+ * underlying feed is untouched; this only changes how it's presented.
+ */
+function groupNotifsByUser(body){
+  // body is newest-first, and Map preserves insertion order, so the first
+  // entry seen for a user is already that user's most recent notification.
+  const groups=new Map();
+  body.forEach(n=>{
+    if(!groups.has(n.username)) groups.set(n.username,[]);
+    groups.get(n.username).push(n);
+  });
+  return groups;
+}
+
 function renderNotifTab(body){
+  lastNotifBody=body;
   $('notifCountBadge').textContent=body.length;
-  $('notifList').innerHTML = body.length ? body.map(n=>`
-    <div class="list-row" data-notif-id="${n.id}">
+  const groups=groupNotifsByUser(body);
+  $('notifList').innerHTML = groups.size ? [...groups.values()].map(list=>{
+    const n=list[0], count=list.length;
+    return `<div class="list-row" style="cursor:pointer" onclick="openUserNotifHistory('${esc(n.username)}')">
       <div class="ic">${notifIcon(n)}</div>
       <div class="content">
         <div class="row" style="gap:8px">
           <b>${esc(n.displayName)}</b>
+          <span class="hint">${notifWhat(n)}</span>
+          ${count>1?`<span class="badge" style="background:var(--surface2);color:var(--muted)">×${count}</span>`:''}
+          <span class="spacer"></span>
+          <span class="hint">${new Date(n.atMs).toLocaleString()}</span>
+        </div>
+        <div class="hint" style="margin-top:2px">${esc(n.contestTitle)}</div>
+      </div>
+      <button class="btn sm danger" onclick="event.stopPropagation();dismissUserNotifications('${esc(n.username)}')"
+              style="align-self:center">Delete${count>1?' all':''}</button>
+    </div>`;
+  }).join('') : '<div class="empty">No notifications yet.</div>';
+
+  // Keep an already-open per-user history modal in sync with whatever just
+  // arrived or got dismissed, rather than leaving it showing a stale list.
+  if(openNotifUser) renderUserNotifModal(openNotifUser, groups.get(openNotifUser)||[]);
+}
+
+/** The full history behind one summary row — every entry for one user, newest first. */
+function renderUserNotifModal(username, list){
+  if(!list.length){ closeModal('userNotifModal'); openNotifUser=null; return; }
+  $('userNotifTitle').textContent=`${list[0].displayName} (@${username}) — ${list.length} notification${list.length===1?'':'s'}`;
+  $('userNotifContainer').innerHTML = list.map(n=>`
+    <div class="list-row" data-notif-id="${n.id}">
+      <div class="ic">${notifIcon(n)}</div>
+      <div class="content">
+        <div class="row" style="gap:8px">
           <span class="hint">${notifWhat(n)}</span>
           <span class="spacer"></span>
           <span class="hint">${new Date(n.atMs).toLocaleString()}</span>
@@ -1445,7 +1633,13 @@ function renderNotifTab(body){
         <div class="hint" style="margin-top:2px">${esc(n.contestTitle)}</div>
       </div>
       <button class="btn sm danger" onclick="dismissNotification(${n.id})" style="align-self:center">Delete</button>
-    </div>`).join('') : '<div class="empty">No notifications yet.</div>';
+    </div>`).join('');
+}
+
+function openUserNotifHistory(username){
+  openNotifUser=username;
+  renderUserNotifModal(username, lastNotifBody.filter(n=>n.username===username));
+  openModal('userNotifModal');
 }
 
 async function refreshNotifications(){
@@ -1471,13 +1665,18 @@ async function refreshNotifications(){
 }
 
 async function dismissNotification(id){
-  // Optimistic in both places it can appear — the next poll confirms either
-  // way, no need to wait on the DELETE round trip first.
   liveNotifs=liveNotifs.filter(n=>n.id!==id);
   renderLiveNotifs();
-  const row=document.querySelector(`#notifList [data-notif-id="${id}"]`);
-  if(row) row.remove();
   await api('DELETE','/api/admin/notifications/'+id,null,true);
+  await refreshNotifications();
+}
+
+/** Clears one user's whole run of entries at once — see groupNotifsByUser's javadoc. */
+async function dismissUserNotifications(username){
+  liveNotifs=liveNotifs.filter(n=>n.username!==username);
+  renderLiveNotifs();
+  await api('DELETE','/api/admin/notifications/by-user/'+encodeURIComponent(username),null,true);
+  await refreshNotifications();
 }
 
 async function loadContests(){
@@ -2019,6 +2218,36 @@ function macCell(x){
 let feedData=[];
 const openUsers=new Set(), openProblems=new Set();
 
+/* Feed table column sort — Participant/Submissions/Accepted are clickable
+   (Best Verdict isn't: it's per-problem/per-attempt once expanded, not a
+   single sortable value on the group row). Each click either picks a new
+   column (ascending first) or, on the already-sorted column, flips
+   direction — a plain toggle, not a three-state "click again to clear". */
+let feedSort={key:null,dir:1};
+const FEED_SORT_COMPARATORS={
+  name:(a,b)=>(a.displayName||a.username).localeCompare(b.displayName||b.username),
+  submissions:(a,b)=>a.totalSubmissions-b.totalSubmissions,
+  accepted:(a,b)=>a.acceptedCount-b.acceptedCount,
+};
+
+function sortFeed(key){
+  feedSort.dir = (feedSort.key===key) ? -feedSort.dir : 1;
+  feedSort.key = key;
+  renderFeed();
+}
+
+function applyFeedSort(){
+  const cmp=FEED_SORT_COMPARATORS[feedSort.key];
+  if(cmp) feedData.sort((a,b)=>cmp(a,b)*feedSort.dir);
+}
+
+function updateFeedSortIndicators(){
+  Object.keys(FEED_SORT_COMPARATORS).forEach(k=>{
+    const el=$('feedSortInd-'+k);
+    if(el) el.textContent = feedSort.key===k ? (feedSort.dir>0?'▲':'▼') : '';
+  });
+}
+
 async function loadFeed(){
   if(selected==null) return;
   const {body}=await api('GET',`/api/admin/contests/${selected}/submissions/grouped`,null,true);
@@ -2047,15 +2276,27 @@ function groupByProblem(subs){
     .map(([code,list])=>({code,list}));
 }
 
+/** "Problem A — Print 1 to 5" -> "A". Falls back to the label itself if it
+    doesn't match that shape (e.g. the "—" placeholder for a deleted problem). */
+function shortProblemCode(label){
+  const m=/^Problem\s+(\S+)\s+—/.exec(label||'');
+  return m ? m[1] : label;
+}
+
 function renderFeed(){
+  applyFeedSort();
+  updateFeedSortIndicators();
   const tb=$('feedTable').querySelector('tbody');
   if(!feedData.length){
     tb.innerHTML='<tr><td colspan="5" class="empty">No submissions yet.</td></tr>'; return;
   }
   let html='';
-  feedData.forEach((g,gi)=>{
-    const userOpen=openUsers.has(gi);
-    html+=`<tr class="group-head ${userOpen?'open':''}" onclick="toggleUser(${gi})">
+  feedData.forEach((g)=>{
+    // Keyed by username, not array index — sorting the Feed table reorders
+    // feedData, and an index-keyed open-set would make a DIFFERENT
+    // participant appear expanded after every sort/re-sort.
+    const userOpen=openUsers.has(g.username);
+    html+=`<tr class="group-head ${userOpen?'open':''}" onclick="toggleUser('${esc(g.username)}')">
       <td>▶</td>
       <td>${nameCell(g.displayName,g.username)}</td>
       <td>${g.totalSubmissions}</td>
@@ -2064,11 +2305,11 @@ function renderFeed(){
     </tr>`;
     if(!userOpen) return;
 
-    g.problems.forEach((p,pi)=>{
-      const key=gi+':'+pi, problemOpen=openProblems.has(key);
+    g.problems.forEach((p)=>{
+      const key=g.username+':'+p.code, problemOpen=openProblems.has(key);
       const accepted=p.list.filter(s=>s.verdict==='AC').length;
       const best=accepted ? 'AC' : ((p.list.find(s=>s.verdict)||{}).verdict||null);
-      html+=`<tr class="problem-head ${problemOpen?'open':''}" onclick="toggleProblem('${key}')">
+      html+=`<tr class="problem-head ${problemOpen?'open':''}" onclick="toggleProblem('${esc(key)}')">
         <td style="text-align:right;color:var(--muted)">▶</td>
         <td style="padding-left:34px"><b>${esc(p.code)}</b></td>
         <td>${p.list.length}</td>
@@ -2093,8 +2334,8 @@ function renderFeed(){
   tb.innerHTML=html;
 }
 
-function toggleUser(gi){
-  openUsers.has(gi) ? openUsers.delete(gi) : openUsers.add(gi);
+function toggleUser(username){
+  openUsers.has(username) ? openUsers.delete(username) : openUsers.add(username);
   renderFeed();
 }
 
@@ -2122,20 +2363,70 @@ async function loadStandings(){
   const top=body.reduce((best,s)=>(!best||s.solved>best.solved)?s:best,null);
   $('tileTopSolved').textContent=top?top.solved:0;
   $('tileTopSolvedWho').textContent=top&&top.solved>0?(top.displayName||top.username):'no solves yet';
+
+  // Problem columns vary per contest — problemColumns() (shared with Export)
+  // derives them from the longest cells array rather than a separate fetch.
+  const codes=problemColumns(body);
+  renderStandingsHeader(codes);
+
   $('standingsTable').querySelector('tbody').innerHTML = body.length? body.map((s,i)=>`<tr>
-      <td><span class="rank-badge ${i===0?'r1':i===1?'r2':i===2?'r3':''}">${i+1}</span></td>
-      <td>${nameCell(s.displayName,s.username)}</td>
-      <td>${s.solved}</td>
-      <td style="white-space:nowrap"><b>${s.penaltyMinutes}m</b> <button class="btn sm" style="padding:2px 6px;margin-left:6px;font-size:11px" onclick="adjustPenaltyPrompt('${esc(s.username)}')">± Penalty</button></td>
-      <td>${s.bestExecTimeMs>=0?s.bestExecTimeMs+' ms':'—'}</td>
-      <td>${s.bestLanguage||'—'}</td>
-      <td><input type="number" min="0" max="100" value="${s.marks!=null?s.marks:''}" 
+      <td class="standings-sticky sticky-0"><span class="rank-badge ${i===0?'r1':i===1?'r2':i===2?'r3':''}">${i+1}</span></td>
+      <td class="standings-sticky sticky-1">${nameCell(s.displayName,s.username)}</td>
+      <td class="standings-sticky sticky-2">${s.solved}</td>
+      <td class="standings-sticky sticky-3" style="white-space:nowrap"><b>${s.penaltyMinutes}m</b> <button class="btn sm" style="padding:2px 6px;margin-left:6px;font-size:11px" onclick="adjustPenaltyPrompt('${esc(s.username)}')">± Penalty</button></td>
+      <td class="standings-sticky sticky-4"><input type="number" min="0" max="100" value="${s.marks!=null?s.marks:''}"
            style="width:70px" placeholder="—"
            onchange="setParticipantMarks('${esc(s.username)}',this.value)"
            onkeydown="if(event.key==='Enter'){setParticipantMarks('${esc(s.username)}',this.value);this.blur()}"
            ${s.bestSubmissionId!=null?'':'disabled title="No submissions yet"'}></td>
-      <td>${s.bestSubmissionId!=null?`<button class="btn sm" onclick="viewParticipantCodes('${esc(s.username)}','${esc(s.displayName)}')">View code</button>`:''}</td>
-    </tr>`).join('') : '<tr><td colspan="8" class="empty">No submissions yet.</td></tr>';
+      ${codes.map(code=>`<td style="padding:5px">${standingsBoxCell(s,code)}</td>`).join('')}
+    </tr>`).join('') : `<tr><td colspan="${5+codes.length}" class="empty">No submissions yet.</td></tr>`;
+}
+
+/** One problem's box for one row — same states/colours as the JavaFX client's
+    ProblemCell (LeaderboardPanelController): first solve / solved / failed /
+    blank. Blank cells aren't clickable — there's nothing to show. */
+function standingsBoxCell(row,code){
+  const cell=(row.cells||[]).find(c=>c.problemCode===code);
+  const untouched=!cell||(!cell.solved&&cell.failedAttempts===0&&!cell.ceAttempts);
+  if(untouched) return '<div class="standings-box sb-empty">—</div>';
+
+  const onclick=`openParticipantProblemSubmissions('${esc(row.username)}','${esc(row.displayName)}','${esc(code)}')`;
+  // BR-04: CE never counts as a reject, so a problem only ever compile-errored
+  // still needs to read as "touched" rather than blank.
+  if(!cell.solved&&cell.failedAttempts===0&&cell.ceAttempts>0){
+    return `<div class="standings-box sb-ce" onclick="${onclick}" title="Click to see all attempts">
+      <span class="sb-time">-1</span></div>`;
+  }
+  if(cell.solved){
+    const cls=cell.firstSolve?'sb-first':'sb-solved';
+    const tries=cell.failedAttempts>0?`<span class="sb-tries">(-${cell.failedAttempts})</span>`:'';
+    return `<div class="standings-box ${cls}" onclick="${onclick}" title="Click to see all attempts">
+      <span class="sb-time">${elapsedClock(cell.solvedAtSeconds)}</span>${tries}</div>`;
+  }
+  return `<div class="standings-box sb-failed" onclick="${onclick}" title="Click to see all attempts">
+    <span class="sb-time">(-${cell.failedAttempts})</span></div>`;
+}
+
+/** Same H:MM:SS-uncapped format as the client's ProblemCell.elapsed(). */
+function elapsedClock(totalSeconds){
+  if(totalSeconds==null||totalSeconds<0) return '—';
+  const h=Math.floor(totalSeconds/3600), m=Math.floor((totalSeconds%3600)/60), sec=totalSeconds%60;
+  return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+/** Fixed columns are hand-written in the HTML; only the problem columns are rebuilt here. */
+function renderStandingsHeader(codes){
+  const row=$('standingsHeadRow');
+  [...row.querySelectorAll('th.standings-problem-col')].forEach(th=>th.remove());
+  codes.forEach(code=>{
+    const th=document.createElement('th');
+    th.className='standings-problem-col';
+    th.style.width='72px';
+    th.style.textAlign='center';
+    th.textContent=code;
+    row.appendChild(th);
+  });
 }
 
 async function setParticipantMarks(username,val){
@@ -2167,36 +2458,45 @@ async function overrideVerdict(subId, newVerdict){
   }
 }
 
-async function viewParticipantCodes(username, displayName){
-  const {status,body}=await api('GET',`/api/admin/contests/${selected}/participants/${encodeURIComponent(username)}/codes`,null,true);
+/**
+ * Standings box click: every attempt one participant made on one problem,
+ * newest first — timestamps, verdicts, how far each got — with no code shown
+ * yet. Reuses the Feed's own grouped-submissions fetch and grouping (same
+ * data, same shape) instead of a dedicated endpoint. Clicking a row drills
+ * into the existing sourceModal (viewSource) for the full detail — this
+ * modal closes first so the two never show at once.
+ */
+async function openParticipantProblemSubmissions(username, displayName, problemCode){
+  const {status,body}=await api('GET',`/api/admin/contests/${selected}/submissions/grouped`,null,true);
   if(status>=300||!Array.isArray(body)) return;
-  $('bestSourceTitle').textContent=`Submissions for ${username} (${displayName})`;
+  const group=body.find(g=>g.username===username);
+  // groupByProblem() keys its groups by SubmissionHistoryDto.problemCode, which
+  // — despite the name — is actually "Problem <code> — <title>" (see its
+  // server-side construction; the Feed tab already relies on that full label
+  // for display). Standings' own cells carry the bare code ("A"), so a direct
+  // === match here always misses. Extract the short code from the label
+  // before comparing instead of assuming the two fields share a format.
+  const attempts=group ? (groupByProblem(group.submissions||[])
+      .find(p=>shortProblemCode(p.code)===problemCode)?.list || []) : [];
+
+  $('bestSourceTitle').textContent=`${displayName} (@${username}) — Problem ${problemCode}`;
   const container=$('bestSourceContainer');
-  if(!body.length){
-    container.innerHTML='<div class="empty">No submissions for this participant.</div>';
+  if(!attempts.length){
+    container.innerHTML='<div class="empty">No attempts recorded for this problem.</div>';
   } else {
-    container.innerHTML = body.map(p => `
-      <div style="margin-bottom:20px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--surface)">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <h3 style="margin:0;font-size:15px;color:var(--fg)">📌 Problem ${esc(p.problemCode)}: ${esc(p.problemTitle)}
-            <span class="${p.verdict?'v-'+p.verdict:'v-none'}" style="margin-left:8px;font-size:13px">[${p.verdict||'judging'}]</span>
-            <small class="hint" style="margin-left:8px">(${p.execTimeMs>=0?p.execTimeMs+' ms':'—'} · ${esc(p.language||'—')})</small>
-          </h3>
-          <div>
-            <select onchange="overrideVerdict(${p.submissionId}, this.value)" style="font-size:12px;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface2)">
-              <option value="" disabled selected>Override verdict...</option>
-              <option value="AC">Set AC (Accepted)</option>
-              <option value="WA">Set WA (Wrong Answer)</option>
-              <option value="TLE">Set TLE (Time Limit Exceeded)</option>
-              <option value="MLE">Set MLE (Memory Limit Exceeded)</option>
-              <option value="RE">Set RE (Runtime Error)</option>
-              <option value="CE">Set CE (Compile Error)</option>
-            </select>
-          </div>
-        </div>
-        <pre class="code" style="margin:0">${esc(p.sourceCode||'')}${p.compilerOutput?'\n\n--- compiler output ---\n'+esc(p.compilerOutput):''}</pre>
-      </div>
-    `).join('');
+    container.innerHTML = `<div class="table-flush"><table><thead><tr>
+        <th>Submitted</th><th>Verdict</th><th>Language</th><th>Time</th><th>Tests</th><th></th>
+      </tr></thead><tbody>
+      ${attempts.map(s=>`
+        <tr class="attempt-row" style="cursor:pointer" onclick="closeModal('bestSourceModal');viewSource(${s.id})">
+          <td>${esc(new Date(s.submittedAtMs).toLocaleString())}</td>
+          <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
+          <td>${esc(s.language||'—')}</td>
+          <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
+          <td>${s.totalTestCases>0?`${s.passedTestCount}/${s.totalTestCases}`:'—'}</td>
+          <td><button class="btn sm" onclick="event.stopPropagation();closeModal('bestSourceModal');viewSource(${s.id})">View submission</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>`;
   }
   openModal('bestSourceModal');
 }
@@ -2277,6 +2577,89 @@ async function loadAnnouncements(){
         <div>${a.body}</div>
       </div>
     </div>`).join('') : '<div class="empty">Nothing published yet.</div>';
+}
+
+/* ── materials (FR-07 sibling) ─────────────────────────────────────────── */
+
+/* Kept so download/delete only need an id in their onclick — embedding the
+   filename itself there would need to survive both HTML-attribute and JS
+   string escaping for names a browser genuinely lets through (quotes,
+   apostrophes), the same reason the notifications tab keys off username. */
+let lastMaterials=[];
+
+function humanFileSize(bytes){
+  if(bytes<1024) return bytes+' B';
+  if(bytes<1024*1024) return (bytes/1024).toFixed(1)+' KB';
+  return (bytes/(1024*1024)).toFixed(1)+' MB';
+}
+
+async function loadMaterials(){
+  if(selected==null) return;
+  const {status,body}=await api('GET',`/api/admin/contests/${selected}/materials`,null,true);
+  if(status>=300||!Array.isArray(body)) return;
+  lastMaterials=body;
+  $('matCountBadge').textContent=body.length;
+  $('matList').innerHTML = body.length ? body.map(m=>`
+    <div class="list-row">
+      <div class="ic">📁</div>
+      <div class="content">
+        <div>${esc(m.filename)}</div>
+        <div class="hint">${humanFileSize(m.sizeBytes)} &middot; ${esc(new Date(m.uploadedAtMs).toLocaleString())}</div>
+      </div>
+      <button class="btn sm" onclick="downloadMaterial(${m.id})" style="align-self:center">⬇ Download</button>
+      <button class="btn sm danger" onclick="deleteMaterial(${m.id})" style="align-self:center">Delete</button>
+    </div>`).join('') : '<div class="empty">No materials uploaded yet.</div>';
+}
+
+async function uploadMaterial(){
+  if(selected==null){ log(400,'Select a contest first'); return; }
+  const input=$('matFile');
+  if(!input.files.length){ log(400,'Choose one or more files first'); return; }
+  const btn=event.target; btn.disabled=true; btn.textContent='Uploading…';
+  const results=$('matUploadResults'); results.classList.remove('hide');
+  const list=$('matUploadResultsList'); list.innerHTML='';
+  let ok=0, fail=0;
+  // Sequential, not Promise.all — files land in the list in the order picked
+  // and a slow/large upload never races another for the same contest's row.
+  for(const file of input.files){
+    const form=new FormData(); form.append('file', file);
+    const res=await fetch(`/api/admin/contests/${selected}/materials`,
+      {method:'POST', headers:token?{Authorization:'Bearer '+token}:{}, body:form});
+    const body=await res.json().catch(()=>({}));
+    if(res.ok){
+      ok++;
+      list.innerHTML+=`<div style="margin:4px 0;color:var(--green)">✓ <b>${esc(body.filename)}</b> (${humanFileSize(body.sizeBytes)})</div>`;
+    } else {
+      fail++;
+      list.innerHTML+=`<div style="margin:4px 0;color:var(--red)">✗ <b>${esc(file.name)}</b> — ${esc(body.message||'Upload failed')}</div>`;
+    }
+  }
+  log(fail?422:201, `${ok} uploaded, ${fail} failed`);
+  btn.disabled=false; btn.textContent='Upload';
+  input.value='';
+  await loadMaterials();
+}
+
+async function downloadMaterial(id){
+  const m=lastMaterials.find(x=>x.id===id);
+  const res=await fetch(`/api/materials/${id}/download`,
+    {headers:token?{Authorization:'Bearer '+token}:{}});
+  if(!res.ok){ log(res.status,'Download failed'); return; }
+  const blob=await res.blob();
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=m?m.filename:'download';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function deleteMaterial(id){
+  const m=lastMaterials.find(x=>x.id===id);
+  const name=m?m.filename:'this file';
+  if(!(await showConfirm(`Delete "${name}"? This cannot be undone.`))) return;
+  const {status,body}=await api('DELETE','/api/admin/materials/'+id,null,true);
+  log(status, status<300?`Deleted ${name}`:body);
+  await loadMaterials();
 }
 
 /* \u2500\u2500 clarifications \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
@@ -2694,10 +3077,10 @@ async function loadSourceTests(id){
           <span class="hint">${t.execTimeMs>=0?t.execTimeMs+' ms':''}</span>
           ${t.truncated?'<span class="hint">(truncated)</span>':''}
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-          <div><div class="hint">Input</div><pre class="code">${esc(t.input||'')}</pre></div>
-          <div><div class="hint">Expected output</div><pre class="code">${esc(t.expectedOutput||'')}</pre></div>
-          <div><div class="hint">Their output</div><pre class="code">${
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:8px">
+          <div style="min-width:0"><div class="hint">Input</div><pre class="code" style="max-width:100%">${esc(t.input||'')}</pre></div>
+          <div style="min-width:0"><div class="hint">Expected output</div><pre class="code" style="max-width:100%">${esc(t.expectedOutput||'')}</pre></div>
+          <div style="min-width:0"><div class="hint">Their output</div><pre class="code" style="max-width:100%">${
             t.actualOutput==null
               ? '<span class="hint">not recorded for this submission</span>'
               : esc(t.actualOutput)}</pre></div>
@@ -2887,7 +3270,7 @@ function renderDashboard({participants,standings,problems,grouped}){
         name:s.displayName||s.username, sub:'@'+s.username, val:s.solved+' solved · '+s.penaltyMinutes+'m'})))}
 
     ${donutCard('Languages used',totalAttempts+' total',paletteSegments(langCounts),'third')}
-    ${rankListCard('🩸 First blood',firstBloodList.map(([code,f])=>({
+    ${rankListCard('⭐ First Solve',firstBloodList.map(([code,f])=>({
         name:code+' — '+(f.displayName||f.username), sub:'@'+f.username,
         val:f.solvedAtMinutes>=0?f.solvedAtMinutes+' min':'—'})),'third')}
     ${rankListCard('⚡ Most active',mostActive.map(g=>({

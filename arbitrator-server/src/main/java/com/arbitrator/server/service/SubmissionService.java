@@ -143,15 +143,14 @@ public class SubmissionService {
         // BR-02: the server clock decides whether that contest is still open.
         contestService.assertAcceptingSubmissions(contest);
 
-        // A contestant resubmitting byte-for-byte identical code for the same
-        // problem gains nothing (the verdict cannot change) and only spends a
-        // slot in the shared judge queue and another tick of the cooldown —
-        // most often an accidental double-submit or a retry after a UI hiccup
-        // rather than a deliberate resubmission. Scoped to (user, problem):
-        // the same code against a DIFFERENT problem is a legitimate, separate
-        // attempt (e.g. two problems sharing an I/O template).
-        if (submissions.existsByUserIdAndProblemIdAndSourceCodeAndActiveTrue(
-                user.getId(), problem.getId(), req.sourceCode())) {
+        // A contestant resubmitting the same code for the same problem gains
+        // nothing (the verdict cannot change) and only spends a slot in the
+        // shared judge queue and another tick of the cooldown — most often an
+        // accidental double-submit or a retry after a UI hiccup rather than a
+        // deliberate resubmission. Scoped to (user, problem): the same code
+        // against a DIFFERENT problem is a legitimate, separate attempt (e.g.
+        // two problems sharing an I/O template).
+        if (isDuplicate(user.getId(), problem.getId(), req.sourceCode())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "You already submitted this exact code for this problem");
         }
@@ -170,6 +169,22 @@ public class SubmissionService {
         int position = queue.enqueue(sub.getId());
 
         return new SubmitAckDto(sub.getId(), position);
+    }
+
+    /**
+     * Whitespace-insensitive duplicate check: strips every space, tab and
+     * newline before comparing, so re-indenting or deleting a single space
+     * doesn't dodge the guard — the compiled program is identical either way,
+     * and the whole point of the guard is that the verdict can't change.
+     */
+    private boolean isDuplicate(long userId, long problemId, String sourceCode) {
+        String normalized = stripWhitespace(sourceCode);
+        return submissions.findSourceCodesByUserIdAndProblemIdAndActiveTrue(userId, problemId).stream()
+                .anyMatch(existing -> stripWhitespace(existing).equals(normalized));
+    }
+
+    private static String stripWhitespace(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", "");
     }
 
     /**

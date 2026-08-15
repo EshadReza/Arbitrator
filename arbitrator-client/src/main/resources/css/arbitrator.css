@@ -422,6 +422,12 @@
     -fx-background-color: -lc-accent-bg;
     -fx-text-fill: -lc-accent-text;
     -fx-border-color: -lc-accent-bg;
+    /* Explicit, matching .btn-outline/.theme-toggle-button's 1.5 — this was
+       unset (JavaFX default 1px), which on its own is only a sub-pixel
+       difference, but stacked next to two neighbours that both declare 1.5
+       it was the other half of the topbar's three action buttons not quite
+       lining up height-for-height. */
+    -fx-border-width: 1.5;
     -fx-font-weight: bold;
     -fx-font-size: 12.5px;
     -fx-padding: 7 16 7 16;
@@ -505,6 +511,44 @@
     -fx-border-radius: 999px;
     -fx-padding: 4 8 4 8;
 }
+
+/* Theme toggle, in the topbar action tray — was plain .icon-button (fully
+   transparent until hovered, glyph-only, no label): reported live that most
+   users never even noticed it was there, sitting next to Refresh's solid
+   accent fill and Switch Contest's accent outline with nothing of its own to
+   draw the eye. A filled pill with a real word label, sized to match its
+   tray-mates rather than shrink to icon-button's glyph-only footprint.
+   Colour and hover now reuse -lc-accent-bg/-lc-accent-text exactly like
+   .btn-outline (Switch Contest) does — that variable is already the
+   deliberate black-in-light/white-in-dark inversion used across the topbar's
+   primary actions (see its definition on .root/.root.dark above), not the
+   blue -c-accent. Two earlier attempts got this wrong: first plain -c-accent
+   blue on hover (nothing else in the tray ever turns blue), then a fallback
+   to flat -c-surface/-c-border/-c-text, which put a pure-white pill (light
+   theme -c-surface is #fff) inside the -c-surface-2 tray behind it — same
+   family of colour, barely distinguishable, and unrelated to its neighbours'
+   black/white accent language. Matching .btn-outline's own variables directly
+   is what actually keeps all three tray buttons visually one set. The glyph
+   still swaps ☾/☼ to name the theme a click lands on, exactly as before —
+   this only changes how loud the button is, not what it says. */
+.theme-toggle-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: -lc-accent-bg;
+    -fx-border-color: -lc-accent-bg;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 999px;
+    -fx-background-radius: 999px;
+    -fx-font-weight: 600;
+    -fx-font-size: 12.5px;
+    /* Matches .refresh-button/.btn-outline's own 7 16 exactly, not just the
+       top/bottom — this was 7 15 7 13, and a button whose horizontal padding
+       doesn't match its tray-mates ends up a couple pixels narrower or wider
+       than either neighbour even once the height lines up. */
+    -fx-padding: 7 16 7 16;
+    -fx-cursor: hand;
+}
+.theme-toggle-button:hover { -fx-background-color: derive(-lc-accent-bg, 85%); }
+.root.dark .theme-toggle-button:hover { -fx-background-color: derive(-lc-accent-bg, -75%); }
 
 /* --- tabs ------------------------------------------------------------------ */
 
@@ -886,6 +930,15 @@
 .table-view .table-cell.v-OLE { -fx-text-fill: -c-orange; -fx-font-weight: bold; }
 .table-view .table-cell.v-CE  { -fx-text-fill: -c-purple; -fx-font-weight: bold; }
 .table-view .table-cell.v-pending { -fx-text-fill: -c-muted; }
+
+/* The standings-box attempts dialog: a real TableView now (not plain Labels),
+   so it picks up the v-XX rules above for free. Just sized up a notch — the
+   dialog has far fewer columns competing for space than the Submissions tab,
+   so the default table font read as cramped inside it. */
+.attempts-table,
+.attempts-table .table-cell { -fx-font-size: 13.5px; }
+.attempts-table .column-header .label { -fx-font-size: 13px; }
+
 /* --- standings extras --------------------------------------------------------- */
 
 .freeze-banner {
@@ -957,11 +1010,20 @@
     -fx-border-color: transparent;
     -fx-background-radius: 0;
 }
+/* -c-muted at rest, not -c-border: -c-border is also this same control's own
+   near-invisible track/edge colour and sits almost on top of -c-surface in
+   both themes, so a thumb resting in it was technically always painted but
+   had no real contrast to actually see against the panel around it —
+   worse the longer the scrollable content, since the thumb itself shrinks
+   too. Only :hover switched to the higher-contrast -c-muted, which is
+   backwards: finding a thumb you can't see requires already knowing where
+   to hover. -c-muted has real contrast against -c-surface/-c-surface-2 in
+   both themes at rest; hover/pressed step up further from there. */
 .scroll-bar .thumb {
-    -fx-background-color: -c-border;
+    -fx-background-color: -c-muted;
     -fx-background-radius: 999px;
 }
-.scroll-bar .thumb:hover  { -fx-background-color: -c-muted; }
+.scroll-bar .thumb:hover  { -fx-background-color: -c-text; }
 .scroll-bar .thumb:pressed { -fx-background-color: -c-accent; }
 .scroll-bar:vertical .thumb   { -fx-background-insets: 0 2 0 2; }
 .scroll-bar:horizontal .thumb { -fx-background-insets: 2 0 2 0; }

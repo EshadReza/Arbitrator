@@ -59,6 +59,12 @@ arbitrator:
     # but do NOT ship a real contest with it at 0 (see application-local.yml).
     submit-cooldown-seconds: ${ARBITRATOR_SUBMIT_COOLDOWN:10}
 
+  materials:
+    # Where uploaded materials (slides, PDFs, any file) live on disk — see
+    # MaterialService and V65. Persistent across restarts, unlike judge.work-root:
+    # these are files students expect to still find later, not scratch space.
+    root: ${ARBITRATOR_MATERIALS_ROOT:./arbitrator-data/materials}
+
   contest:
     reset-on-boot: ${ARBITRATOR_RESET_ON_BOOT:false}
 

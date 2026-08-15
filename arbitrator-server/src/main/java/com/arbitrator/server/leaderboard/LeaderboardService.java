@@ -128,7 +128,7 @@ public class LeaderboardService {
             for (Map.Entry<Long, String> p : problemCode.entrySet()) {
                 Tally t = e.getValue().get(p.getKey());
                 if (t == null) {
-                    cells.add(new LeaderboardCellDto(p.getValue(), false, 0, -1, -1, false));
+                    cells.add(new LeaderboardCellDto(p.getValue(), false, 0, -1, -1, false, 0));
                     continue;
                 }
                 penalty += t.manualDelta;
@@ -143,7 +143,7 @@ public class LeaderboardService {
                         t.solved ? t.rejectsBeforeAc : t.rejects,
                         t.solved ? t.solvedAtMinutes : -1,
                         t.solved ? t.solvedAtSeconds : -1,
-                        first));
+                        first, t.ceAttempts));
             }
             penalty = Math.max(0, penalty);
             rows.add(new LeaderboardRowDto(0, user.getUsername(), user.getDisplayName(),
@@ -230,6 +230,7 @@ public class LeaderboardService {
         int rejects;            // all rejected attempts (for the unsolved display)
         int rejectsBeforeAc;    // only those before the first AC — what FR-18 charges
         int manualDelta;
+        int ceAttempts;         // BR-04: never a reject, but still shown as "touched"
 
         void accept(Submission s, Instant contestStart) {
             manualDelta += s.getManualPenaltyDelta();
@@ -246,6 +247,8 @@ public class LeaderboardService {
                 Duration elapsed = Duration.between(contestStart, s.getQueuedAt());
                 solvedAtMinutes = Math.max(0, elapsed.toMinutes());
                 solvedAtSeconds = Math.max(0, elapsed.getSeconds());
+            } else if (s.getVerdict() == Verdict.CE) {
+                ceAttempts++;
             } else if (countsTowardPenalty(s.getVerdict())) {
                 rejects++;
             }

@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import com.arbitrator.common.dto.AnnouncementDto;
+import com.arbitrator.common.dto.AttemptSummaryDto;
 import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
@@ -18,6 +19,7 @@ import com.arbitrator.common.dto.LeaderboardCellDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LeaderboardRowDto;
 import com.arbitrator.common.dto.LoginResponse;
+import com.arbitrator.common.dto.MaterialDto;
 import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
@@ -57,6 +59,12 @@ public class FakeJudgeApi implements JudgeApi {
     private volatile Runnable onClarifications;
     private final List<AnnouncementDto> fakeAnnouncements = new ArrayList<>();
     private final List<ClarificationDto> fakeClarifications = new ArrayList<>();
+    private final List<MaterialDto> fakeMaterials = new ArrayList<>(List.of(
+            new MaterialDto(1, 1, "Lecture 1 - Introduction.pdf", "application/pdf",
+                    2_300_000, System.currentTimeMillis()),
+            new MaterialDto(2, 1, "Sample Slides.pptx",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    5_100_000, System.currentTimeMillis())));
 
     @Override
     public LoginResponse login(String username, String password, boolean force) {
@@ -69,6 +77,11 @@ public class FakeJudgeApi implements JudgeApi {
         return new LoginResponse("fake-token", username,
                 displayName == null || displayName.isBlank() ? username : displayName,
                 Role.STUDENT);
+    }
+
+    @Override
+    public void logout() {
+        // No real session/presence tracking to release in mock mode.
     }
 
     @Override
@@ -189,6 +202,16 @@ public class FakeJudgeApi implements JudgeApi {
     }
 
     @Override
+    public List<AttemptSummaryDto> problemAttempts(long contestId, String username, String problemCode) {
+        long now = System.currentTimeMillis();
+        return List.of(
+                new AttemptSummaryDto(9001, Language.CPP17, Verdict.AC, 44, now - 60_000,
+                        -1, 3, 3),
+                new AttemptSummaryDto(9000, Language.CPP17, Verdict.WA, 39, now - 300_000,
+                        2, 1, 3));
+    }
+
+    @Override
     public void connectVerdicts(Consumer<VerdictEventDto> onVerdict) {
         this.onVerdict = onVerdict;
     }
@@ -209,7 +232,8 @@ public class FakeJudgeApi implements JudgeApi {
     /**
      * Enough rows and shapes to exercise every cell state in UIF-13: a first
      * solve (dark green) in each column, ordinary accepts with and without
-     * prior attempts, a tried-and-failed cell, and columns nobody has touched.
+     * prior attempts, a tried-and-failed cell, a compile-error-only cell, and
+     * columns nobody has touched.
      */
     private LeaderboardDto fakeBoard() {
         List<String> codes = List.of("A", "B", "C");
@@ -219,7 +243,7 @@ public class FakeJudgeApi implements JudgeApi {
                 row(2, "alice", "Alice", 2, 96,
                         ac("A", 0, 16, false), ac("B", 2, 40, false), tried("C", 3)),
                 row(3, "carol", "Carol", 1, 21,
-                        ac("A", 1, 1, true), untouched("B"), untouched("C")));
+                        ac("A", 1, 1, true), ce("B", 2), untouched("C")));
         return new LeaderboardDto(1, false, System.currentTimeMillis(), codes, rows);
     }
 
@@ -231,15 +255,20 @@ public class FakeJudgeApi implements JudgeApi {
     /** Accepted at {@code atMinutes}, with a few seconds of jitter so the clock reads real. */
     private static LeaderboardCellDto ac(String code, int failed, long atMinutes, boolean first) {
         return new LeaderboardCellDto(code, true, failed, atMinutes,
-                atMinutes * 60 + (atMinutes % 47), first);
+                atMinutes * 60 + (atMinutes % 47), first, 0);
     }
 
     private static LeaderboardCellDto tried(String code, int failed) {
-        return new LeaderboardCellDto(code, false, failed, -1, -1, false);
+        return new LeaderboardCellDto(code, false, failed, -1, -1, false, 0);
     }
 
     private static LeaderboardCellDto untouched(String code) {
-        return new LeaderboardCellDto(code, false, 0, -1, -1, false);
+        return new LeaderboardCellDto(code, false, 0, -1, -1, false, 0);
+    }
+
+    /** BR-04: compile errors alone never count as a reject, but still show as touched. */
+    private static LeaderboardCellDto ce(String code, int ceAttempts) {
+        return new LeaderboardCellDto(code, false, 0, -1, -1, false, ceAttempts);
     }
 
     @Override
@@ -271,6 +300,16 @@ public class FakeJudgeApi implements JudgeApi {
     @Override
     public List<ClarificationDto> clarifications(long contestId) {
         return List.copyOf(fakeClarifications);
+    }
+
+    @Override
+    public List<MaterialDto> materials(long contestId) {
+        return List.copyOf(fakeMaterials);
+    }
+
+    @Override
+    public byte[] materialBytes(long materialId) {
+        return ("Mock material #" + materialId).getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     @Override
@@ -320,6 +359,12 @@ public class FakeJudgeApi implements JudgeApi {
     @Override
     public void connectClarifications(long contestId, Runnable onChanged) {
         this.onClarifications = onChanged;
+    }
+
+    @Override
+    public void connectMaterials(long contestId, Runnable onChanged) {
+        // Nothing changes the canned list on its own; the tab is still fully
+        // browsable/downloadable without a real push.
     }
 
     @Override

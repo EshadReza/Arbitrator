@@ -39,4 +39,9 @@ public final class StompDestinations {
     public static String contestClarifications(long contestId) {
         return TOPIC_PREFIX + "/contest/" + contestId + "/clarifications";
     }
+
+    /** Material list changed — uploaded, or deleted (FR-07 sibling). */
+    public static String contestMaterials(long contestId) {
+        return TOPIC_PREFIX + "/contest/" + contestId + "/materials";
+    }
 }

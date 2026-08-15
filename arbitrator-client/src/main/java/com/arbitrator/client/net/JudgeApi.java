@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import com.arbitrator.common.dto.AnnouncementDto;
+import com.arbitrator.common.dto.AttemptSummaryDto;
 import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.CustomRunRequest;
@@ -11,6 +12,7 @@ import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LoginResponse;
+import com.arbitrator.common.dto.MaterialDto;
 import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
@@ -51,6 +53,19 @@ public interface JudgeApi extends AutoCloseable {
     LoginResponse register(String username, String displayName, String password)
             throws ApiException;
 
+    /**
+     * FR-02 counterpart: tells the server this sign-out is deliberate, not a
+     * dropped connection — releases the single-session slot (so the very
+     * next login as this user never wrongly hits the "already logged in
+     * elsewhere" prompt) and raises DISCONNECTED immediately instead of
+     * after the presence grace period. Call this BEFORE dropConnection(),
+     * while the server still has this session's WebSocket subscription to
+     * attribute the sign-out to. Best-effort: a network hiccup here must
+     * not block the sign-out the user already asked for, so callers should
+     * swallow failures rather than surface them.
+     */
+    void logout() throws ApiException;
+
     ContestStateDto currentContest() throws ApiException;
 
     /** Contests the student may enter, for the picker shown after login. */
@@ -76,6 +91,15 @@ public interface JudgeApi extends AutoCloseable {
 
     /** FR-07: every announcement in this contest, newest first. */
     List<AnnouncementDto> announcements(long contestId) throws ApiException;
+
+    /** FR-07 sibling: every downloadable material for this contest, newest first. */
+    List<MaterialDto> materials(long contestId) throws ApiException;
+
+    /**
+     * Raw bytes of one material — opaque; the client just writes them
+     * wherever the user chooses to save, there is nothing to render.
+     */
+    byte[] materialBytes(long materialId) throws ApiException;
 
     /** The public clarification board; the asker's name is never included. */
     List<ClarificationDto> clarifications(long contestId) throws ApiException;
@@ -116,6 +140,16 @@ public interface JudgeApi extends AutoCloseable {
     /** Current standings over REST — first paint and after a reconnect (FR-17). */
     LeaderboardDto leaderboard() throws ApiException;
 
+    /**
+     * Standings box drill-down: every attempt {@code username} made on
+     * problem {@code problemCode} in this contest, newest first. Public to
+     * any contestant — unlike {@link #submissionTests}, this is not gated to
+     * "my own submissions", but the DTO itself carries no source code or
+     * compiler output, so there is nothing here that needs owner-gating.
+     */
+    List<AttemptSummaryDto> problemAttempts(long contestId, String username, String problemCode)
+            throws ApiException;
+
     /** Opens the WebSocket and routes verdict pushes to the consumer (FR-15). */
     void connectVerdicts(Consumer<VerdictEventDto> onVerdict) throws ApiException;
 
@@ -138,6 +172,9 @@ public interface JudgeApi extends AutoCloseable {
      * the callback simply re-reads the board it is entitled to.
      */
     void connectClarifications(long contestId, Runnable onChanged) throws ApiException;
+
+    /** The material list changed — a new upload or a deletion; re-read it. */
+    void connectMaterials(long contestId, Runnable onChanged) throws ApiException;
 
     /** Quick reachability probe for the login screen's status dot (UIF-01). */
     boolean ping();

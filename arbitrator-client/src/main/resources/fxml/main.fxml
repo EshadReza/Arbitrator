@@ -81,8 +81,8 @@
                         <HBox alignment="CENTER_RIGHT" spacing="6" styleClass="topbar-actions">
                             <Button text="%main.refresh" onAction="#onRefresh"
                                     styleClass="refresh-button"/>
-                            <Button fx:id="themeButton" text="☾" onAction="#onToggleTheme"
-                                    styleClass="icon-button"/>
+                            <Button fx:id="themeButton" text="☾ Dark mode" onAction="#onToggleTheme"
+                                    styleClass="theme-toggle-button"/>
                             <Button text="%main.switchContest" onAction="#onSwitchContest" styleClass="btn-outline"/>
                             <Button text="%main.signOut" onAction="#onSignOut" styleClass="btn-ghost"/>
                         </HBox>
@@ -131,6 +131,10 @@
 
                 <Tab text="%main.tab.announcements">
                     <fx:include source="announcements-panel.fxml" fx:id="announcementsPanel"/>
+                </Tab>
+
+                <Tab text="%main.tab.materials">
+                    <fx:include source="materials-panel.fxml" fx:id="materialsPanel"/>
                 </Tab>
 
                 <Tab text="%main.tab.clarifications">

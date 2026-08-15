@@ -1,10 +1,13 @@
 package com.arbitrator.server.controller;
 
+import java.security.Principal;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.LoginRequest;
@@ -30,5 +33,21 @@ public class AuthController {
     @PostMapping(ApiPaths.AUTH_LOGIN)
     public LoginResponse login(@RequestBody LoginRequest req) {
         return userService.login(req);
+    }
+
+    /**
+     * FR-02 counterpart — see UserService.logout's javadoc. Sits under
+     * /api/auth/** (permitAll at the SecurityConfig layer, same as login —
+     * that prefix has to stay open for a token-less client to reach login
+     * at all), so an absent/invalid Bearer token reaches this method as a
+     * null Principal rather than being rejected upstream; guarded here
+     * instead of touching SecurityConfig's path-pattern rules for one route.
+     */
+    @PostMapping(ApiPaths.AUTH_LOGOUT)
+    public void logout(Principal principal) {
+        if (principal == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not signed in");
+        }
+        userService.logout(principal.getName());
     }
 }

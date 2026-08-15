@@ -95,6 +95,14 @@ public class AdminMonitorController {
         }
     }
 
+    /** The instructor dismissed one user's whole run of entries at once. */
+    @DeleteMapping(ApiPaths.ADMIN_NOTIFICATIONS_BY_USER)
+    public void dismissUserNotifications(@PathVariable String username) {
+        if (!notificationService.dismissAllForUser(username)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No notifications for that user");
+        }
+    }
+
     /**
      * Everyone who has taken part, merged with who is connected right now.
      * Someone who submitted then closed the app still appears — offline.

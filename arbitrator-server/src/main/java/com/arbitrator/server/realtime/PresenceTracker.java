@@ -42,9 +42,9 @@ public class PresenceTracker {
      * immediately followed by a fresh reconnect; deciding "offline" from the
      * disconnect alone fired a DISCONNECTED+RECONNECTED notification pair for
      * every such blip. Waiting this long and rechecking means only a
-     * disconnect that's still true after 4s counts as genuine.
+     * disconnect that's still true after 15s counts as genuine.
      */
-    private static final long OFFLINE_GRACE_MS = 4000;
+    private static final long OFFLINE_GRACE_MS = 15000;
 
     private final TaskScheduler scheduler;
 
@@ -132,6 +132,30 @@ public class PresenceTracker {
         long cid = contestId;
         scheduler.schedule(() -> checkStillOffline(cid, username),
                 Instant.now().plusMillis(OFFLINE_GRACE_MS));
+    }
+
+    /**
+     * Explicit sign-out — a deliberate Sign Out click isn't a network blip,
+     * so unlike {@link #onDisconnect}, this skips {@link #OFFLINE_GRACE_MS}
+     * entirely and raises DISCONNECTED (if this really was their last live
+     * session) the instant it's called. Every session tracked under this
+     * username is dropped up front, so the real {@link SessionDisconnectEvent}
+     * that follows once the client actually closes its socket finds nothing
+     * left to remove and is a clean no-op — not a second, redundant
+     * notification a grace period later.
+     */
+    public void signOut(String username) {
+        sessionUser.entrySet().stream()
+                .filter(e -> username.equals(e.getValue()))
+                .map(Map.Entry::getKey)
+                .toList()
+                .forEach(sessionId -> {
+                    sessionUser.remove(sessionId);
+                    Long contestId = sessionContest.remove(sessionId);
+                    if (contestId != null) {
+                        checkStillOffline(contestId, username);
+                    }
+                });
     }
 
     /** Only start the offline clock if ALL of this user's sessions in this contest are STILL gone. */

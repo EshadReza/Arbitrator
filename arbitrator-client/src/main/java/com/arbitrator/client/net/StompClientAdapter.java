@@ -145,6 +145,13 @@ public class StompClientAdapter implements AutoCloseable {
                 java.util.Map.class, ignored -> onChanged.run());
     }
 
+    /** FR-07 sibling: material list changed — uploaded, or deleted. */
+    public void subscribeMaterials(long contestId, Runnable onChanged)
+            throws JudgeApi.ApiException {
+        subscribe(StompDestinations.contestMaterials(contestId),
+                java.util.Map.class, ignored -> onChanged.run());
+    }
+
     /** FR-17: contest-wide standings broadcast. */
     public void subscribeLeaderboard(long contestId, Consumer<LeaderboardDto> onUpdate)
             throws JudgeApi.ApiException {

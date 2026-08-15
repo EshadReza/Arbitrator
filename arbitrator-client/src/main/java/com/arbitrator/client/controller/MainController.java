@@ -8,6 +8,8 @@ import com.arbitrator.client.app.AppState;
 import com.arbitrator.client.app.DraftStore;
 import com.arbitrator.client.app.PdfStatementRenderer;
 import com.arbitrator.client.app.SceneRouter;
+import com.arbitrator.client.net.JudgeApi;
+import com.arbitrator.client.net.JudgeApi.ApiException;
 import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.common.dto.SubmitAckDto;
@@ -84,6 +86,7 @@ public class MainController {
     @FXML private LeaderboardPanelController leaderboardPanelController;
     @FXML private SubmissionsPanelController submissionsPanelController;
     @FXML private AnnouncementsPanelController announcementsPanelController;
+    @FXML private MaterialsPanelController materialsPanelController;
     @FXML private ClarificationsPanelController clarificationsPanelController;
 
     private final AppState state = AppState.get();
@@ -160,7 +163,7 @@ public class MainController {
         // keep its own copy, or it will drift from what is actually released.
         clarificationsPanelController.setProblemSupplier(
                 () -> List.copyOf(problemList.getItems()));
-        themeButton.setText(state.darkMode() ? "☼" : "☾");
+        themeButton.setText(state.darkMode() ? "☼ Light mode" : "☾ Dark mode");
 
         // Submissions/Standings selection is just "I clicked here," not a real
         // selection with any downstream effect — it must not survive leaving
@@ -406,6 +409,7 @@ public class MainController {
     private void onRefresh() {
         submissionsPanelController.refresh();
         announcementsPanelController.refresh();
+        materialsPanelController.refresh();
         async(() -> {
             try {
                 long id = state.contest().contestId();
@@ -442,18 +446,35 @@ public class MainController {
         // username, and afterwards there is no username to file it under.
         stashDraft(currentProblemId);
         stopClocks();
-        // The STOMP socket is a singleton for the app's lifetime and
-        // connect() is a no-op once isConnected() is true — so without an
-        // explicit drop here it stays authenticated as the outgoing user's
-        // JWT. The next sign-in's connectLive() then finds a socket that
-        // already looks connected and never redials, leaving the new
-        // user's private /user/queue/verdicts bound to the old Principal:
-        // verdict popups silently never arrive and submissions only show up
-        // after a manual refresh falls back to polling.
-        state.api().dropConnection();
-        state.setSession(null);
-        state.setContestCleared();
-        SceneRouter.showLogin();
+
+        // logout() must reach the server and be handled BEFORE dropConnection()
+        // closes the WebSocket — PresenceTracker.signOut() (which is what makes
+        // the instructor's console show DISCONNECTED right now, and releases the
+        // single-session slot so the next sign-in never wrongly hits "already
+        // logged in elsewhere") reads this session's live subscription, which
+        // dropConnection() is what tears down. Running both on a background
+        // thread, in that order, keeps the sequence deterministic instead of
+        // racing a local socket close against a LAN round trip — and keeps a
+        // slow/dead network from stalling the sign-out the user already asked
+        // for; logout() failing is a lost nicety, not a reason to stay signed in.
+        JudgeApi api = state.api();
+        Thread worker = new Thread(() -> {
+            try {
+                api.logout();
+            } catch (ApiException ignored) {
+                // Best-effort — see JudgeApi.logout()'s javadoc. PresenceTracker's
+                // own grace-period fallback still catches this via the socket
+                // close below, just without the immediacy.
+            }
+            api.dropConnection();
+            Platform.runLater(() -> {
+                state.setSession(null);
+                state.setContestCleared();
+                SceneRouter.showLogin();
+            });
+        }, "sign-out");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     /** Timers keep firing against a dead scene otherwise. */
@@ -475,7 +496,7 @@ public class MainController {
         state.setDarkMode(dark);
         SceneRouter.applyTheme(rootStack.getScene());
         applyWebViewFill();
-        themeButton.setText(dark ? "☼" : "☾");
+        themeButton.setText(dark ? "☼ Light mode" : "☾ Dark mode");
         // Re-render the statement so its inline CSS matches the new theme.
         var selected = problemList.getSelectionModel().getSelectedItem();
         if (selected != null) {
@@ -778,6 +799,9 @@ public class MainController {
                 // The board moved — re-read whichever view we are entitled to.
                 state.api().connectClarifications(contestId,
                         () -> clarificationsPanelController.refresh());
+                // FR-07 sibling: a material was uploaded or removed.
+                state.api().connectMaterials(contestId,
+                        () -> materialsPanelController.refresh());
                 state.api().connectLeaderboard(contestId,
                         board -> leaderboardPanelController.update(board));
                 // FR-06: the server owns the clock and tells us when it changes.

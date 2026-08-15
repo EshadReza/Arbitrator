@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.layout.VBox?>
+
+<!-- FR-07 sibling: every downloadable material for this contest — slides,
+     PDFs, any file the instructor uploaded. Nothing here is rendered; a
+     material is opaque bytes the client just saves where the student picks. -->
+<VBox xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="com.arbitrator.client.controller.MaterialsPanelController"
+      styleClass="box">
+
+    <Label text="%materials.title" styleClass="box-head" maxWidth="Infinity"/>
+    <Label fx:id="countLabel" styleClass="subtitle">
+        <padding><Insets top="6" right="10" bottom="6" left="10"/></padding>
+    </Label>
+
+    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS">
+        <VBox fx:id="listBox" spacing="10">
+            <padding><Insets top="4" right="10" bottom="10" left="10"/></padding>
+        </VBox>
+    </ScrollPane>
+</VBox>

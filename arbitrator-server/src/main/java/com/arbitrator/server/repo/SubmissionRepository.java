@@ -3,6 +3,7 @@ package com.arbitrator.server.repo;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import com.arbitrator.server.entity.Submission;
 
@@ -33,12 +34,20 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     long countByUserIdAndStatusNot(Long userId, Submission.Status status);
 
     /**
-     * Duplicate-submission guard: byte-for-byte identical code, same user,
-     * same problem, already on record. {@code active} scoped — DOC-9
+     * Duplicate-submission guard source data: every prior source code this
+     * user has on record for this problem. {@code active} scoped — DOC-9
      * archives a contest's submissions on restart/clone, and a fresh run
      * must not treat a previous run's attempt as a duplicate.
+     *
+     * Whitespace-insensitive by design, so the comparison happens in
+     * SubmissionService rather than as a SQL equality predicate here — see
+     * SubmissionService.isDuplicate. A byte-for-byte SQL match let a single
+     * deleted space count as "new" code, which defeats the guard's whole
+     * point (the verdict cannot change from whitespace alone).
      */
-    boolean existsByUserIdAndProblemIdAndSourceCodeAndActiveTrue(Long userId, Long problemId, String sourceCode);
+    @Query("select s.sourceCode from Submission s "
+            + "where s.userId = ?1 and s.problemId = ?2 and s.active = true")
+    List<String> findSourceCodesByUserIdAndProblemIdAndActiveTrue(Long userId, Long problemId);
 
     /** Guards problem deletion — submissions are never destroyed (DBR-04). */
     long countByProblemId(Long problemId);

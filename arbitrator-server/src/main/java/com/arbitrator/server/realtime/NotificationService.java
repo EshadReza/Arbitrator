@@ -105,6 +105,16 @@ public class NotificationService {
     }
 
     /**
+     * The instructor dismissed one user's whole run of entries at once — the
+     * console groups the feed per-user precisely so a participant who
+     * dropped and reconnected 500 times can be cleared in one click instead
+     * of 500 individual deletes.
+     */
+    public boolean dismissAllForUser(String username) {
+        return notifications.removeIf(n -> n.username().equals(username));
+    }
+
+    /**
      * Hooked to both {@code ContestService.onContestStarted} and {@code
      * onContestEnded}: presence tracking for this contest is no longer
      * meaningful once it's not the one currently live, so any participant

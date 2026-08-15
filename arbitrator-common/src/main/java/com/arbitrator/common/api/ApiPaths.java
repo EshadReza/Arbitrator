@@ -13,6 +13,10 @@ public final class ApiPaths {
     // --- auth (permitAll) ---
     public static final String AUTH_REGISTER = "/api/auth/register";
     public static final String AUTH_LOGIN = "/api/auth/login";
+    /** Explicit sign-out: releases the single-session slot and raises
+        DISCONNECTED immediately instead of waiting out the presence grace
+        period, since a deliberate Sign Out isn't a network blip. */
+    public static final String AUTH_LOGOUT = "/api/auth/logout";
 
     // --- authenticated ---
     public static final String CONTESTS = "/api/contests";                 // GET joinable list
@@ -24,6 +28,10 @@ public final class ApiPaths {
     public static final String PROBLEM_STATEMENT_PDF = "/api/problems/{id}/statement.pdf";
     /** FR-07: announcements for the contest the caller is in. */
     public static final String ANNOUNCEMENTS = "/api/announcements";
+    /** FR-07 sibling: downloadable materials for the contest the caller is in. */
+    public static final String MATERIALS = "/api/materials";
+    /** Raw bytes of one material, streamed with its original filename. */
+    public static final String MATERIAL_DOWNLOAD = "/api/materials/{id}/download";
     /** Public clarification board: GET to read it, POST to ask. */
     public static final String CLARIFICATIONS = "/api/clarifications";
     public static final String SUBMISSIONS = "/api/submissions";           // POST
@@ -33,6 +41,13 @@ public final class ApiPaths {
     /** Test data behind my own verdict — only if the instructor allowed it. */
     public static final String SUBMISSION_TESTS = "/api/submissions/{id}/tests";
     public static final String LEADERBOARD = "/api/leaderboard";           // GET current contest
+    /**
+     * Standings-box drill-down: one participant's attempts on one problem,
+     * newest first. Public to any contestant (not owner-gated like
+     * SUBMISSION_SOURCE) — see AttemptSummaryDto for why that's still safe.
+     */
+    public static final String CONTEST_PARTICIPANT_PROBLEM_ATTEMPTS =
+            "/api/contests/{id}/participants/{username}/problems/{code}/attempts";
 
     // --- admin: loopback + ADMIN JWT, both enforced (decision D3) ---
     public static final String ADMIN_API_PREFIX = "/api/admin";
@@ -84,6 +99,9 @@ public final class ApiPaths {
     /** FR-07: compose and list announcements for a contest. */
     public static final String ADMIN_ANNOUNCEMENTS = "/api/admin/contests/{id}/announcements";
     public static final String ADMIN_ANNOUNCEMENT_BY_ID = "/api/admin/announcements/{id}";
+    /** FR-07 sibling: upload (POST, multipart) and list materials for a contest. */
+    public static final String ADMIN_MATERIALS = "/api/admin/contests/{id}/materials";
+    public static final String ADMIN_MATERIAL_BY_ID = "/api/admin/materials/{id}";
     /** The clarification queue, with the asker's name attached. */
     public static final String ADMIN_CLARIFICATIONS = "/api/admin/contests/{id}/clarifications";
     public static final String ADMIN_CLARIFICATION_ANSWER = "/api/admin/clarifications/{id}/answer";
@@ -92,6 +110,10 @@ public final class ApiPaths {
     /** Escalating "offline for N minutes" alerts, newest first. GET to poll, DELETE one to dismiss it. */
     public static final String ADMIN_NOTIFICATIONS = "/api/admin/notifications";
     public static final String ADMIN_NOTIFICATION_BY_ID = "/api/admin/notifications/{id}";
+    /** Dismiss every notification for one user at once — the console groups
+        the feed per-user, so clearing a flaky participant's whole run of
+        disconnect/reconnect entries is one action, not one per entry. */
+    public static final String ADMIN_NOTIFICATIONS_BY_USER = "/api/admin/notifications/by-user/{username}";
 
     // --- static admin panel, loopback only ---
     public static final String ADMIN_PANEL_PREFIX = "/admin";

@@ -13,6 +13,7 @@ import com.arbitrator.common.dto.LoginResponse;
 import com.arbitrator.common.enums.Role;
 import com.arbitrator.server.entity.User;
 import com.arbitrator.server.realtime.NotificationService;
+import com.arbitrator.server.realtime.PresenceTracker;
 import com.arbitrator.server.repo.UserRepository;
 import com.arbitrator.server.security.ActiveSessionRegistry;
 import com.arbitrator.server.security.JwtService;
@@ -28,14 +29,17 @@ public class UserService {
     private final JwtService jwt;
     private final ActiveSessionRegistry sessions;
     private final NotificationService notifications;
+    private final PresenceTracker presence;
 
     public UserService(UserRepository users, PasswordEncoder encoder, JwtService jwt,
-                       ActiveSessionRegistry sessions, NotificationService notifications) {
+                       ActiveSessionRegistry sessions, NotificationService notifications,
+                       PresenceTracker presence) {
         this.users = users;
         this.encoder = encoder;
         this.jwt = jwt;
         this.sessions = sessions;
         this.notifications = notifications;
+        this.presence = presence;
     }
 
     /** FR-01: unique username, >= 8 char password, bcrypt storage. */
@@ -103,6 +107,22 @@ public class UserService {
             u.setMacChangedAt(Instant.now());
             notifications.raiseMacChanged(u.getUsername());
         }
+    }
+
+    /**
+     * FR-02 counterpart: explicit sign-out. Releases the single-session slot
+     * (item 5) so the very next login as this same user never needs
+     * {@code force=true} — without this, ActiveSessionRegistry still held
+     * the outgoing session, and every subsequent login wrongly looked like
+     * "someone else is already signed in" instead of what actually
+     * happened, a clean sign-out. Also tells PresenceTracker directly
+     * instead of waiting on the WebSocket close it will still see — a
+     * deliberate Sign Out click is not a network blip, so this skips the
+     * offline grace period and raises DISCONNECTED right away.
+     */
+    public void logout(String username) {
+        sessions.clear(username);
+        presence.signOut(username);
     }
 
     public User requireByUsername(String username) {

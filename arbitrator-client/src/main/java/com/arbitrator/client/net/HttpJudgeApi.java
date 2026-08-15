@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.arbitrator.client.app.ServerConfig;
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.AnnouncementDto;
+import com.arbitrator.common.dto.AttemptSummaryDto;
 import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.common.dto.ClarificationPrivacyDto;
 import com.arbitrator.common.dto.ContestStateDto;
@@ -23,6 +24,7 @@ import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.common.dto.LeaderboardDto;
 import com.arbitrator.common.dto.LoginRequest;
 import com.arbitrator.common.dto.LoginResponse;
+import com.arbitrator.common.dto.MaterialDto;
 import com.arbitrator.common.dto.ProblemDetailDto;
 import com.arbitrator.common.dto.ProblemSummaryDto;
 import com.arbitrator.common.dto.SubmissionHistoryDto;
@@ -69,6 +71,19 @@ public class HttpJudgeApi implements JudgeApi {
                 LoginResponse.class);
         this.token = res.token();
         return res;
+    }
+
+    @Override
+    public void logout() throws ApiException {
+        try {
+            sendRaw(builder(ApiPaths.AUTH_LOGOUT).POST(HttpRequest.BodyPublishers.noBody()).build());
+        } finally {
+            // Otherwise builder() keeps attaching this now-invalidated token to
+            // the very next login attempt; JwtAuthFilter sees its sid no longer
+            // matches ActiveSessionRegistry and rejects the login itself with
+            // SESSION_SUPERSEDED, before it ever reaches AuthController.
+            token = null;
+        }
     }
 
     @Override
@@ -121,6 +136,29 @@ public class HttpJudgeApi implements JudgeApi {
     @Override
     public List<AnnouncementDto> announcements(long contestId) throws ApiException {
         return getList(ApiPaths.ANNOUNCEMENTS + "?contestId=" + contestId, AnnouncementDto.class);
+    }
+
+    @Override
+    public List<MaterialDto> materials(long contestId) throws ApiException {
+        return getList(ApiPaths.MATERIALS + "?contestId=" + contestId, MaterialDto.class);
+    }
+
+    @Override
+    public byte[] materialBytes(long materialId) throws ApiException {
+        try {
+            HttpResponse<byte[]> res = http.send(
+                    builder(ApiPaths.MATERIALS + "/" + materialId + "/download").GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            if (res.statusCode() >= 400) {
+                throw new ApiException(res.statusCode(), "Could not download the material");
+            }
+            return res.body();
+        } catch (IOException e) {
+            throw new ApiException("Server unreachable — check the LAN connection", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ApiException("Request interrupted", e);
+        }
     }
 
     @Override
@@ -179,6 +217,17 @@ public class HttpJudgeApi implements JudgeApi {
     }
 
     @Override
+    public List<AttemptSummaryDto> problemAttempts(long contestId, String username, String problemCode)
+            throws ApiException {
+        String path = "/api/contests/" + contestId + "/participants/"
+                + java.net.URLEncoder.encode(username, java.nio.charset.StandardCharsets.UTF_8)
+                + "/problems/"
+                + java.net.URLEncoder.encode(problemCode, java.nio.charset.StandardCharsets.UTF_8)
+                + "/attempts";
+        return getList(path, AttemptSummaryDto.class);
+    }
+
+    @Override
     public void connectVerdicts(Consumer<VerdictEventDto> onVerdict) throws ApiException {
         requireSocket();
         stomp.subscribeVerdicts(onVerdict);
@@ -209,6 +258,12 @@ public class HttpJudgeApi implements JudgeApi {
     public void connectClarifications(long contestId, Runnable onChanged) throws ApiException {
         requireSocket();
         stomp.subscribeClarifications(contestId, onChanged);
+    }
+
+    @Override
+    public void connectMaterials(long contestId, Runnable onChanged) throws ApiException {
+        requireSocket();
+        stomp.subscribeMaterials(contestId, onChanged);
     }
 
     private void requireSocket() throws ApiException {
