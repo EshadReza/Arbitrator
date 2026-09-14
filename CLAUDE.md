@@ -1,164 +1,148 @@
-# Arbitrator — context for Claude
+# Arbitrator — repository context
 
-Offline LAN Online Judge for university programming labs.
-**Read `STATUS.md` first** — it says what is done and what is next.
+Arbitrator is an offline, LAN-first programming contest system for university labs. One instructor machine runs a Spring Boot server, MySQL, Docker-backed judging, and a loopback-only browser console. Students use a JavaFX desktop client over REST and STOMP/WebSocket.
 
-## Orientation (read in this order)
+Read these files before changing the repository:
 
-1. `STATUS.md` — current phase, what's done, what's next, known issues
-2. `WORKFLOW_PLAN.md` — locked decisions (§0), ownership map (§3), sprint chunks (§6)
-3. `rules.md` — the nine collaboration rules; Rule 1 (file ownership) governs every edit
+1. `STATUS.md` — verified current state, known defects, and next priorities
+2. `rules.md` — file ownership and collaboration rules; it is governance, not descriptive documentation
+3. `WORKFLOW_PLAN.md` — current architecture, workflow, and roadmap
+4. `README.md` — setup, run, packaging, and test commands
 
-Everything project-related lives in **this folder** — there are no docs one level up.
+`ARBITRATOR_BUNDLE.txt` is a legacy generated snapshot and is not authoritative.
 
-| File | What it is | Edited by |
-|---|---|---|
-| `CLAUDE.md` | this file — auto-loaded context | update when a locked decision or a "bites" item changes |
-| `STATUS.md` | living progress tracker | **update whenever a chunk lands** |
-| `WORKFLOW_PLAN.md` | the 4-sprint plan, ownership, GitHub bootstrap | rarely; it's the baseline |
-| `rules.md` | collaboration rules | only by group agreement |
-| `README.md` | setup + run instructions for a new developer | when setup steps change |
-| `ARBITRATOR_BUNDLE.txt` | generated single-file copy of the whole tree, for handoff without git | never edit — regenerate with `python3 scripts/make-bundle.py` (git-ignored) |
+## Product boundary
 
-## The team and who owns what
+The production-shaped application consists of three Maven modules:
 
-| Dev | Track | Owns |
-|---|---|---|
-| **Eshad** | Platform & Data | `server/{config,security,entity,repo}`, contest/problem/user services + controllers, Flyway `V1`–`V49`, admin panel |
-| **Mahir** | Judge & Real-time | `server/{judge,realtime,leaderboard}`, submission + announcement services/controllers, `languages.yml`, `scripts/docker/**`, Flyway `V50`–`V79` |
-| **Zahin** | JavaFX Client | all of `arbitrator-client/**` including `arbitrator.css` |
+| Module | Responsibility |
+|---|---|
+| `arbitrator-common` | Shared records, enums, API paths, and STOMP destinations |
+| `arbitrator-server` | REST/auth, contest and content services, MySQL persistence, Docker judge, WebSockets, leaderboard, and static admin console |
+| `arbitrator-client` | JavaFX participant UI, editor, statements, submissions, standings, and live updates |
 
-**Rule 1 is not advisory.** Before editing, check who owns the file. Cross-track changes go through a `contract-change` issue, not a quiet edit.
+`arbitrator-web` is a separate React 19/Vite 8/Tailwind 4 toolchain experiment. It is not included by the root Maven build, not served by Spring Boot, and not a replacement for the current admin console.
 
-## Locked decisions — do not reopen
+## Locked decisions
 
 | # | Decision |
 |---|---|
-| D1 | **MySQL 8** only. Not PostgreSQL (the SRS says Postgres in five places; that's a doc bug to fix, not a design choice). |
-| D2 | **Linux only** for real deployment (lab machines are Linux). No longer load-bearing for sandbox safety, though: since S4-B1, `SandboxExecutor` runs every compile/run/checker inside Docker, and MLE/network isolation/fork-bomb containment all hold identically on macOS/Windows dev machines too — see `scripts/docker/`. |
-| D3 | Admin surface = **loopback filter AND ADMIN JWT**, both layers. |
-| D4 | **HTTPS deferred** to post-v1.0. Plain HTTP/WS over the closed LAN. `server.scheme` stays configurable so enabling TLS later is one line. |
+| D1 | MySQL 8 is the only application datastore. |
+| D2 | Ubuntu 22.04 is the target lab deployment. Docker also makes judge development possible on macOS/Windows. |
+| D3 | Instructor surfaces require a loopback request; admin API operations additionally require an `ADMIN` JWT. |
+| D4 | HTTPS/WSS is deferred. v1 currently uses HTTP/WS on a controlled LAN. |
+| D5 | One contest can be joinable/live at a time, although historical contests remain stored. |
+| D6 | All participant compilation and execution, including custom checkers, runs in Docker; there is no host-process fallback. |
 
-UI reference is **Codeforces-derived, information-dense** — now themed light AND dark (top-bar toggle or Ctrl+D), which supersedes both the SRS §4 "dark-themed" line and the earlier light-only note.
+The UI is information-dense and Codeforces-inspired, with both light and dark themes.
 
-## Work vocabulary
+## Current feature model
 
-Chunks are identified as `S<sprint>-<track><n>`, e.g. `S2-B3` = Sprint 2, Mahir's track, chunk 3.
-They're listed in `WORKFLOW_PLAN.md` §6. Branches are `feat/<name>-<chunk-id>-<slug>`.
+- Authentication: student self-registration, seeded instructor account, bcrypt cost 12, 12-hour JWT, explicit logout, in-memory single-active-session registry, and optional client MAC reporting
+- Contest lifecycle: `DRAFT → LOBBY → ACTIVE`, then `PAUSED`, `FROZEN`, or `ENDED`; active contests can be paused/resumed, extended, frozen/unfrozen, scheduled, ended, or cloned
+- Problems: ZIP import, HTML/TXT/Markdown/PDF statements, paired tests, test visibility, exact/custom checker selection, editing, PDF replacement, reordering, and deletion
+- Judging: C++17, Java 17, Python 3.10; persist-before-queue; Docker compile/run; fail-fast tests; exact/custom checking; per-test output; AC/WA/TLE/MLE/CE/RE/OLE
+- Live data: private verdict pushes plus contest-state, leaderboard, announcement, and presence updates over STOMP
+- Participant tools: editor, syntax highlighting, drafts, file upload, custom run, submission history/source/tests, standings, announcements, materials, clarifications, themes, zoom, and shortcuts
+- Instructor tools: contest controls, participant presence, submission feed/source/tests, standings, marks, manual penalties, verdict overrides, exports, notifications, announcements, materials, clarifications, and problem administration
 
-When starting work, say which chunk. When finishing, update `STATUS.md`.
+Float tolerance and rejudge are not implemented. The repository also lacks a supported installer, automated UI/load/coverage suites, complete backup automation, and full localization.
 
 ## Build and run
 
 ```bash
-bash scripts/docker/build-sandbox-image.sh            # once per machine — Docker must be running
-mvn clean install                                    # all three modules
-mvn -pl arbitrator-server spring-boot:run              # server (port 8080)
-mvn -pl arbitrator-client exec:java -Dexec.mainClass=com.arbitrator.client.app.Launcher
-#   ... add -Darbitrator.mock=true for canned data with no server
+bash scripts/docker/build-sandbox-image.sh
+mvn clean install
+mvn -pl arbitrator-server spring-boot:run
+mvn -pl arbitrator-client exec:java
 ```
 
-Demo credentials (seeded on first boot into an empty DB): `admin`/`admin123`, `alice`/`alice123`.
+Use `com.arbitrator.client.app.Launcher` as the client entry point. Mock mode is:
 
-**Run the client via `com.arbitrator.client.app.Launcher`**, never `ArbitratorApp` and never
-`mvn javafx:run`. In Eclipse: *Run As → Java Application* on `Launcher`, with **no VM arguments**.
+```bash
+mvn -pl arbitrator-client exec:java -Darbitrator.mock=true
+```
 
-Why: `javafx-web` declares `requires jdk.jsobject`, a module removed from the JDK in Java 11 and never
-published to Maven Central, so JavaFX can never resolve on the **module path** from Maven deps alone
-(`Module jdk.jsobject not found`). Launching from the **classpath** skips the module graph entirely.
-`Launcher` also dodges "JavaFX runtime components are missing", which the JVM only raises when the main
-class itself extends `Application`. Net effect: no `--module-path`, no machine-specific SDK paths.
+JavaFX dependencies are platform-classified. The POM currently defaults to `mac-aarch64`; pass `-Djavafx.platform=linux` for the Ubuntu x86_64 client. The packaged name is `arbitrator-client-<platform>.jar`.
 
-## Things that bite (learned the hard way)
+Demo data on an empty database: `admin` / `admin123`, `alice` / `alice123`, and draft contest `Lab Contest #1`.
 
-- **`languages.yml` is NOT auto-loaded.** It needs `spring.config.import: optional:classpath:languages.yml`
-  in `application.yml`. Without it `JudgeProperties.languages` binds empty and every submission returns a
-  bare RE with no explanation.
-- **No `-static` in the C++ compile command.** macOS clang has no static libc (`ld: library 'crt0.o' not found`),
-  and the sandbox's isolation doesn't depend on static linking anyway.
-- **Enum columns need `@JdbcTypeCode(SqlTypes.VARCHAR)`.** Hibernate 6's MySQL dialect otherwise expects a native
-  `ENUM(...)` column and fails schema validation against Flyway's `VARCHAR`.
-- **Port 8080 conflicts**: a server left running in Eclipse blocks any terminal-launched restart. Check
-  `lsof -i :8080 -sTCP:LISTEN` before assuming a fix didn't work.
-- **Eclipse silently overwrites Maven's output with broken classes.** When anything is added to
-  `arbitrator-common`, Eclipse's build path goes stale, its compiler emits *error-stub* `.class` files into
-  `target/classes` (they throw `Unresolved compilation problems: X cannot be resolved` at runtime), and it
-  overwrites whatever Maven just built. Symptom: `mvn clean install` says BUILD SUCCESS but the app dies with
-  an **unqualified** `ClassNotFoundException`/`NoClassDefFoundError`.
-  Fix: select all four projects → **Maven → Update Project (Alt+F5)** with "Force Update" ticked →
-  **Project → Clean all**. Diagnose with:
-  `javap -p -c arbitrator-server/target/classes/<Class>.class | grep "Unresolved compilation"`.
-  **Always run `mvn clean install` after an Alt+F5**, and prefer Maven over Eclipse launchers when a change
-  spans modules.
-- **Docker Desktop/Engine must be running before the server (or `mvn test` on the judge package) will judge
-  anything.** `SandboxExecutor` compiles and runs *everything* — contestant code, checkers, the compile step
-  too — inside a container from `scripts/docker/Dockerfile`; there is no host-process fallback left, on any
-  OS. First-time setup: `bash scripts/docker/build-sandbox-image.sh` once per machine. If Docker isn't up,
-  `SandboxExecutorTest`/`JudgeWorkerTest` skip themselves (same `assumeTrue` pattern as the old `gppAvailable`
-  check) and the live server logs a loud error instead of silently running code unsandboxed.
-- **`--memory-swap` must always equal `--memory` in every `docker run` call.** Leaving `--memory-swap` unset
-  lets the container use up to 2x `--memory` in swap, silently doubling the effective RSS cap; setting them
-  equal is what makes it a real hard limit.
-- **Every container mounts the whole work root read-only (`/base`) *and* its own call's work dir read-write
-  (`/sandbox`) — don't "simplify" to a single mount.** `CheckerRunner` invokes a checker binary that's cached
-  outside the submission's own work dir (`workRoot/checkers/problem-N/`), while reading input/expected/actual
-  files that live in the *parent* of the checker's own call-specific dir (`__checker`). A single mount scoped
-  to just the immediate call's dir breaks checker judging; see `SandboxExecutor.translatePath`.
-- **Exit code 137 from a container is NOT proof of a timeout — it can be an OOM kill just as easily**, and
-  they need different verdicts (TLE vs MLE). Only exit 124 (GNU `timeout`'s own deadline firing) is trusted as
-  the timeout signal; verified empirically that a memory-hog fixture hits 137 in milliseconds, nowhere near
-  its wall-clock deadline. See the javadoc on `SandboxExecutor.parseContainerResult`.
-- **`peakMemoryKb` is `-1` when a run times out** (the in-container `/usr/bin/time` never gets to write its
-  report if it's killed mid-wait) — expected, not a bug; `JudgeWorker`'s MLE check already guards on `> 0`.
-  It's a real number on every other platform now, including macOS dev, via Docker — no longer Linux-only.
-- **Never test a fork bomb by running it directly on a dev machine's shell** — always go through
-  `SandboxExecutor`/the sandbox image, where `--pids-limit` contains it. A bare fork loop outside Docker can
-  still fill the host's real process table.
-- **Raw SQL touching times must use `UTC_TIMESTAMP()`, never `NOW()`.** `contests.start_time` is a zoneless
-  `DATETIME` and the JDBC url sets `serverTimezone=UTC`, so Java reads stored values as UTC. `NOW()` writes
-  machine-local time; on a +06 machine that puts the contest six hours in the future and **every submission
-  returns 403** with no obvious cause. JPA writes (`Instant`) are already correct — this only bites hand-written
-  SQL and DB tools.
-- **Start testing from a clean slate**: `mysql -u root arbitrator < scripts/reset-dev-data.sql`. Stale solved
-  state makes badge behaviour look broken — a solved problem shows its green tick and hides later failures,
-  which is correct but confusing if the "solved" came from someone else's test run.
-- **The client's WebSocket needs `tomcat-api` explicitly.** `tomcat-websocket` uses
-  `org.apache.tomcat.InstanceManagerBindings` at runtime but doesn't declare it, so the client dies with
-  `NoClassDefFoundError` the instant it opens a socket — verdicts and live standings silently never arrive
-  while everything else keeps working. The server never sees this (tomcat-embed-core bundles the class), so
-  **a passing server-side integration test does not prove the client can connect.** Verify from the client
-  side when touching WebSocket wiring.
-- **Don't use Mockito in tests.** Byte Buddy (pinned by the Spring Boot 3.2.5 BOM) supports Java 22 at most,
-  and this dev machine runs JDK 26 — every `mock()` call dies with "Java 26 (70) is not supported".
-  The project *targets* 17, so teammates on openjdk-17 won't see it, but tests must run everywhere.
-  Use `java.lang.reflect.Proxy` fakes for repository interfaces and anonymous subclasses for concrete
-  services — see `ProblemPackageServiceTest` for the pattern.
+## Runtime configuration
 
-## Contest lifecycle
+`application.yml` imports `languages.yml` explicitly. Do not remove that import: without it, the judge has no language commands.
 
-`DRAFT → LOBBY → ACTIVE ⇄ PAUSED/FROZEN → ENDED`
+Important environment variables:
 
-`LOBBY` is the holding room: students may enter and wait, but **problems are not
-released and no clock runs** — releasing statements early would let people read
-and plan before the timer starts. `ContestState` carries the rules
-(`isJoinable`, `acceptsSubmissions`, `releasesProblems`, `hasStarted`); check
-there rather than comparing states by hand.
+| Variable | Purpose / default |
+|---|---|
+| `DB_USER` | MySQL user, default `arbitrator` |
+| `DB_PASS` | MySQL password; committed default is development-only |
+| `ARBITRATOR_JWT_SECRET` | JWT signing secret; must be overridden outside local development |
+| `ARBITRATOR_DOCKER_BIN` | Docker executable, default `docker` with runtime discovery of common paths |
+| `ARBITRATOR_DOCKER_IMAGE` | Judge image, default `arbitrator-judge:latest` |
+| `ARBITRATOR_SUBMIT_COOLDOWN` | Submission cooldown, default 10 seconds |
+| `ARBITRATOR_MATERIALS_ROOT` | Persistent material storage, default `./arbitrator-data/materials` |
+| `ARBITRATOR_RESET_ON_BOOT` | Reset non-ended contests to draft, default `false` |
+| `ARBITRATOR_ADMIN_AUTO_OPEN` | Open the admin console after startup, default `true` |
 
-A freshly booted server starts **nothing**, and this is enforced, not merely
-seeded: `ContestBootReset` returns every LOBBY/ACTIVE/PAUSED/FROZEN contest to
-DRAFT and clears its clock at startup. Contest state lives in MySQL, so without
-this a contest left ACTIVE at shutdown came back ACTIVE with a clock that had
-been running against the wall clock the whole time the server was down — the
-first student to open the client walked into a contest nobody had started.
-ENDED contests are left alone. Set `arbitrator.contest.reset-on-boot=false` only
-if the server is meant to be bounced mid-contest and resumed.
+Multipart requests are globally capped at 64 MB. Material-service messages mention 200 MB, but the Spring limit currently wins.
 
-Consequence for tests and scripts: **do not look up "the contest" by
-`state != DRAFT`** — after a boot there isn't one. Take the contest by id, or
-take the first row, then set the state you need.
+The default `reset-on-boot=false` means a live contest survives a server restart and its wall-clock deadline continues to advance. Set it to `true` when every restart should return non-ended contests to `DRAFT` and clear their clocks.
 
-## House style
+## Judge invariants
 
-Match the surrounding code. Comments explain *why* (usually citing an SRS requirement ID like FR-15, BR-01,
-NFR-R04), not what. Keep requirement traceability in comments when adding features — it's how the SRS gets
-verified at acceptance.
+- Docker must be usable before judging. If it is missing or the daemon is inaccessible, the server starts but judge work returns an internal-error-style `RE`.
+- Every compile and run uses a throwaway container with `--network none`, read-only root, a non-root UID, dropped capabilities, `no-new-privileges`, PID/memory/CPU/file-descriptor limits, and tmpfs scratch space.
+- `--memory-swap` must equal `--memory`; otherwise Docker can effectively double the intended memory allowance.
+- The work root is mounted read-only at `/base`, while the immediate work directory is writable at `/sandbox`. Custom checker path translation relies on both mounts.
+- Exit 124 is the reliable GNU `timeout` signal. Exit 137 may indicate an OOM kill and must not automatically become TLE.
+- `peakMemoryKb == -1` is expected when a timed-out process is killed before GNU `time` writes its report.
+- Never run fork-bomb fixtures directly on the host.
+- Raw SQL timestamps must use `UTC_TIMESTAMP()`. The JDBC connection treats zoneless MySQL `DATETIME` values as UTC.
+
+## Persistence and state
+
+Flyway owns the schema; Hibernate uses `ddl-auto=validate`. Never edit an applied migration—add a new migration in the range assigned by `rules.md`.
+
+`submission_results` and PDF statements use JDBC-backed side tables in addition to JPA entities. Uploaded materials are stored on disk with metadata in MySQL, so database-only backups are incomplete.
+
+The active-session registry, presence state, notification queue, judge executor, and scheduled broadcasts are in-memory and intentionally assume one server process.
+
+## Tests and verification
+
+```bash
+mvn test -pl arbitrator-server
+```
+
+Audit result on 2026-09-15: 52 tests, 0 failures, 0 errors, 14 skipped. Docker-backed sandbox/worker/checker and full STOMP integration tests can skip when their prerequisites are unavailable. There are currently no JavaFX UI tests or React product tests.
+
+Do not use Mockito in this repository while tests must run on JDKs newer than the Byte Buddy version managed by Spring Boot 3.2.5. Existing service tests use dynamic proxies and small fakes.
+
+## Known high-priority defects
+
+Before calling the system production-ready, address these findings from the full-codebase audit:
+
+1. Contest-password checks do not create or enforce durable server-side contest membership; authenticated users can reach problem endpoints independently of the picker gate.
+2. Student-controlled strings are placed in inline JavaScript handler attributes in the admin page. HTML escaping is not sufficient for that JavaScript context, creating a credible stored-XSS path.
+3. The REST filter enforces active JWT session IDs, but the WebSocket handshake does not perform the equivalent active-session-registry check.
+4. Duplicate-submission detection removes all whitespace, which changes Python semantics and can also alter strings/token boundaries in Java and C++.
+5. Contest deletion omits material metadata/files and can conflict with the materials foreign key.
+6. ZIP entry-size enforcement does not robustly detect an unknown-size entry that exceeds the cap, and duplicate normalized paths are not rejected.
+
+See `STATUS.md` for the broader prioritized backlog.
+
+## Things that commonly bite
+
+- A server left running in an IDE occupies port 8080. Check `lsof -i :8080 -sTCP:LISTEN` before debugging startup.
+- Eclipse can overwrite Maven output with stale error-stub classes after `arbitrator-common` changes. Update all Maven projects, clean Eclipse projects, then run `mvn clean install`.
+- The standalone STOMP client needs both `tomcat-websocket` and `tomcat-api`; server-side WebSocket tests alone do not verify the client runtime.
+- A solved problem remains visually solved after later failed attempts. Reset development submissions when testing status badges.
+- Source-ban regexes scan raw source rather than a parsed syntax tree and can match prohibited API names inside comments or strings.
+- The global judge executor has a fixed worker pool but an unbounded FIFO queue. Per-user cooldown/in-flight checks reduce abuse but do not impose a global backlog cap.
+- `scripts/prepare-zero-download-bundles.py` expects an obsolete client JAR filename. `scripts/make-bundle.py` also assumes all repository files are UTF-8 text despite binary assets. Neither script is currently a reliable release path.
+
+## Change discipline
+
+Follow `rules.md` for ownership, migration numbering, branches, and reviews. Newer material/clarification files are not fully represented in the old ownership table; coordinate ownership rather than guessing.
+
+Match surrounding style. Comments should explain why and preserve requirement identifiers where they help acceptance traceability. Changes affecting shared DTOs or API constants must update server and client consumers together.

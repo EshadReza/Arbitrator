@@ -1,121 +1,163 @@
 # Arbitrator
 
-Offline, LAN-only Online Judge for university programming labs.
-Spring Boot 3.2 judge server + JavaFX 21 student client + MySQL 8, judging inside Docker. Linux only for real deployment.
+Arbitrator is an offline, LAN-first programming contest platform for university labs. An instructor runs one Spring Boot server with MySQL and Docker; students connect through a JavaFX desktop client. The system supports contest administration, problem distribution, sandboxed judging, live standings, announcements, materials, and clarifications without depending on an internet connection.
 
-**Team:** Eshad (Platform & Data) · Mahir (Judge & Real-time) · Zahin (JavaFX Client)
+The repository currently represents a feature-rich beta rather than a production-hardened v1.0. See [`STATUS.md`](STATUS.md) for verified capabilities, open risks, and the release-readiness backlog.
 
-> Read **rules.md** before your first commit. Ownership map and sprint plan
-> live in **WORKFLOW_PLAN.md**. This checkout is Bundle 1 — the runnable
-> vertical slice (login → submit → judge → live verdict).
+## Architecture
 
-## Prerequisites (Ubuntu 22.04)
+| Component | Purpose |
+|---|---|
+| `arbitrator-common` | Shared DTOs, enums, REST paths, and STOMP destinations |
+| `arbitrator-server` | Spring Boot REST API, security, contest services, judge queue, Docker sandbox, Flyway migrations, and WebSocket publishing |
+| `arbitrator-client` | JavaFX participant application with RichTextFX editor, PDF/HTML statements, and live contest views |
+| `arbitrator-server/src/main/resources/static/admin` | Loopback-only instructor console served by the Spring Boot application |
+| `arbitrator-web` | Standalone React/Vite toolchain experiment; not integrated with the running product or root Maven build |
+
+The root Maven reactor contains three modules: `arbitrator-common`, `arbitrator-server`, and `arbitrator-client`.
+
+## Implemented features
+
+- Student registration, login/logout, bcrypt passwords, 12-hour JWTs, single-active-session handling, and optional MAC-address change notifications
+- Contest states `DRAFT`, `LOBBY`, `ACTIVE`, `PAUSED`, `FROZEN`, and `ENDED`, including scheduling, pause/resume, time adjustment, freeze/unfreeze, cloning, and ending
+- ZIP problem packages with HTML, text, Markdown, or PDF statements; paired test files; exact or custom checkers; editing and reordering
+- C++17, Java 17, and Python 3.10 compilation and execution
+- Docker isolation for compilation, execution, and custom checkers: no network, read-only root filesystem, non-root user, capability drop, PID/CPU/memory/output limits, and temporary workspaces
+- Persist-before-queue submissions, crash recovery for pending work, per-test results, source viewing, custom runs, and verdicts `AC`, `WA`, `TLE`, `MLE`, `CE`, `RE`, and `OLE`
+- ICPC-style leaderboard, first-solve tracking, freeze-aware standings, manual marks, verdict overrides, and penalty adjustments
+- STOMP/WebSocket delivery for verdicts, contest state, standings, announcements, and participant presence
+- Participant announcements, downloadable materials, public/private clarifications, and instructor approval for public answers
+- Instructor monitoring, exports, notification feed, participant drill-downs, and test-case visibility controls
+- JavaFX drafts, file upload, syntax highlighting, automatic indentation/brackets, custom input, submission history, themes, fullscreen views, zoom, shortcuts, and reconnect watchdog
+
+Not yet implemented: float-tolerance judging, rejudge, a supported installer, Bengali localization, automated JavaFX UI tests, load tests, and a complete backup/deployment workflow.
+
+## Prerequisites
+
+Target deployment is Ubuntu 22.04 with:
+
+- JDK 17
+- Maven 3.8+
+- MySQL 8
+- Docker Engine with access to the daemon for the account running the server
+
+macOS and Windows with Docker Desktop are supported for development and judge testing, but the planned lab deployment remains Linux.
+
+The host does not need `g++`, `javac`, or Python for judging. Those toolchains live in the Docker image.
+
+## First-time setup
+
+1. Create the local database and development account:
+
+   ```bash
+   sudo mysql < scripts/init-db.sql
+   ```
+
+2. Prepare local configuration:
+
+   ```bash
+   cp arbitrator-server/src/main/resources/application-local.yml.example \
+      arbitrator-server/src/main/resources/application-local.yml
+   ```
+
+   Edit the copied file or set environment variables. Important production overrides include `DB_USER`, `DB_PASS`, `ARBITRATOR_JWT_SECRET`, `ARBITRATOR_MATERIALS_ROOT`, and optionally `ARBITRATOR_RESET_ON_BOOT`.
+
+   `application-local.yml` is intended to remain local and must not contain shared credentials. If Git already tracks it in an older checkout, remove it from the index before adding real secrets.
+
+3. Build the judge image:
+
+   ```bash
+   bash scripts/docker/build-sandbox-image.sh
+   ```
+
+4. Build and test the Maven modules:
+
+   ```bash
+   mvn clean install
+   ```
+
+If the server is launched by an IDE that cannot find Docker, set `arbitrator.judge.docker-binary` in `application-local.yml` to the absolute path returned by `which docker`.
+
+## Run locally
+
+Start the server:
 
 ```bash
-sudo apt install openjdk-17-jdk maven mysql-server
-```
-
-No compiler toolchain (`g++`, `python3.10`, etc.) is needed on the host itself —
-every compile and every submission run happens inside a Docker container (see
-`scripts/docker/`), never as a direct child process of the server. Install
-Docker instead:
-
-```bash
-# Ubuntu 22.04 — Docker Engine (see https://docs.docker.com/engine/install/ubuntu/)
-# ... then add the account running arbitrator-server to the docker group:
-sudo usermod -aG docker $USER    # log out/in for this to take effect
-```
-
-On a macOS/Windows dev machine, install Docker Desktop and make sure it's running instead.
-
-## First-time setup (each developer, ~10 minutes)
-
-```bash
-# 1. database (your own local instance — rules.md Rule 6)
-sudo mysql < scripts/init-db.sql
-
-# 2. your local credentials (git-ignored)
-cp arbitrator-server/src/main/resources/application-local.yml.example \
-   arbitrator-server/src/main/resources/application-local.yml
-# edit the password to match what you set in init-db.sql
-
-# 3. build the sandbox image (once per machine; rebuild after scripts/docker/Dockerfile changes)
-bash scripts/docker/build-sandbox-image.sh
-
-# 4. build everything
-mvn clean install
-```
-
-If you run the server from an IDE launcher (Eclipse "Run As → Java
-Application") rather than a terminal, the launched process may not inherit
-your shell's `PATH` and can fail to find `docker`. If so, add to
-`application-local.yml`:
-```yaml
-arbitrator:
-  judge:
-    docker-binary: /usr/local/bin/docker   # wherever `which docker` points
-```
-
-## Run
-
-```bash
-# server (Flyway migrates, demo data seeds on first boot:
-#         admin/admin123, alice/alice123, contest "Lab Contest #1")
 mvn -pl arbitrator-server spring-boot:run
-
-# client (in a second terminal)
-mvn -pl arbitrator-client javafx:run
-
-# client against canned data, no server needed (Zahin's daily mode)
-mvn -pl arbitrator-client javafx:run -Darbitrator.mock=true
 ```
 
-Admin panel: http://localhost:8080/admin — server machine only (loopback
-lock + ADMIN JWT, decision D3).
+The default address is `http://localhost:8080`. On an empty database, the development seeder creates:
 
-## Verify the vertical slice
+- Instructor: `admin` / `admin123`
+- Student: `alice` / `alice123`
+- Draft contest: `Lab Contest #1`
 
-1. `mvn test -pl arbitrator-server` — VerdictEvaluator tests pass anywhere;
-   the sandbox fixture suite (6 verdicts + fork bomb) passes wherever Docker
-   runs, not just Linux, since Docker is the only execution path now.
-2. Start server, start client, log in as `alice`.
-3. Open problem A, paste the reference solution, submit:
+The instructor console is available at [http://localhost:8080/admin](http://localhost:8080/admin). Both `/admin/**` and `/api/admin/**` are restricted to loopback requests, and admin API operations also require an `ADMIN` JWT.
 
-```cpp
-#include <iostream>
-int main() { long long a, b; std::cin >> a >> b; std::cout << a + b << "\n"; }
+Run the participant client from another terminal:
+
+```bash
+mvn -pl arbitrator-client exec:java
 ```
 
-4. A green **✓ Accepted** banner arrives over WebSocket within seconds.
+Run it against canned data without a server:
 
-## Module map
-
-| Module | Owner | Contents |
-|---|---|---|
-| `arbitrator-common` | frozen contract | DTOs, enums, path/topic constants |
-| `arbitrator-server` | Eshad + Mahir (see rules.md Rule 1) | REST, auth, judge engine, STOMP |
-| `arbitrator-client` | Zahin | JavaFX UI, Codeforces-style theme |
-
-Eclipse: `File → Import → Maven → Existing Maven Projects` → repo root.
-Import `config/eclipse-formatter.xml`, enable format-on-save. Never commit
-`.classpath` / `.project` / `.settings` (rules.md Rule 3).
-
-## Problem packages (FR-05)
-
-Instructors add problems by uploading a ZIP at http://localhost:8080/admin
-(server machine only). Layout:
-
+```bash
+mvn -pl arbitrator-client exec:java -Darbitrator.mock=true
 ```
+
+The supported entry point is `com.arbitrator.client.app.Launcher`. The client reads `server.properties` from its classpath and accepts a file with the same name beside the packaged JAR as an external override.
+
+## Client packaging
+
+JavaFX artifacts contain platform-specific native libraries. The current default classifier is `mac-aarch64`; override it when building for the target lab platform:
+
+```bash
+mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=linux
+```
+
+The resulting client artifact is named `arbitrator-client-<platform>.jar`. The existing `scripts/prepare-zero-download-bundles.py` still expects the older generic filename and must be corrected before it is used as a release process.
+
+## Problem-package format
+
+Upload a ZIP from the instructor console. A minimal package is:
+
+```text
 config.json                 {"code":"B","title":"Max of Three",
                              "timeLimitMs":1000,"memoryLimitKb":131072}
-statement/statement.html    rendered in the client (.txt and .md also accepted)
-tests/01.in  01.out         one pair per test, evaluated in ascending order
-tests/02.in  02.out
+statement/statement.html    HTML, HTM, TXT, MD, or PDF
+tests/01.in
+tests/01.out
+tests/02.in
+tests/02.out
 ```
 
-Zipping the *folder* rather than its contents works too — a single wrapping
-directory is stripped automatically.
+A single wrapping directory is removed automatically. Packages are validated before persistence and are accepted or rejected as a unit. `config.json` can also select a custom checker, in which case the package must include its checker source.
 
-A package is imported whole or not at all. Rejections list every problem found
-(missing statement, an `.in` without its `.out`, duplicate problem code,
-out-of-range limits), so one upload tells you everything to fix.
+## Tests
+
+Run the server suite with:
+
+```bash
+mvn test -pl arbitrator-server
+```
+
+The latest repository audit on 2026-09-15 completed with 52 tests, 0 failures, 0 errors, and 14 environment-dependent skips. Docker-backed sandbox, worker, checker, and full STOMP integration tests skip when their external prerequisites are unavailable; a green run with skips is not equivalent to a full deployment verification.
+
+The React experiment can be checked separately and is not part of Maven:
+
+```bash
+cd arbitrator-web
+npm install
+npm run build
+npm run lint
+```
+
+## Documentation
+
+- [`STATUS.md`](STATUS.md) — current implementation and remaining work
+- [`CLAUDE.md`](CLAUDE.md) — concise repository context for coding agents and contributors
+- [`WORKFLOW_PLAN.md`](WORKFLOW_PLAN.md) — current architecture, ownership, workflow, and roadmap
+- [`rules.md`](rules.md) — team collaboration and ownership rules; change only by team agreement
+
+Generated directories (`target/`, `dist/`, and `arbitrator-data/`) are not source. `ARBITRATOR_BUNDLE.txt` is a legacy snapshot and should not be treated as authoritative.

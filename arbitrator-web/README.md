@@ -1,32 +1,48 @@
-# React + TypeScript + Vite
+# arbitrator-web
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This directory is a standalone frontend toolchain experiment. It proves that the selected React stack compiles together, but it is **not** the Arbitrator instructor console or participant client.
 
-Currently, two official plugins are available:
+The running product currently uses:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- JavaFX in `../arbitrator-client` for participants
+- The static browser console in `../arbitrator-server/src/main/resources/static/admin` for instructors
 
-## React Compiler
+`arbitrator-web` is not included in the root Maven reactor, is not served by Spring Boot, has no API/authentication integration, and contains no production dashboard routes or state model. `src/App.tsx` is deliberately a component/toolchain smoke test.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Stack
 
-## Expanding the Oxlint configuration
+- React 19
+- TypeScript 6
+- Vite 8
+- Tailwind CSS 4
+- Base UI and shadcn-style components
+- Motion
+- Oxlint
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Run
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Verify
+
+```bash
+npm run build
+npm run lint
+```
+
+## Before product development
+
+Decide whether this project will replace the existing static instructor console or serve a different purpose. A real integration will need, at minimum:
+
+- A documented routing and page model
+- REST and STOMP clients based on the contracts in `arbitrator-common`
+- Admin authentication and loopback behavior compatible with the Spring Boot security model
+- Contest, problem, monitoring, standings, announcement, material, and clarification screens
+- Error/loading/reconnect states
+- Production build integration and deployment ownership
+- Browser and security tests
+
+Until that decision and integration work happen, changes here do not alter the Arbitrator application's behavior.

@@ -1,353 +1,230 @@
-# Arbitrator — Workflow & Work-Split Plan
+# Arbitrator — workflow and delivery plan
 
 **Team:** Eshad · Mahir · Zahin
-**Stack:** Spring Boot 3.2 + JavaFX 21 + MySQL 8 · Linux only · Eclipse IDE · offline LAN
-**UI reference:** Codeforces (m1.codeforces.com)
-**Source SRS:** `Arbitrator_SRS_v1.1.docx` · **Reference project:** `XOROJ-main` (partial reuse only)
+**Current stack:** Java 17 · Spring Boot 3.2.5 · JavaFX 21 · MySQL 8 · Docker · offline LAN
+**Current stage:** feature-rich beta moving into correctness, security, and release hardening
 
----
+This document began as the four-sprint implementation plan. Most of that feature work now exists, so this revision describes the architecture that actually shipped and the remaining path to v1.0. Requirement/chunk identifiers remain useful for traceability, but `STATUS.md` is the source of truth for completion and open defects.
 
-## 0. Locked decisions (v1.0 — do not reopen)
+## 1. Locked product decisions
 
-| # | Decision | Consequence |
+| # | Decision | Current consequence |
 |---|---|---|
-| D1 | **MySQL 8.0+** is the only datastore | `mysql-connector-j` + `flyway-mysql`. SRS §1.4, §2.2.1, DBR-01, DBR-05, NFR-R02 must be edited: PostgreSQL → MySQL 8.0, `pg_dump` → `mysqldump`. "mySQL 15+" in the dependency table is wrong — there is no MySQL 15. |
-| D2 | **Linux only** — server *and* client (Ubuntu 22.04 LTS target) | Real sandboxing becomes achievable (namespaces, rlimits, cgroups v2). Drops the Windows smoke test from §3.3.5 Portability. **Resolves TBD-02, TBD-05, TBD-08.** |
-| D3 | **Admin panel = loopback bind + ADMIN JWT** (both, not either) | **Resolves TBD-06.** Servlet filter rejects any non-`127.0.0.1` request to `/admin/**` and `/api/admin/**` with 403, *and* `@PreAuthorize("hasRole('ADMIN')")` on top. |
-| D4 | **HTTPS deferred to post-v1.0** | Plain HTTP + WS over the closed LAN for now. NFR-S05 is explicitly waived for v1.0 — write that in the SRS so it isn't read as a defect. The client keeps `server.scheme=http` in its properties file so enabling TLS later is a one-line change, not a refactor. |
+| D1 | MySQL 8 is the only datastore. | Flyway owns the schema; Hibernate validates it. PostgreSQL references in the original proposal/SRS are obsolete. |
+| D2 | Ubuntu 22.04 is the target deployment. | The lab release is Linux, while Docker Desktop allows judge development on macOS/Windows. |
+| D3 | Instructor surfaces are local to the server machine. | `/admin/**` and `/api/admin/**` require loopback; admin APIs also require an `ADMIN` JWT. |
+| D4 | HTTPS/WSS is deferred. | v1 uses HTTP/WS on a controlled LAN. This remains an explicit security tradeoff. |
+| D5 | One contest is joinable/live at a time. | Historical contests remain stored, but opening/starting another contest resolves the previous live state. |
+| D6 | Participant code never runs directly on the host. | Compilation, execution, and custom checkers all use disposable Docker containers. |
 
-**Additional consequence of D2 — the sandbox stops being hand-wavy.** This is the single biggest win. Dev-B's executor runs each submission as:
+The active UI direction is information-dense and Codeforces-inspired with light and dark themes. Monaco is out of scope; the client uses RichTextFX.
 
-```
-sudo -u arbitrator-sandbox \
-  unshare -Urn \                          # new user + NETWORK namespace → no network (NFR-S04, FMEA-08)
-  prlimit --cpu=<tl+1> --as=<ml*2> --nproc=64 --fsize=64M --nofile=64 \
-  <compiled binary>                        # cwd = per-submission temp dir only (NFR-S03)
-```
+## 2. Repository and runtime architecture
 
-- Peak memory = `VmHWM` from `/proc/<pid>/status`, or cgroup v2 `memory.peak` → **MLE verdict is now real** (TBD-02 resolved).
-- `--fsize=64M` caps disk output (TBD-05 resolved).
-- `--nproc=64` + process-group `SIGKILL` stops fork bombs (FMEA-08).
-- Hard kill at 2× time limit satisfies NFR-R04.
-- No Windows Defender/AV exclusion needed (TBD-08 resolved).
-
-> **Superseded (S4-B1, see STATUS.md).** The design above — `unshare`/`prlimit` run directly on the host —
-> is what Sprint 1 actually shipped, but it was replaced in Sprint 4 by running every compile and every
-> submission inside a Docker container instead (`scripts/docker/`, `SandboxExecutor`). The rationale for D2
-> (namespaces/cgroups make real sandboxing possible) still holds — Docker is built on the same kernel
-> primitives — but the *mechanism* is no longer a bare `unshare`/`prlimit` wrapper, and it is no longer
-> Linux-exclusive: the same containment now holds on macOS/Windows dev machines too. Do not follow the
-> command block above as current instructions; see `CLAUDE.md` and `STATUS.md` for what's actually running.
-
-### UI direction — Codeforces, not the SRS's dark theme
-
-SRS §4 opens with *"dark-themed, high-contrast design."* You've chosen the Codeforces look, which is **light**: white content boxes with a thin border, a colored header strip per box (`#E1E1E1` bar, bold title), blue links (`#0000EE`-ish), Verdana/sans body text, monospace sample blocks with a copy button, and a right-hand sidebar. **Edit §4's opening sentence to "light, information-dense theme modeled on Codeforces"** or the UI will contradict the SRS at acceptance. Zahin builds one `codeforces.css` in Sprint 1 and every screen inherits it.
-
-Keep from Codeforces: the boxed-panel grammar, the standings table (rank / handle / solved / penalty / per-problem cells green-or-red), verdict color language, the problem page layout (statement left, limits box top-right). Ignore: ratings, colored handles, blogs, gyms — not in the SRS.
-
----
-
-## 1. What the XorOJ reference is actually worth
-
-| Reference asset | Verdict |
-|---|---|
-| `pom.xml` skeleton, Lombok, layering | **Reuse** — swap driver to `mysql-connector-j`, add `spring-boot-starter-websocket`, `flyway-core` + `flyway-mysql`. |
-| `JWTService`, `JWTFilter`, `SecurityConfig`, `PasswordConfig`, `XUserDetailsService` | **Reuse (port)** — raise bcrypt cost to 12 (NFR-S06), move secret to env var (NFR-S07). |
-| `FileStorageService` | **Reuse** — fits problem-package storage. |
-| `ScoreboardService`, `StandingsSnapshotEntity`, `StandingsScheduler` | **Reuse the idea, rewrite the code** — SRS penalty formula (FR-18) differs and freeze (FR-19) doesn't exist there. |
-| `entity/` — `XUser`, `Contest`, `Problem`, `TestFile`, `Submission` | **Port selectively** — keep the shape, drop XorOJ columns. |
-| `judge/CppExecutor.java` (412 lines) | **Rewrite.** C++ only; compares against a *main solution* instead of stored `.out` files; `/proc` memory read that returns 0 on Windows; TLE faked via exit code 124; **no MLE, no custom checker, no float judging, no fail-fast, no real isolation.** Keep only the async stream-reader pattern. |
-| Blog / vote / star / comment / recommendations / `AdvancedDB*` / `AuditLog` | **Delete** — not in the SRS. ~35% of the backend files. |
-| `frontend/` (React + Vite + Tailwind + Monaco) | **Delete** — replaced by JavaFX. |
-| WebSocket / STOMP | **Absent from the reference entirely.** FR-06, FR-07, FR-15, FR-17 all depend on it. Built from scratch. |
-
-**≈30% port, ≈70% new.** Start a clean workspace and copy classes in deliberately — do not try to "convert" XorOJ.
-
----
-
-## 2. Repository layout
-
-One Git repo, four Maven projects, one Eclipse workspace.
-
-```
+```text
 arbitrator/
-├─ pom.xml                     parent aggregator (versions only)
-├─ rules.md                    ← collaboration rules, read before first commit
-├─ WORKFLOW_PLAN.md            this file
-├─ config/
-│   ├─ eclipse-formatter.xml
-│   └─ eclipse.importorder
-├─ arbitrator-common/            SHARED CONTRACT — frozen day 3
-│   └─ src/main/java/com/arbitrator/common/{dto,enums,api}
-├─ arbitrator-server/
-│   ├─ src/main/java/com/arbitrator/server/
-│   │    {config,security,entity,repo,service,controller,judge,realtime,leaderboard}
-│   └─ src/main/resources/{application.yml, db/migration, languages.yml, static/admin}
-└─ arbitrator-client/
-    ├─ src/main/java/com/arbitrator/client/{app,view,controller,net,model,util}
-    └─ src/main/resources/{fxml,css,i18n,images}
+├── pom.xml                         Maven parent/aggregator
+├── arbitrator-common/              shared API contract
+├── arbitrator-server/              Spring Boot server and static admin console
+│   ├── src/main/java/.../
+│   │   ├── config, security
+│   │   ├── entity, repo, service, controller
+│   │   ├── judge
+│   │   ├── realtime
+│   │   └── leaderboard
+│   └── src/main/resources/
+│       ├── application.yml, languages.yml
+│       ├── db/migration/
+│       └── static/admin/
+├── arbitrator-client/              JavaFX participant application
+├── arbitrator-web/                 independent React toolchain experiment
+├── scripts/                        database, Docker, and legacy bundle helpers
+└── README.md, STATUS.md, rules.md
 ```
 
-Zahin never opens a file under `arbitrator-server`. Eshad and Mahir never open a file under `arbitrator-client`. The only shared code is `arbitrator-common`, which is deliberately tiny and frozen on day 3.
+The root Maven reactor builds only `arbitrator-common`, `arbitrator-server`, and `arbitrator-client`. `arbitrator-web` has its own npm lifecycle and is not connected to the product.
 
-### Eclipse setup — identical on all three machines
+### Runtime data flow
 
-- Eclipse IDE for Enterprise Java and Web Developers · **JDK 17** · Ubuntu 22.04.
-- Plugins: **Spring Tools 4** (Eshad, Mahir) · **e(fx)clipse** + **Scene Builder** (Zahin).
-- Import once: `File → Import → Maven → Existing Maven Projects` → repo root → all four projects appear.
-- JavaFX arrives as **Maven dependencies** (`org.openjfx:javafx-controls`/`javafx-fxml:21`) plus `javafx-maven-plugin`. **Never** configure a JavaFX SDK or manual module-path — that setting lives in `.classpath` and will conflict on every pull.
-- `.gitignore` must exclude `target/`, `.classpath`, `.project`, `.settings/`, `application-local.yml`, `.env`. Committed Eclipse metadata is the number-one source of junk merge conflicts on student teams.
-- Everyone imports `config/eclipse-formatter.xml` and enables *Save Actions → format source code*. This eliminates whitespace-only diffs, which is half of all false conflicts.
+1. Spring Boot starts, Flyway migrates MySQL, the demo seeder fills an empty database, and the server checks Docker readiness.
+2. The instructor signs into the loopback admin console and creates or selects a contest.
+3. Problems are imported from ZIP packages and stored as relational metadata/tests plus optional PDF blobs.
+4. Students authenticate in JavaFX, choose the joinable contest, and load released content through REST.
+5. A submission is validated and persisted before being placed on the judge executor.
+6. A worker creates a temporary workspace, compiles in Docker, runs test cases in Docker, invokes the selected checker, and persists the result.
+7. The student receives a private verdict event. Updated standings and contest state are broadcast to subscribed clients.
+8. Announcements, materials, clarifications, presence, and monitoring share the same server and contest identity model.
 
-Local prerequisites on each machine: `mysql-server-8.0`, `openjdk-17-jdk`, Docker (Engine on Linux, Desktop on
-macOS/Windows for dev) — see README.md. No host-side `g++`/`python3.10`/toolchain needed since S4-B1: judging
-runs inside a container, not on the host.
+### Persistence boundaries
 
----
+- MySQL: users, contests, problems, tests, submissions, announcements, clarifications, material metadata, and most operational state
+- JDBC side tables: per-test submission results and PDF statement blobs
+- Filesystem: uploaded material bodies under `arbitrator.materials.root`
+- In-memory: active-session registry, presence, pending notifications, judge executor, and scheduled broadcasters
 
-## 3. Ownership map — the anti-collision rule
+Database backup alone does not capture uploaded material files.
 
-> **You may only edit files inside packages you own.** Need a change elsewhere? Open a GitHub issue tagged `contract-change`; the owner makes it. No exceptions. This one rule is why three people can work daily without merge conflicts.
+## 3. Shared contract
 
-| Track | Owner | Exclusively owned paths |
+`arbitrator-common` is the compile-time contract between server and client. It contains:
+
+- Enums: roles, languages, verdicts, checker types, and contest states
+- Records: authentication, contests, problems, submissions, tests, standings, attempts, announcements, materials, clarifications, custom runs, and live events
+- Constants: all shared REST paths and STOMP destinations
+
+Existing record fields, enum values, and paths must not be renamed casually. A contract change needs coordinated updates to both consumers and regression tests. Additive records/constants are lower risk but still require review under `rules.md`.
+
+## 4. Ownership and coordination
+
+`rules.md` is authoritative. The broad domains are:
+
+| Track | Owner | Main domain |
 |---|---|---|
-| Shared contract | **All three** (co-designed day 2, frozen day 3) | `arbitrator-common/**` |
-| **A — Platform, Data & Admin** | **Eshad** | `server/config`, `server/security`, `server/entity`, `server/repo`, `server/service/{user,contest,problem,report}`, `server/controller/{auth,admin,contest,problem,user}`, `resources/db/migration`, `resources/static/admin` |
-| **B — Judge Engine & Real-time** | **Mahir** | `server/judge/**`, `server/realtime/**`, `server/leaderboard/**`, `server/service/{submission,announcement}`, `server/controller/{submission,announcement}`, `resources/languages.yml`, `scripts/docker/**` |
-| **C — JavaFX Client** | **Zahin** | `arbitrator-client/**` (entire project, including `codeforces.css`) |
-| Build, CI, docs | **Eshad** (PR-reviewed) | root `pom.xml`, `README.md`, `.github/` |
+| Platform, data, and admin | Eshad | configuration, security, entities, repositories, Flyway, platform services/controllers, static admin console, root build/docs |
+| Judge and real-time | Mahir | judge, realtime, leaderboard, submission/announcement flow, language configuration, Docker image |
+| JavaFX client | Zahin | all client application code, FXML, CSS, resources, and client packaging |
+| Shared contract | Team | `arbitrator-common` |
 
-*Roles are labels — swapping any two is a find-and-replace in this file and `rules.md`. Decide in the day-1 meeting and don't revisit.*
+Material and clarification code was added after the original ownership table and is not named explicitly in `rules.md`. Treat it as coordinated platform/API work until the team formally updates the rule.
 
-### The four known friction points, pre-solved
+Migration ranges remain:
 
-| Friction | Fix |
+- Eshad: V1–V49
+- Mahir: V50–V79
+- Integration/hotfix: V80–V99
+
+Never edit an applied Flyway migration. Add a new version.
+
+## 5. Current functional baseline
+
+The following end-to-end paths exist:
+
+- Register/login/logout, including replacement of an existing REST session
+- Create contest → open lobby → start → pause/resume → adjust time → freeze/unfreeze → end/clone
+- Import/view/edit/reorder/delete problems and inspect test cases
+- Submit C++/Java/Python → queue → Docker compile/run → exact/custom check → persist → push verdict
+- Custom run without storing a contest submission
+- Frozen and unfrozen ICPC standings with attempt drill-downs
+- Participant source/test history with ownership restrictions
+- Instructor live monitoring, source/test inspection, marks, overrides, penalties, exports, and notifications
+- Announcements, materials, and clarification ask/answer/approval flows
+- HTML, text, Markdown, and PDF problem statements
+- JavaFX drafts, editor assistance, themes, fullscreen modes, refresh/reconnect handling, and contest switching
+
+The original “Bundle 1” terminology now refers only to an old vertical-slice snapshot. It does not describe the current repository.
+
+## 6. Historical sprint reconciliation
+
+| Original area | Current state |
 |---|---|
-| `Submission` entity — Eshad owns it, Mahir judges it | Eshad creates it in **Sprint 1** with every field Mahir needs: `verdict`, `execTimeMs`, `peakMemoryKb`, `compilerOutput`, `queuedAt`, `judgedAt`, `language`, `workstationIp`, `failedTestIndex`. **Frozen after Sprint 1.** |
-| `SecurityConfig` — Eshad owns, Mahir adds endpoints under it | Eshad writes **path patterns, not per-endpoint rules**: `/api/admin/**` → ADMIN, `/admin/**` → loopback + ADMIN, `/api/**` → authenticated, `/ws/**` → authenticated. Mahir never opens the file. |
-| Flyway migration version collisions | **Reserved ranges.** Eshad `V1__`–`V49__` · Mahir `V50__`–`V79__` · hotfix `V80__`+. Two people can never pick the same number. |
-| Shared database | Each developer runs their **own local MySQL 8**. `application.yml` is committed with placeholders; real credentials live in untracked `application-local.yml`. Never point two machines at one DB during development. |
+| Sprint 1 foundations | Delivered and substantially extended |
+| Sprint 2 submit/judge/verdict slice | Delivered end to end |
+| Java/Python judging | Delivered |
+| Docker sandbox hardening | Delivered, replacing the original host `unshare`/`prlimit` design |
+| Leaderboard and freeze | Delivered |
+| Announcements | Delivered |
+| Custom checker | Delivered |
+| Rejudge | Not delivered |
+| Float-tolerance checker | Not delivered |
+| CSV bulk user import and password reset UI | Not present as a supported current flow |
+| Automated backup on contest end | Not delivered |
+| JaCoCo, dependency check, JMeter, TestFX | Not delivered |
+| Installer/systemd/operator release | Not delivered |
+| Bengali localization | Not delivered |
+| Full multi-machine rehearsal | Not evidenced in the current repository |
 
----
+## 7. v1.0 hardening plan
 
-## 4. The contract — build this first (Sprint 1, days 2–3)
+### Phase A — authorization and injection safety
 
-`arbitrator-common` holds exactly three things. Once it's frozen, nobody blocks anybody.
+1. Replace the contest-password picker check with a server-side contest-access grant or equivalent authorization rule.
+2. Enforce contest release/access checks consistently on problem, PDF, material, clarification, submission, and standings endpoints.
+3. Remove inline JavaScript handlers from the admin console or pass untrusted values through safe DOM event binding and context-appropriate encoding.
+4. Add a restrictive, documented server-side student-ID validation policy.
+5. Apply active-session `sid` validation during WebSocket handshakes and test forced-login replacement end to end.
 
-**Enums** — `Verdict {AC,WA,TLE,MLE,CE,RE}` · `Language {CPP17,JAVA17,PYTHON310}` · `ContestState {DRAFT,ACTIVE,FROZEN,ENDED}` · `Role {STUDENT,ADMIN}`
+### Phase B — correctness and data lifecycle
 
-**DTOs** — `LoginRequest/Response` · `ProblemSummaryDto` · `ProblemDetailDto` · `SubmitRequest` · `SubmitAckDto(submissionId, queuePosition)` · `VerdictEventDto` · `SubmissionHistoryDto` · `LeaderboardDto(rows[], frozen, lastUpdated)` · `AnnouncementDto` · `ContestStateDto(state, serverTimeMs, endTimeMs)`
+1. Replace whitespace-stripping duplicate detection with exact hashing or a language-safe normalization policy.
+2. Delete material metadata and files as part of contest deletion, transactionally where possible.
+3. Harden ZIP import with an extra-byte limit probe, duplicate normalized-path rejection, entry-count limits, and tests.
+4. Reconcile the 64 MB multipart limit with the material service's advertised 200 MB cap.
+5. Decide and document queue capacity/backpressure behavior.
+6. Replace raw source-ban regex scanning with a safer policy or explicitly accept and test its false-positive behavior.
 
-**Constants** — every REST path and STOMP destination as a `String` constant, so a typo is a compile error rather than a runtime 404.
+### Phase C — missing contest features
 
-| REST | STOMP |
-|---|---|
-| `POST /api/auth/login` | `/topic/contest/{id}/leaderboard` |
-| `GET  /api/contests/current` | `/topic/contest/{id}/announcements` |
-| `GET  /api/problems/{id}` | `/topic/contest/{id}/state` |
-| `POST /api/submissions` | `/user/queue/verdicts` |
-| `GET  /api/submissions/mine` | |
-| `GET  /api/leaderboard/{cid}` | |
-| `POST /api/admin/**` (loopback + ADMIN) | |
+1. Implement rejudge with immutable audit information and predictable leaderboard updates.
+2. Implement absolute/relative float tolerance as an explicit checker mode.
+3. Decide whether bulk user import, password reset, post-contest reports, and automatic contest-end backup remain v1 requirements.
 
-**Sprint 1 day 3: this module compiles and is pushed to `main`.** Everything after that runs in parallel.
+### Phase D — verification
 
----
+1. Run all Docker-dependent tests without skips on the target server.
+2. Add integration tests for contest access, session replacement, materials, contest deletion, and admin rendering safety.
+3. Add TestFX coverage for login, contest picker, submit/verdict, reconnect banner, standings freeze, and PDF display.
+4. Add a 30-user load test for REST, STOMP broadcasting, and judge backlog behavior.
+5. Conduct a two-hour rehearsal with 20+ Ubuntu clients, multiple languages, at least six problems, network interruption, restart/recovery, and a frozen scoreboard.
 
-## 5. Nobody waits on anybody
+### Phase E — release engineering
 
-- **Mahir** does not wait for Eshad's database. The judge engine (`SandboxExecutor`, `VerdictEvaluator`, `CheckerRunner`) takes **file paths and limits, not entities**, and is developed with plain JUnit against fixtures in `src/test/resources`. Wiring it to `SubmissionRepository` is a one-day task in Sprint 3.
-- **Zahin** does not wait for the server. The client talks to an interface `JudgeApi` with two implementations: `HttpJudgeApi` (real) and `FakeJudgeApi` (canned problems, fake verdicts on a timer, fake leaderboard ticks), switched by `-Darbitrator.mock=true`. The **entire UI is demoable before the server exists**.
-- **Eshad** starts at the bottom of the stack and is never blocked.
+1. Repair `.gitignore` and remove already-tracked IDE/local/generated artifacts without deleting developers' local files.
+2. Replace the stale bundle generator or retire it in favor of tagged Git releases.
+3. Align distribution scripts with `arbitrator-client-<platform>.jar` and build Linux artifacts explicitly.
+4. Package a JRE, client configuration, server JAR, Docker-image setup, MySQL setup, and operator scripts as a coherent release.
+5. Document and test database-plus-material backup/restore.
+6. Produce instructor and student quick-start guides from the tagged release.
 
----
+## 8. Development workflow
 
-## 6. Sprint plan — 8 weeks, 4 sprints × 2 weeks
-
-### Sprint 1 — Foundations & contract (weeks 1–2)
-
-| Dev | Chunks | Done when |
-|---|---|---|
-| **Eshad** | `S1-A1` repo + parent pom + 4 modules + `.gitignore` + formatter · `S1-A2` MySQL 8 schema via Flyway: `user, contest, problem, test_case, submission, submission_result, announcement, leaderboard_snapshot` (DBR-03) · `S1-A3` JPA entities + repositories (port from XorOJ) · `S1-A4` auth: register/login, bcrypt(12), JWT 12 h, `SecurityConfig` path rules + **loopback filter for `/admin/**`** (FR-01/02/03, D3) | `mvn clean install` green · login returns a JWT · ADMIN endpoint 403s for a STUDENT token · `/admin` 403s from another machine |
-| **Mahir** | `S1-B1` `sandbox-run.sh` + `SandboxExecutor`: `unshare -Urn` + `prlimit` + kill at 2× TL, real peak-RSS read (FR-10, NFR-R04, NFR-S03/S04) · `S1-B2` `languages.yml` compile/run command config (FR-21) · `S1-B3` JUnit fixture suite: AC / WA / TLE / **MLE** / CE / RE programs · `S1-B4` **spike the STOMP + JWT handshake** in the remaining time | All six fixture programs produce the correct verdict from a unit test, no Spring context needed · a fork-bomb fixture is contained |
-| **Zahin** | `S1-C1` JavaFX project, Maven run/package · `S1-C2` **`codeforces.css`** — boxed panels, header strips, link blues, monospace blocks · `S1-C3` login screen (UIF-01…04) with connection-status dot · `S1-C4` app shell: three-panel layout + top status bar + nav tabs · `S1-C5` `JudgeApi` interface + `FakeJudgeApi` | Client reaches login in < 5 s (NFR-P05) · shell is navigable keyboard-only (NFR-U04) · side-by-side screenshot against m1.codeforces.com looks like a sibling |
-| **All** | `S1-X` `arbitrator-common` designed together day 2, pushed day 3, **frozen** | Module compiles; all three depend on it |
-
-**Checkpoint I1 (end of week 2):** Zahin's client logs into Eshad's real server and receives a JWT.
-
-### Sprint 2 — Vertical slice: submit → judge → verdict (weeks 3–4)
-
-| Dev | Chunks |
-|---|---|
-| **Eshad** | `S2-A1` contest CRUD + start/stop + authoritative server clock (FR-04/06/08) · `S2-A2` problem-package ZIP upload: extract, validate `.in`/`.out` pairs + `config.json`, reject malformed (FR-05, FMEA-07) · `S2-A3` `GET /api/problems/{id}` + statement serving · `S2-A4` admin panel skeleton (static HTML/JS, loopback-only) — Contests + Problems pages |
-| **Mahir** | `S2-B1` `POST /api/submissions` → **persist before queueing** (FMEA-01), 202 + queue position (FR-09) · `S2-B2` judge queue: bounded `ThreadPoolExecutor`, ≥10 parallel jobs, depth gauge (NFR-P04, FMEA-10) · `S2-B3` `VerdictEvaluator` — exact match, whitespace-normalised, fail-fast (FR-12, BR-05) · `S2-B4` WebSocket/STOMP config + JWT handshake auth + `/user/queue/verdicts` (FR-15) · `S2-B5` 1-submission-per-30 s rate limit (BR-01) · `S2-B6` reject after deadline by server clock (BR-02) |
-| **Zahin** | `S2-C1` problem-list panel with Codeforces-style status badges · `S2-C2` statement renderer + copy-to-clipboard sample blocks · `S2-C3` code editor (**RichTextFX `CodeArea`**) — highlighting for 3 languages, line numbers, language selector · `S2-C4` submit flow + toast (UIF-08) · `S2-C5` STOMP client + verdict banner, six colour states (UIF-10) |
-
-**Checkpoint I2 (end of week 4) — make or break:** a student logs in, opens a problem, submits C++, and an **AC banner arrives over WebSocket in under 30 s**. Everything after this is breadth, not risk.
-
-### Sprint 3 — Full judging, leaderboard, live features (weeks 5–6)
-
-| Dev | Chunks |
-|---|---|
-| **Eshad** | `S3-A1` Java 17 + Python 3.10 toolchain config & validation · `S3-A2` user admin: CSV bulk import, reset password (UIF-21) · `S3-A3` admin panel: Submissions table + rejudge button, Users page, Announcements composer, confirmation dialogs on destructive actions (UIF-22) · `S3-A4` post-contest report endpoint (FR-22) · `S3-A5` `mysqldump` backup on contest end (DBR-05) |
-| **Mahir** | `S3-B1` float-tolerance judging `max(abs_eps, rel_eps×\|expected\|)` (FR-13) · `S3-B2` custom checker: compile + run `<in> <out> <ans>`, exit-code mapping (FR-14) · `S3-B3` leaderboard engine: `firstACminutes + 20×priorWA`, CE excluded, first-AC only, tiebreakers (FR-17/18, BR-03/04/06) · `S3-B4` freeze / unfreeze (FR-19) · `S3-B5` announcement broadcast (FR-07) · `S3-B6` rejudge pipeline (UC-14) · `S3-B7` CE stderr truncated to 4096 chars (FR-20) |
-| **Zahin** | `S3-C1` leaderboard view — Codeforces standings table, per-problem cells, self-row highlight, freeze banner, no h-scroll at 1280 px (UIF-13…16) · `S3-C2` click-handle modal (UIF-17) · `S3-C3` announcement modal + bell + side panel (UIF-18/19) · `S3-C4` submission-history table + read-only source viewer (UIF-12) · `S3-C5` CE log panel (UIF-11) · `S3-C6` contest timer, server-derived, red pulse under 5 min, "Contest Ended" (UIF-05…07) · `S3-C7` reconnect with exponential backoff + "Connection Lost" banner (NFR-R03, FMEA-03) |
-
-**Checkpoint I3 (end of week 6):** three machines, one contest, three languages, live leaderboard, announcements landing.
-
-### Sprint 4 — Hardening, deployment, acceptance (weeks 7–8)
-
-| Dev | Chunks |
-|---|---|
-| **Eshad** | `S4-A1` HikariCP 5/20, DB-level FKs, soft-delete (DBR-04/06/07) · `S4-A2` deployment: single fat JAR + `install-server.md`, pre-contest disk-space check (FMEA-04) · `S4-A3` JaCoCo ≥ 70 % on server · `S4-A4` OWASP dependency-check + `NOTICES` file (NFR-C03, LRR-03) · `S4-A5` systemd unit with auto-restart (FMEA-01) |
-| **Mahir** | `S4-B1` sandbox hardening — **delivered as a Docker-backed sandbox instead of the sudoers/process-group design sketched here** (stronger: real filesystem isolation + cgroup memory cap, see STATUS.md) — verified no network from inside (NFR-S03/S04, FMEA-02/08) · `S4-B2` crash recovery — requeue `PENDING` submissions on startup (NFR-R02, FMEA-01) · `S4-B3` JMeter, 30 virtual users, P95 ≤ 500 ms (NFR-P01) · `S4-B4` admin dashboard metrics feed: queue depth, submission rate, connected clients (UIF-23) |
-| **Zahin** | `S4-C1` i18n resource bundle, UTF-8 throughout (I18N-01/02) · `S4-C2` silent installer script for lab machines + `server.properties` (host, port, **scheme**) · `S4-C3` TestFX automated tests for UIF-01/08/10 · `S4-C4` smoke test on Ubuntu 22.04 · `S4-C5` one-page student quick-start (NFR-U01) |
-| **All** | `S4-X` dress rehearsal: 20+ machines, 6 problems, 2-hour mock contest, then bug triage |
-
-**Deferred to post-v1.0:** HTTPS/WSS + truststore (D4) · Bengali localisation (TBD-01) · partial scoring (TBD-07) · Windows client support.
-
-**Final acceptance:** walk the six Gherkin scenarios in SRS §3.1.3 in front of the supervisor. They are your demo script — rehearse them verbatim.
-
----
-
-## 7. Bundle 1 — the runnable vertical slice (what gets written first)
-
-**Decision:** the first deliverable is a *runnable vertical slice*, not a full v1.0 and not an empty skeleton. It compiles and runs end-to-end on day one, and it deliberately contains the two riskiest pieces — the Linux sandbox and the STOMP+JWT handshake — so they are proven before anyone builds breadth on top of them.
-
-Everything in Bundle 1 maps to a Sprint 1 or Sprint 2 chunk. Nothing from Sprint 3–4 is included.
-
-**Naming:** repo name and base package are yours to set. Below they appear as `arbitrator` / `com.arbitrator` — substitute freely; the name occurs only in the four `pom.xml` files and in `package`/`import` declarations.
-
-### Root — 8 files
-```
-pom.xml                        parent aggregator, dependency versions
-.gitignore                     exactly as rules.md Rule 3
-rules.md · WORKFLOW_PLAN.md
-config/eclipse-formatter.xml · config/eclipse.importorder
-scripts/sandbox-run.sh         unshare -Urn + prlimit wrapper   [Mahir]
-scripts/init-db.sql            creates schema + labjudge user   [Eshad]
-```
-
-### `arbitrator-common` — 14 files · shared, frozen day 3
-```
-pom.xml
-enums/   Verdict · Language · ContestState · Role
-dto/     LoginRequest · LoginResponse · ProblemSummaryDto · ProblemDetailDto
-         SubmitRequest · SubmitAckDto · VerdictEventDto · SubmissionHistoryDto · ContestStateDto
-api/     ApiPaths · StompDestinations
-```
-
-### `arbitrator-server` — ~40 files
-| Package | Files | Owner |
-|---|---|---|
-| root | `pom.xml`, `application.yml`, `application-local.yml.example`, `languages.yml`, `ArbitratorServerApplication` | Eshad (`languages.yml` → Mahir) |
-| `db/migration` | `V1__baseline.sql` — user, contest, problem, test_case, submission, submission_result | Eshad |
-| `config` | `SecurityConfig`, `PasswordConfig`, `JacksonConfig`, **`LoopbackAdminFilter`** | Eshad |
-| `security` | `JwtService`, `JwtAuthFilter`, `UserDetailsServiceImpl`, **`JwtHandshakeInterceptor`** | Eshad (interceptor co-reviewed with Mahir) |
-| `entity` | `User`, `Contest`, `Problem`, `TestCase`, **`Submission` (all fields, frozen)** | Eshad |
-| `repo` | 5 Spring Data interfaces | Eshad |
-| `service` | `UserService`, `ContestService`, `ProblemService` | Eshad |
-| `controller` | `AuthController`, `ContestController`, `ProblemController` | Eshad |
-| `judge` | `SandboxExecutor`, `ExecutionResult`, `LanguageConfig`, `JudgeQueue`, `JudgeWorker`, `VerdictEvaluator`, `ExactMatcher` | Mahir |
-| `service` / `controller` | `SubmissionService`, `SubmissionController` (persist-before-queue, 202 + queue position, 30 s rate limit) | Mahir |
-| `realtime` | `WebSocketConfig`, `VerdictPublisher` | Mahir |
-| `src/test` | `SandboxExecutorTest` + 7 fixtures: `ac.cpp`, `wa.cpp`, `tle.cpp`, `mle.cpp`, `ce.cpp`, `re.cpp`, `forkbomb.cpp` | Mahir |
-
-### `arbitrator-client` — ~22 files · all Zahin
-```
-pom.xml                        openjfx 21 + javafx-maven-plugin + richtextfx
-app/       ArbitratorApp · AppState · SceneRouter
-net/       JudgeApi (interface) · HttpJudgeApi · FakeJudgeApi · StompClientAdapter
-controller/ LoginController · MainController · EditorController · VerdictBanner
-fxml/      login.fxml · main.fxml · problem-panel.fxml · editor-panel.fxml
-css/       codeforces.css        ← the whole visual language, one file
-resources/ server.properties (host, port, scheme) · messages_en.properties
-```
-
-**Definition of done for Bundle 1:** on one Ubuntu 22.04 machine — `mvn clean install` green · server starts against local MySQL · client launches, logs in, loads a seeded problem, submits `ac.cpp`, and an AC banner arrives over WebSocket in under 30 s · `SandboxExecutorTest` shows all six verdicts plus fork-bomb containment · `/admin` returns 403 from a second machine.
-
-**Not in Bundle 1** (Sprint 3–4, added later): leaderboard + penalty engine, freeze, float judging, custom checkers, announcements, rejudge, admin panel pages, CSV import, reports, i18n, installer, TestFX, JMeter.
-
----
-
-## 8. Dividing the files and pushing to GitHub
-
-### The counter-intuitive part: do **not** split the first push three ways
-
-Bundle 1 is a single coherent tree that must compile as a unit. Splitting it across three people's first commits creates exactly the mess this plan exists to avoid — half-resolved imports, a `common` module that doesn't exist yet for two of you, three conflicting `pom.xml` versions.
-
-**One person (Eshad) unpacks the bundle and pushes the whole thing as the initial commit.** Ownership begins at commit #2. From then on, §3's ownership map and `rules.md` govern everything.
-
-### Day 0 — Eshad, once, alone (~20 minutes)
+Use the branch/review process in `rules.md`:
 
 ```bash
-# 1. create the repo on github.com (private, no README, no .gitignore, no license)
-
-# 2. unpack the bundle into an empty folder
-mkdir labjudge && cd labjudge
-# place ARBITRATOR_BUNDLE.txt here and run the python3 snippet embedded in
-# its header — it writes all files and chmods scripts/docker/build-sandbox-image.sh
-
-# 3. sanity-check BEFORE the first commit
-mvn clean install           # must be green
-
-# 4. first commit — .gitignore goes in first, before Eclipse ever touches the folder
-git init -b main
-git add .gitignore && git commit -m "chore: gitignore before anything else"
-git add . && git commit -m "feat: Arbitrator vertical slice — common, server, client"
-git remote add origin git@github.com:<org>/<repo>.git
-git push -u origin main
-
-# 5. branches and protection
-git checkout -b dev && git push -u origin dev
-# on github.com → Settings → Branches → protect `main` and `dev`:
-#   require 1 approving review, require branches be up to date before merge
-git tag v0.0-bundle && git push --tags
+git checkout dev
+git pull origin dev
+git checkout -b feat/<name>-<chunk-or-issue>-<slug>
 ```
 
-Then invite Mahir and Zahin as collaborators and post the clone command in the group chat.
-
-### Day 0 — Mahir and Zahin, once each (~15 minutes)
+Before opening a PR:
 
 ```bash
-git clone git@github.com:<org>/<repo>.git && cd <repo>
-mvn clean install                                    # must be green before Eclipse
-sudo apt install mysql-server-8.0 openjdk-17-jdk   # + Docker — see README.md prerequisites
-sudo mysql < scripts/init-db.sql
-cp arbitrator-server/src/main/resources/application-local.yml.example \
-   arbitrator-server/src/main/resources/application-local.yml   # git-ignored; put your password here
-```
-Then in Eclipse: `File → Import → Maven → Existing Maven Projects` → repo root → all four appear. Import `config/eclipse-formatter.xml`, enable Save Actions (rules.md Rule 4). Verify `git status` is **clean** — if `.classpath` or `.settings/` shows up, the `.gitignore` didn't land and you fix that before anything else.
-
-### Day 1 onward — everyone
-
-Nobody pushes to `main` or `dev` directly again. Every change is a branch → PR → one approval → merge to `dev`, per `rules.md` Rule 7. `main` only moves at the four checkpoint tags.
-
-```bash
-git checkout dev && git pull origin dev
-git checkout -b feat/<yourname>-<chunk-id>-<slug>     # e.g. feat/mahir-S2-B4-stomp-verdicts
+git checkout dev
+git pull origin dev
+git checkout <feature-branch>
+git merge dev
+mvn clean install
 ```
 
-### The first three branches off Bundle 1
+Also run the smallest relevant targeted tests while iterating. Changes to the React experiment use its own `npm run build` and `npm run lint` checks.
 
-| Dev | Branch | What it does |
+Keep branches scoped to one behavior. Changes spanning ownership domains should be divided into coordinated commits or made by the owning developer. Never rewrite applied migrations, commit credentials, or run contestant/fork-bomb fixtures directly on the host.
+
+## 9. Test strategy
+
+| Layer | Current coverage | Required next coverage |
 |---|---|---|
-| Eshad | `feat/eshad-S2-A1-contest-lifecycle` | contest CRUD, start/stop, authoritative server clock |
-| Mahir | `feat/mahir-S2-B3-exact-matcher` | fail-fast evaluation across all test cases + whitespace normalisation |
-| Zahin | `feat/zahin-S2-C1-problem-list` | left-panel problem list with Codeforces status badges |
+| Pure judge/scoring | Exact verdict and leaderboard unit tests | Float checker, duplicate policy, source-ban edge cases |
+| Problem importer | Broad package validation tests | Unknown-size/over-cap and duplicate-path cases |
+| Docker execution | Sandbox/worker/checker tests, environment-skippable | Mandatory target-host run and long-run cleanup checks |
+| WebSocket | Server integration test, environment-skippable | Active-session invalidation and real JavaFX reconnect |
+| Services/controllers | Partial | Authorization matrix, materials, deletion, restart behavior |
+| JavaFX | Compile/manual verification | TestFX plus Ubuntu visual acceptance |
+| Admin console | Manual/live checks | Injection-safe DOM tests and browser workflow tests |
+| Performance | No repeatable suite | REST/STOMP/judge load and two-hour soak |
 
-Three branches, three disjoint file sets, zero possible conflict. That's the pattern for the rest of the project.
+The latest audit run is recorded in `STATUS.md` and must be updated when the verification state changes.
 
----
+## 10. Acceptance gate
 
-## 9. Risk watchlist
+A v1.0 tag requires all of the following:
 
-1. **STOMP + JWT handshake** is where student teams lose three days. Mahir spikes it in Sprint 1 slack (`S1-B4`), not in Sprint 2 under pressure.
-2. ~~`unshare -Urn` needs unprivileged user namespaces enabled.~~ **Superseded (S4-B1):** judging runs inside
-   Docker now, not a bare `unshare` wrapper. The equivalent risk is **Docker itself being available and usable**
-   on the lab image — daemon installed and running, and the account running `arbitrator-server` in the `docker`
-   group (or otherwise able to reach the daemon socket without `sudo`). Verify on the **actual lab machines**
-   in week 1: `docker run --rm hello-world` as that account must succeed.
-3. **Don't embed Monaco in JavaFX.** RichTextFX `CodeArea` — SRS §4.2 explicitly permits it.
-4. **Scope creep from XorOJ.** Blogs, ratings, recommendations are not in the SRS. Deleting them is a feature.
-5. **Bus factor on the client.** Zahin owns a whole project alone. Pair Zahin with Eshad for one day in Sprint 2 so someone else can build and run it.
+- No open Priority 0 or Priority 1 findings from `STATUS.md`
+- Full server test suite on the deployment host with no environment skips
+- Successful Ubuntu client install on a clean machine
+- Successful multi-client LAN rehearsal and reconnect/restart drill
+- Repeatable backup and restore of MySQL plus material files
+- Docker judge image and daemon validated under the real server account
+- Documentation, configuration templates, and artifacts generated from the same commit
+- Instructor sign-off on the end-to-end contest, monitoring, freeze, export, and recovery flows
+
+Post-v1 candidates remain HTTPS/WSS, Bengali localization, partial scoring, a production web frontend, and support for distributed/multi-server deployment.

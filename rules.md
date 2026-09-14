@@ -196,7 +196,7 @@ Then, by file type:
 - [ ] Repo created on GitHub, `main` and `dev` branches exist, `main` protected
 - [ ] `.gitignore` from Rule 3 committed **before any Eclipse import**
 - [ ] `config/eclipse-formatter.xml` + `eclipse.importorder` committed, all three imported them
-- [ ] All four Maven modules import cleanly; `mvn clean install` green on all three machines
+- [ ] The Maven parent and all three modules import cleanly; `mvn clean install` green on all three machines
 - [ ] Local MySQL 8 running for each dev, `application-local.yml` created, not tracked
 - [ ] `arbitrator-common` designed together (day 2) and pushed (day 3)
 - [ ] Everyone has read this file
