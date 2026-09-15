@@ -12,13 +12,13 @@ The full Maven server suite was run during the 2026-09-15 repository audit:
 
 | Result | Count |
 |---|---:|
-| Tests discovered | 52 |
-| Passed | 38 |
+| Tests discovered | 58 |
+| Passed | 58 |
 | Failed | 0 |
 | Errors | 0 |
-| Skipped | 14 |
+| Skipped | 0 |
 
-The skipped cases are environment-dependent Docker sandbox, worker, checker, and full STOMP integration tests. The build is green, but this run does not replace a Docker-enabled integration run or a real LAN rehearsal.
+The latest run used local MySQL and Docker: all sandbox, worker, checker, STOMP, and material-deletion integration tests passed without skips. Six new tests cover material cleanup on commit, rollback preservation, unrelated contests, missing files, filesystem errors, empty contests, and the transaction requirement. This run does not replace a real LAN rehearsal.
 
 The JavaFX client has no automated UI suite. The React experiment was not built during this audit because its `node_modules` directory was absent; it is outside the root Maven build.
 
@@ -94,6 +94,16 @@ The JavaFX client has no automated UI suite. The React experiment was not built 
 - TestFX client suite, JMeter/load suite, JaCoCo target, dependency-check automation, and a full dress rehearsal
 - A production React web application; `arbitrator-web` is only a toolchain smoke test
 
+## Confirmed fixes
+
+### Contest deletion with materials — fixed 2026-09-15
+
+The live reproduction cloned Lab Contest #1 into contest 42, copied three text materials, ran a C++ submission (AC, 5/5), and ended the contest. Deletion initially returned HTTP 500 naming `fk_materials_contest`; the database transaction rolled back and all files remained.
+
+`AdminContestController` now calls `MaterialService.deleteForContest()` inside its transaction. Material rows are deleted immediately before the contest's JDBC deletion. File cleanup runs only after commit, preserving downloads if later SQL fails and rolls back. Missing files are tolerated; cleanup failures are logged with the contest and path and do not prevent cleanup of other files. Filesystem cleanup is best-effort: an I/O error or process exit after commit can still leave orphan files requiring manual cleanup.
+
+After the fix, deleting the same contest returned HTTP 204. Its problems, submission, material rows, and three files were removed; material downloads returned 404. All original contest summaries, material records, and remaining file checksums were unchanged. `ContestMaterialDeletionTest` verifies the transaction behavior against the separate `arbitrator_test` MySQL schema and temporary files, including a real FK failure after deletion to prove rollback safety.
+
 ## Open defects and risks
 
 ### Priority 0 — fix before an untrusted contest
@@ -105,7 +115,6 @@ The JavaFX client has no automated UI suite. The React experiment was not built 
 
 3. **Forced-login invalidation is incomplete for WebSockets.** `JwtAuthFilter` checks the JWT `sid` against `ActiveSessionRegistry`; `JwtHandshakeInterceptor` validates the token but does not perform the equivalent active-session check.
 4. **Duplicate-source normalization is semantically unsafe.** `SubmissionService` removes all whitespace before comparison. This can collapse distinct Python programs and can alter string/token meaning in Java or C++.
-5. **Contest deletion omits materials.** `AdminContestController.delete()` does not remove material rows or disk files. The V65 materials foreign key has no delete cascade, so a contest containing materials can block deletion.
 6. **ZIP size enforcement has edge cases.** Unknown-size entries are read exactly to the cap without an extra-byte probe, so an oversized entry can be silently truncated. Duplicate normalized ZIP paths can overwrite earlier entries.
 
 ### Priority 2 — operational and quality risks
@@ -135,9 +144,9 @@ The JavaFX client has no automated UI suite. The React experiment was not built 
 Recommended order:
 
 1. Close both Priority 0 findings and add regression tests.
-2. Fix WebSocket session invalidation, duplicate detection, material-aware contest deletion, and ZIP validation.
+2. Fix WebSocket session invalidation, duplicate detection, and ZIP validation.
 3. Repair `.gitignore`/tracked local artifacts and the packaging scripts without committing real credentials.
-4. Add controller/security integration tests for contest access, session replacement, materials, deletion, and admin rendering.
+4. Add controller/security integration tests for contest access, session replacement, material authorization, and admin rendering; deletion transaction tests now exist.
 5. Run the complete Docker-enabled suite, a multi-client LAN soak test, and a visual acceptance pass on Ubuntu 22.04.
 6. Implement rejudge and float tolerance only after the correctness/security backlog is green.
 7. Produce a repeatable server/client distribution, backup/restore procedure, and operator checklist before tagging v1.0.

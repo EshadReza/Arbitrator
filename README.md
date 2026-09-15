@@ -142,7 +142,7 @@ Run the server suite with:
 mvn test -pl arbitrator-server
 ```
 
-The latest repository audit on 2026-09-15 completed with 52 tests, 0 failures, 0 errors, and 14 environment-dependent skips. Docker-backed sandbox, worker, checker, and full STOMP integration tests skip when their external prerequisites are unavailable; a green run with skips is not equivalent to a full deployment verification.
+The latest server test run on 2026-09-15 completed with 58 tests, 0 failures, 0 errors, and 0 skips, with MySQL and Docker available. This includes six regression tests for contest/material deletion and rollback safety. Database integration tests use the separate `arbitrator_test` schema. Tests can skip when external prerequisites are unavailable; a green run with skips is not equivalent to a full deployment verification.
 
 The React experiment can be checked separately and is not part of Maven:
 

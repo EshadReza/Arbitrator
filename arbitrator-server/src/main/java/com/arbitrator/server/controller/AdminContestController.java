@@ -24,6 +24,7 @@ import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
 import com.arbitrator.server.service.ClarificationService;
 import com.arbitrator.server.service.ContestService;
+import com.arbitrator.server.service.MaterialService;
 import com.arbitrator.server.service.ProblemPackageService;
 
 /**
@@ -41,6 +42,7 @@ public class AdminContestController {
     private final JdbcTemplate jdbcTemplate;
     private final ClarificationService clarifications;
     private final ProblemPackageService packageService;
+    private final MaterialService materials;
 
     public AdminContestController(ContestService contestService,
                                   ProblemRepository problems,
@@ -49,7 +51,8 @@ public class AdminContestController {
                                   TestCaseRepository testCases,
                                   JdbcTemplate jdbcTemplate,
                                   ClarificationService clarifications,
-                                  ProblemPackageService packageService) {
+                                  ProblemPackageService packageService,
+                                  MaterialService materials) {
         this.contestService = contestService;
         this.problems = problems;
         this.statePublisher = statePublisher;
@@ -58,6 +61,7 @@ public class AdminContestController {
         this.jdbcTemplate = jdbcTemplate;
         this.clarifications = clarifications;
         this.packageService = packageService;
+        this.materials = materials;
     }
 
     /** Every lifecycle action pushes the new state so clients react at once. */
@@ -176,7 +180,7 @@ public class AdminContestController {
     /**
      * Destructive action: deletes contest and everything that FKs to it or to
      * one of its problems — submissions, submission_results, test_cases,
-     * problem_statement_pdfs, problems, clarifications, announcements.
+     * problem_statement_pdfs, problems, clarifications, announcements, materials.
      *
      * clarifications and announcements were missing here: both have a FK on
      * contest_id (clarifications also on problem_id), so any contest that had
@@ -184,12 +188,13 @@ public class AdminContestController {
      * that actually ran — made the final DELETE FROM contests fail on an FK
      * constraint violation. The whole method is @Transactional, so that
      * violation rolled back every delete above it too, leaving the contest
-     * looking completely untouched — Delete appeared to silently do nothing,
-     * no matter how many times it was pressed.
+     * looking completely untouched. Materials have the same FK requirement;
+     * their disk files are removed only after this transaction commits.
      */
     @DeleteMapping(ApiPaths.ADMIN_CONTEST_BY_ID)
     @Transactional
     public ResponseEntity<Void> delete(@PathVariable long id) {
+        materials.deleteForContest(id);
         jdbcTemplate.update("DELETE FROM submission_results WHERE submission_id IN (SELECT id FROM submissions WHERE contest_id = ?)", id);
         jdbcTemplate.update("DELETE FROM submissions WHERE contest_id = ?", id);
         // Must run before the problems delete below: clarifications FKs on

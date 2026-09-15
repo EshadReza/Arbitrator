@@ -16,6 +16,10 @@ import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -131,6 +135,36 @@ public class MaterialService {
         }
         materials.delete(m);
         broadcast(m.getContestId());
+    }
+
+    /**
+     * Join contest deletion: remove the FK rows before its JDBC DELETE, but
+     * retain the files until the whole database transaction commits. Deleting
+     * files first would leave broken downloads if any later SQL rolled back.
+     * File cleanup is best-effort after commit; failures are logged for manual
+     * cleanup, since the committed database deletion can no longer roll back.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void deleteForContest(long contestId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("Contest material deletion requires transaction synchronization");
+        }
+        List<String> storedNames = materials.findByContestIdOrderByUploadedAtDesc(contestId)
+                .stream().map(Material::getStoredName).toList();
+        materials.deleteForContest(contestId);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                for (String storedName : storedNames) {
+                    try {
+                        Files.deleteIfExists(root.resolve(storedName));
+                    } catch (IOException | SecurityException e) {
+                        log.warn("Contest {} was deleted, but material file {} needs cleanup",
+                                contestId, root.resolve(storedName), e);
+                    }
+                }
+            }
+        });
     }
 
     /** Tells the contest its material list moved — client re-reads it (FR-07 sibling). */

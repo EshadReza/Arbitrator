@@ -106,6 +106,8 @@ Flyway owns the schema; Hibernate uses `ddl-auto=validate`. Never edit an applie
 
 `submission_results` and PDF statements use JDBC-backed side tables in addition to JPA entities. Uploaded materials are stored on disk with metadata in MySQL, so database-only backups are incomplete.
 
+Contest deletion removes material rows in the same database transaction before deleting the contest. It removes the corresponding files only after commit; a rollback preserves them. Do not call the individual material-delete operation in a loop from contest deletion, because it deletes files before commit. Post-commit filesystem failures are logged for manual cleanup; this is not a durable cleanup queue.
+
 The active-session registry, presence state, notification queue, judge executor, and scheduled broadcasts are in-memory and intentionally assume one server process.
 
 ## Tests and verification
@@ -114,7 +116,7 @@ The active-session registry, presence state, notification queue, judge executor,
 mvn test -pl arbitrator-server
 ```
 
-Audit result on 2026-09-15: 52 tests, 0 failures, 0 errors, 14 skipped. Docker-backed sandbox/worker/checker and full STOMP integration tests can skip when their prerequisites are unavailable. There are currently no JavaFX UI tests or React product tests.
+Latest result on 2026-09-15: 58 tests, 0 failures, 0 errors, 0 skipped with local MySQL and Docker available. This includes six material-deletion regression tests against `arbitrator_test`, covering commit, rollback, missing files, cleanup failures, empty contests, and missing transaction context. Environment-dependent tests can still skip when their prerequisites are unavailable. There are currently no JavaFX UI tests or React product tests.
 
 Do not use Mockito in this repository while tests must run on JDKs newer than the Byte Buddy version managed by Spring Boot 3.2.5. Existing service tests use dynamic proxies and small fakes.
 
@@ -126,8 +128,7 @@ Before calling the system production-ready, address these findings from the full
 2. Student-controlled strings are placed in inline JavaScript handler attributes in the admin page. HTML escaping is not sufficient for that JavaScript context, creating a credible stored-XSS path.
 3. The REST filter enforces active JWT session IDs, but the WebSocket handshake does not perform the equivalent active-session-registry check.
 4. Duplicate-submission detection removes all whitespace, which changes Python semantics and can also alter strings/token boundaries in Java and C++.
-5. Contest deletion omits material metadata/files and can conflict with the materials foreign key.
-6. ZIP entry-size enforcement does not robustly detect an unknown-size entry that exceeds the cap, and duplicate normalized paths are not rejected.
+5. ZIP entry-size enforcement does not robustly detect an unknown-size entry that exceeds the cap, and duplicate normalized paths are not rejected.
 
 See `STATUS.md` for the broader prioritized backlog.
 

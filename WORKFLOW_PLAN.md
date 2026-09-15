@@ -146,7 +146,7 @@ The original “Bundle 1” terminology now refers only to an old vertical-slice
 ### Phase B — correctness and data lifecycle
 
 1. Replace whitespace-stripping duplicate detection with exact hashing or a language-safe normalization policy.
-2. Delete material metadata and files as part of contest deletion, transactionally where possible.
+2. **Completed 2026-09-15:** delete material metadata within the contest transaction and remove files after commit. MySQL regression tests verify rollback preservation and filesystem-failure handling; the live reproduction now deletes successfully. Post-commit file cleanup remains best-effort, with failures logged for manual cleanup.
 3. Harden ZIP import with an extra-byte limit probe, duplicate normalized-path rejection, entry-count limits, and tests.
 4. Reconcile the 64 MB multipart limit with the material service's advertised 200 MB cap.
 5. Decide and document queue capacity/backpressure behavior.
@@ -207,7 +207,7 @@ Keep branches scoped to one behavior. Changes spanning ownership domains should 
 | Problem importer | Broad package validation tests | Unknown-size/over-cap and duplicate-path cases |
 | Docker execution | Sandbox/worker/checker tests, environment-skippable | Mandatory target-host run and long-run cleanup checks |
 | WebSocket | Server integration test, environment-skippable | Active-session invalidation and real JavaFX reconnect |
-| Services/controllers | Partial | Authorization matrix, materials, deletion, restart behavior |
+| Services/controllers | Material/contest deletion commit and rollback tests on MySQL | Authorization matrix, material authorization, restart behavior |
 | JavaFX | Compile/manual verification | TestFX plus Ubuntu visual acceptance |
 | Admin console | Manual/live checks | Injection-safe DOM tests and browser workflow tests |
 | Performance | No repeatable suite | REST/STOMP/judge load and two-hour soak |
