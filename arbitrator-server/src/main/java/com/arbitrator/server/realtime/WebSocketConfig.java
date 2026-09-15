@@ -6,13 +6,17 @@ import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketTransportRegistration;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+import org.springframework.web.socket.handler.WebSocketHandlerDecorator;
 import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 
 import com.arbitrator.common.api.StompDestinations;
@@ -29,9 +33,40 @@ import com.arbitrator.server.security.JwtHandshakeInterceptor;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
+    private final ContestSubscriptionInterceptor contestSubscriptionInterceptor;
+    private final AuthenticatedWebSocketSessions authenticatedSockets;
 
-    public WebSocketConfig(JwtHandshakeInterceptor jwtHandshakeInterceptor) {
+    public WebSocketConfig(JwtHandshakeInterceptor jwtHandshakeInterceptor,
+                           ContestSubscriptionInterceptor contestSubscriptionInterceptor,
+                           AuthenticatedWebSocketSessions authenticatedSockets) {
         this.jwtHandshakeInterceptor = jwtHandshakeInterceptor;
+        this.contestSubscriptionInterceptor = contestSubscriptionInterceptor;
+        this.authenticatedSockets = authenticatedSockets;
+    }
+
+    @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        registration.interceptors(contestSubscriptionInterceptor);
+    }
+
+    @Override
+    public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
+        registration.addDecoratorFactory(handler -> new WebSocketHandlerDecorator(handler) {
+            @Override
+            public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                if (authenticatedSockets.register(session)) {
+                    super.afterConnectionEstablished(session);
+                }
+            }
+
+            @Override
+            public void afterConnectionClosed(WebSocketSession session,
+                                              org.springframework.web.socket.CloseStatus closeStatus)
+                    throws Exception {
+                authenticatedSockets.unregister(session);
+                super.afterConnectionClosed(session, closeStatus);
+            }
+        });
     }
 
     @Override

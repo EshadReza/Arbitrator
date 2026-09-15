@@ -43,6 +43,7 @@ public class SubmissionService {
     private final SubmissionRepository submissions;
     private final ProblemRepository problems;
     private final ContestService contestService;
+    private final ContestAccessService contestAccess;
     private final UserService userService;
     private final JudgeQueue queue;
     private final UserRepository users;
@@ -77,6 +78,7 @@ public class SubmissionService {
     public SubmissionService(SubmissionRepository submissions,
                              ProblemRepository problems,
                              ContestService contestService,
+                             ContestAccessService contestAccess,
                              UserService userService,
                              JudgeQueue queue,
                              UserRepository users,
@@ -86,6 +88,7 @@ public class SubmissionService {
         this.submissions = submissions;
         this.problems = problems;
         this.contestService = contestService;
+        this.contestAccess = contestAccess;
         this.userService = userService;
         this.queue = queue;
         this.users = users;
@@ -139,6 +142,7 @@ public class SubmissionService {
         // instead of from a global "current contest" means several contests can
         // run at once without submissions landing in the wrong one.
         Contest contest = contestService.require(problem.getContestId());
+        contestAccess.requireReleasedAccess(contest.getId(), username);
 
         // BR-02: the server clock decides whether that contest is still open.
         contestService.assertAcceptingSubmissions(contest);
@@ -172,19 +176,15 @@ public class SubmissionService {
     }
 
     /**
-     * Whitespace-insensitive duplicate check: strips every space, tab and
-     * newline before comparing, so re-indenting or deleting a single space
-     * doesn't dodge the guard — the compiled program is identical either way,
-     * and the whole point of the guard is that the verdict can't change.
+     * Exact duplicate check. Whitespace is program data: it controls Python
+     * blocks, changes string literals, and can separate tokens in every
+     * supported language. Only a character-for-character equal Java String has
+     * guaranteed identical source text, so formatting-only changes intentionally
+     * count as new attempts and remain governed by the normal queue limits.
      */
-    private boolean isDuplicate(long userId, long problemId, String sourceCode) {
-        String normalized = stripWhitespace(sourceCode);
+    boolean isDuplicate(long userId, long problemId, String sourceCode) {
         return submissions.findSourceCodesByUserIdAndProblemIdAndActiveTrue(userId, problemId).stream()
-                .anyMatch(existing -> stripWhitespace(existing).equals(normalized));
-    }
-
-    private static String stripWhitespace(String s) {
-        return s == null ? "" : s.replaceAll("\\s+", "");
+                .anyMatch(sourceCode::equals);
     }
 
     /**
@@ -198,6 +198,9 @@ public class SubmissionService {
         Submission s = submissions.findById(submissionId).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "No such submission"));
         User caller = userService.requireByUsername(username);
+        if (!admin) {
+            contestAccess.requireReleasedAccess(s.getContestId(), username);
+        }
         if (!admin && !s.getUserId().equals(caller.getId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "You can only view your own submissions");
@@ -228,6 +231,9 @@ public class SubmissionService {
         Submission s = submissions.findById(submissionId).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "No such submission"));
         User caller = userService.requireByUsername(username);
+        if (!admin) {
+            contestAccess.requireReleasedAccess(s.getContestId(), username);
+        }
         if (!admin && !s.getUserId().equals(caller.getId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "You can only view your own submissions");
@@ -334,6 +340,7 @@ public class SubmissionService {
             mine = submissions.findByUserIdAndActiveTrueOrderByQueuedAtDesc(user.getId());
         } else {
             long target = contestId != null ? contestId : contestService.requireCurrent().getId();
+            contestAccess.requireAccess(target, username);
             mine = submissions.findByUserIdAndContestIdAndActiveTrueOrderByQueuedAtDesc(user.getId(), target);
         }
 

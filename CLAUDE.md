@@ -38,7 +38,7 @@ The UI is information-dense and Codeforces-inspired, with both light and dark th
 
 ## Current feature model
 
-- Authentication: student self-registration, seeded instructor account, bcrypt cost 12, 12-hour JWT, explicit logout, in-memory single-active-session registry, and optional client MAC reporting
+- Authentication: student self-registration with server-enforced student IDs matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, seeded instructor account, bcrypt cost 12, 12-hour JWT, explicit logout, in-memory single-active-session registry enforced across REST and live WebSockets, optional client MAC reporting, and persistent per-user contest-access grants established by one-time password entry
 - Contest lifecycle: `DRAFT → LOBBY → ACTIVE`, then `PAUSED`, `FROZEN`, or `ENDED`; active contests can be paused/resumed, extended, frozen/unfrozen, scheduled, ended, or cloned
 - Problems: ZIP import, HTML/TXT/Markdown/PDF statements, paired tests, test visibility, exact/custom checker selection, editing, PDF replacement, reordering, and deletion
 - Judging: C++17, Java 17, Python 3.10; persist-before-queue; Docker compile/run; fail-fast tests; exact/custom checking; per-test output; AC/WA/TLE/MLE/CE/RE/OLE
@@ -108,7 +108,13 @@ Flyway owns the schema; Hibernate uses `ddl-auto=validate`. Never edit an applie
 
 Contest deletion removes material rows in the same database transaction before deleting the contest. It removes the corresponding files only after commit; a rollback preserves them. Do not call the individual material-delete operation in a loop from contest deletion, because it deletes files before commit. Post-commit filesystem failures are logged for manual cleanup; this is not a durable cleanup queue.
 
+Contest passwords are accepted only by `POST /api/contests/{id}/join`. A successful join stores an opaque `(contest_id, user_id)` grant in `contest_access_grants`; the JavaFX client does not retain or resend the plaintext. Student-facing problem/PDF, custom-run/submission, announcement, material, clarification, leaderboard, contest-state, and contest-topic STOMP paths enforce that grant. Admins bypass student grants, and LOBBY still hides problem statements and leaderboard problem codes. V80 backfills grants from existing submissions and cascades them on contest/user deletion.
+
 The active-session registry, presence state, notification queue, judge executor, and scheduled broadcasts are in-memory and intentionally assume one server process.
+
+WebSocket handshakes require the JWT `sid` to still match `ActiveSessionRegistry`. `AuthenticatedWebSocketSessions` tracks raw transports by `sid`; replacement login and logout close the invalidated session's existing sockets immediately. Preserve the post-registration active check because it closes the handshake/replacement race.
+
+Generated admin-console controls use delegated `data-action` event binding. Never put fetched/user-controlled values into inline JavaScript handler attributes. Participant and notification names are hydrated with `textContent`; keep that context separation when adding rows. Display names may contain ordinary Unicode and markup characters, but registration rejects control characters and names longer than 128 code points.
 
 ## Tests and verification
 
@@ -116,19 +122,13 @@ The active-session registry, presence state, notification queue, judge executor,
 mvn test -pl arbitrator-server
 ```
 
-Latest result on 2026-09-15: 58 tests, 0 failures, 0 errors, 0 skipped with local MySQL and Docker available. This includes six material-deletion regression tests against `arbitrator_test`, covering commit, rollback, missing files, cleanup failures, empty contests, and missing transaction context. Environment-dependent tests can still skip when their prerequisites are unavailable. There are currently no JavaFX UI tests or React product tests.
+Latest result on 2026-09-15: 86 tests, 0 failures, 0 errors, 0 skipped with local MySQL and Docker available. This includes six material-deletion tests, four contest-access integration tests against `arbitrator_test`, nine registration-policy tests, two static admin-rendering safety tests, three active-session invalidation tests including forced-login HTTP/STOMP integration, seven duplicate-submission policy tests, and three ZIP-limit/path-collision tests. Environment-dependent tests can still skip when their prerequisites are unavailable. There are currently no automated JavaFX UI tests or React product tests; the stored-XSS fix also has a recorded live browser replay in `STATUS.md`.
 
 Do not use Mockito in this repository while tests must run on JDKs newer than the Byte Buddy version managed by Spring Boot 3.2.5. Existing service tests use dynamic proxies and small fakes.
 
 ## Known high-priority defects
 
-Before calling the system production-ready, address these findings from the full-codebase audit:
-
-1. Contest-password checks do not create or enforce durable server-side contest membership; authenticated users can reach problem endpoints independently of the picker gate.
-2. Student-controlled strings are placed in inline JavaScript handler attributes in the admin page. HTML escaping is not sufficient for that JavaScript context, creating a credible stored-XSS path.
-3. The REST filter enforces active JWT session IDs, but the WebSocket handshake does not perform the equivalent active-session-registry check.
-4. Duplicate-submission detection removes all whitespace, which changes Python semantics and can also alter strings/token boundaries in Java and C++.
-5. ZIP entry-size enforcement does not robustly detect an unknown-size entry that exceeds the cap, and duplicate normalized paths are not rejected.
+No Priority 0 or Priority 1 findings from the full-codebase audit remain open. This does not make the system production-ready; operational, packaging, backup, UI-test, and load-test work remains.
 
 See `STATUS.md` for the broader prioritized backlog.
 

@@ -71,16 +71,11 @@ public interface JudgeApi extends AutoCloseable {
     /** Contests the student may enter, for the picker shown after login. */
     List<ContestSummaryDto> contests() throws ApiException;
 
-    /**
-     * Live state of the chosen contest — drives the countdown (FR-06).
-     *
-     * @param password required only when the contest's
-     *                 {@link com.arbitrator.common.dto.ContestSummaryDto#passwordProtected()}
-     *                 flag is set; null/ignored otherwise. Never trust the
-     *                 client's own flag for enforcement — the server
-     *                 re-checks against the stored hash regardless.
-     */
-    ContestStateDto contest(long id, String password) throws ApiException;
+    /** Verifies the entry password once and establishes server-side access. */
+    ContestStateDto joinContest(long id, String password) throws ApiException;
+
+    /** Live state after this account has entered the chosen contest. */
+    ContestStateDto contest(long id) throws ApiException;
 
     List<ProblemSummaryDto> problems() throws ApiException;
 

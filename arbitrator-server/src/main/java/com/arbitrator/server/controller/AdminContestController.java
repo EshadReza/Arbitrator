@@ -180,7 +180,8 @@ public class AdminContestController {
     /**
      * Destructive action: deletes contest and everything that FKs to it or to
      * one of its problems — submissions, submission_results, test_cases,
-     * problem_statement_pdfs, problems, clarifications, announcements, materials.
+     * problem_statement_pdfs, problems, clarifications, announcements,
+     * materials, and contest-access grants (the latter cascades in V80).
      *
      * clarifications and announcements were missing here: both have a FK on
      * contest_id (clarifications also on problem_id), so any contest that had

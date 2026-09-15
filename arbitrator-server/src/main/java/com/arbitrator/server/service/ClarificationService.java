@@ -57,6 +57,7 @@ public class ClarificationService {
     private final ProblemRepository problems;
     private final UserRepository users;
     private final ContestService contestService;
+    private final ContestAccessService contestAccess;
     private final UserService userService;
     private final SimpMessagingTemplate template;
 
@@ -64,12 +65,14 @@ public class ClarificationService {
                                 ProblemRepository problems,
                                 UserRepository users,
                                 ContestService contestService,
+                                ContestAccessService contestAccess,
                                 UserService userService,
                                 SimpMessagingTemplate template) {
         this.clarifications = clarifications;
         this.problems = problems;
         this.users = users;
         this.contestService = contestService;
+        this.contestAccess = contestAccess;
         this.userService = userService;
         this.template = template;
     }
@@ -100,6 +103,11 @@ public class ClarificationService {
         if (contestId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Pick a problem, or say which contest the question is about");
+        }
+        if (problem == null) {
+            contestAccess.requireAccess(contestId, username);
+        } else {
+            contestAccess.requireReleasedAccess(contestId, username);
         }
         // Never trust the client's own checkbox: it was read when the asker
         // opened the dialog, and the instructor's toggle (V61) may have moved

@@ -76,7 +76,7 @@ public class LeaderboardBroadcaster {
     private void publish() {
         for (Contest contest : contestService.joinable()) {
             try {
-                LeaderboardDto dto = leaderboard.forContest(contest);
+                LeaderboardDto dto = leaderboard.forStudents(contest);
                 template.convertAndSend(
                         StompDestinations.contestLeaderboard(contest.getId()), dto);
             } catch (RuntimeException e) {

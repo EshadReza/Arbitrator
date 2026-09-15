@@ -282,11 +282,8 @@ public class ContestPickerController {
         enterButton.setDisable(true);
         Thread worker = new Thread(() -> {
             try {
-                var contestState = state.api().contest(contest.id(), password);
+                var contestState = state.api().joinContest(contest.id(), password);
                 state.setContest(contestState);
-                // Remembered so MainController's own refresh of this same
-                // endpoint doesn't have to re-prompt — see AppState.contestPassword().
-                state.setContestPassword(password);
                 Platform.runLater(SceneRouter::showMain);
             } catch (Exception e) {
                 Platform.runLater(() -> {

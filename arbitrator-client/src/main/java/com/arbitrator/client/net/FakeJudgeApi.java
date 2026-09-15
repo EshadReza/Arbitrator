@@ -105,10 +105,15 @@ public class FakeJudgeApi implements JudgeApi {
     }
 
     @Override
-    public ContestStateDto contest(long id, String password) throws ApiException {
+    public ContestStateDto joinContest(long id, String password) throws ApiException {
         if (id == 2 && !"practice".equals(password)) {
             throw new ApiException(403, "Wrong contest password");
         }
+        return currentContest();
+    }
+
+    @Override
+    public ContestStateDto contest(long id) {
         return currentContest();
     }
 

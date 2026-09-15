@@ -1358,17 +1358,32 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 /* ── person chips: reused by Participants, Submissions and Standings so a
    name reads the same everywhere instead of three different table layouts. */
 const AVATAR_PALETTE=['#2f6fd0','#8257c7','#21a366','#e5a50a','#d64545','#0ea5e9','#f2751a','#5b9bf5'];
-function avatarChip(name){
+function avatarData(name){
   const s=String(name||'?').trim()||'?';
   const initials=(s.match(/[^\s]+/g)||['?']).slice(0,2).map(w=>w[0]).join('').toUpperCase();
   let hash=0; for(let i=0;i<s.length;i++) hash=(hash*31+s.charCodeAt(i))>>>0;
   const color=AVATAR_PALETTE[hash%AVATAR_PALETTE.length];
-  return `<span class="avatar" style="background:${color}">${esc(initials)}</span>`;
+  return {initials,color};
 }
-function nameCell(displayName,username){
-  return `<div class="name-cell">${avatarChip(displayName||username)}
-    <div class="who"><b>${esc(displayName||username)}</b><span class="hint">@${esc(username)}</span></div>
+function nameCell(index){
+  return `<div class="name-cell" data-person-index="${index}">
+    <span class="avatar"></span>
+    <div class="who"><b></b><span class="hint"></span></div>
   </div>`;
+}
+/** Student-controlled names never pass through innerHTML. Templates contain
+    only a numeric lookup key; the actual text is assigned after insertion. */
+function hydrateNameCells(root, people){
+  root.querySelectorAll('.name-cell[data-person-index]').forEach(cell=>{
+    const person=people[Number(cell.dataset.personIndex)]||{};
+    const display=person.displayName||person.username||'?';
+    const avatar=avatarData(display);
+    const avatarEl=cell.querySelector('.avatar');
+    avatarEl.style.background=avatar.color;
+    avatarEl.textContent=avatar.initials;
+    cell.querySelector('.who b').textContent=display;
+    cell.querySelector('.who .hint').textContent='@'+(person.username||'');
+  });
 }
 
 /* The Activity panel this used to write to is gone — feedback now lands as a
@@ -1549,17 +1564,23 @@ function notifWhat(n){
   if(n.type==='MAC_CHANGED') return 'signed in from a different device (MAC changed) — see Participants';
   return 'disconnected';
 }
-function notifCardHtml(n){
+function notifCardHtml(n,index){
   return `<div class="alert-card ${n.type==='RECONNECTED'?'good':'severe'}">
     <div class="body">
-      <div class="who">${notifIcon(n)} ${esc(n.displayName)}</div>
-      <div class="what">${notifWhat(n)} &middot; ${esc(n.contestTitle)}</div>
+      <div class="who">${notifIcon(n)} <span data-live-name="${index}"></span></div>
+      <div class="what">${notifWhat(n)} &middot; <span data-live-contest="${index}"></span></div>
     </div>
-    <span class="x" onclick="dismissNotification(${n.id})" title="Dismiss">&times;</span>
+    <span class="x" data-action="dismiss-notification" data-id="${n.id}" title="Dismiss">&times;</span>
   </div>`;
 }
 function renderLiveNotifs(){
   $('alertStack').innerHTML = liveNotifs.map(notifCardHtml).join('');
+  $('alertStack').querySelectorAll('[data-live-name]').forEach(el=>{
+    el.textContent=liveNotifs[Number(el.dataset.liveName)]?.displayName||'';
+  });
+  $('alertStack').querySelectorAll('[data-live-contest]').forEach(el=>{
+    el.textContent=liveNotifs[Number(el.dataset.liveContest)]?.contestTitle||'';
+  });
 }
 function pushLiveNotification(n){
   liveNotifs.unshift(n);
@@ -1593,24 +1614,35 @@ function renderNotifTab(body){
   lastNotifBody=body;
   $('notifCountBadge').textContent=body.length;
   const groups=groupNotifsByUser(body);
-  $('notifList').innerHTML = groups.size ? [...groups.values()].map(list=>{
+  const grouped=[...groups.values()];
+  $('notifList').innerHTML = groups.size ? grouped.map((list,index)=>{
     const n=list[0], count=list.length;
-    return `<div class="list-row" style="cursor:pointer" onclick="openUserNotifHistory('${esc(n.username)}')">
+    return `<div class="list-row" style="cursor:pointer" data-action="open-notification-history" data-index="${index}">
       <div class="ic">${notifIcon(n)}</div>
       <div class="content">
         <div class="row" style="gap:8px">
-          <b>${esc(n.displayName)}</b>
+          <b data-notif-name="${index}"></b>
           <span class="hint">${notifWhat(n)}</span>
           ${count>1?`<span class="badge" style="background:var(--surface2);color:var(--muted)">×${count}</span>`:''}
           <span class="spacer"></span>
           <span class="hint">${new Date(n.atMs).toLocaleString()}</span>
         </div>
-        <div class="hint" style="margin-top:2px">${esc(n.contestTitle)}</div>
+        <div class="hint" style="margin-top:2px" data-notif-contest="${index}"></div>
       </div>
-      <button class="btn sm danger" onclick="event.stopPropagation();dismissUserNotifications('${esc(n.username)}')"
+      <button class="btn sm danger" data-action="dismiss-user-notifications" data-index="${index}"
               style="align-self:center">Delete${count>1?' all':''}</button>
     </div>`;
   }).join('') : '<div class="empty">No notifications yet.</div>';
+  $('notifList').querySelectorAll('[data-notif-name]').forEach(el=>{
+    el.textContent=grouped[Number(el.dataset.notifName)]?.[0]?.displayName||'';
+  });
+  $('notifList').querySelectorAll('[data-notif-contest]').forEach(el=>{
+    el.textContent=grouped[Number(el.dataset.notifContest)]?.[0]?.contestTitle||'';
+  });
+  $('notifList').querySelectorAll('[data-action="open-notification-history"], [data-action="dismiss-user-notifications"]').forEach(el=>{
+    const list=grouped[Number(el.dataset.index)];
+    el.dataset.username=list?.[0]?.username||'';
+  });
 
   // Keep an already-open per-user history modal in sync with whatever just
   // arrived or got dismissed, rather than leaving it showing a stale list.
@@ -1630,10 +1662,14 @@ function renderUserNotifModal(username, list){
           <span class="spacer"></span>
           <span class="hint">${new Date(n.atMs).toLocaleString()}</span>
         </div>
-        <div class="hint" style="margin-top:2px">${esc(n.contestTitle)}</div>
+        <div class="hint" style="margin-top:2px" data-modal-contest="${n.id}"></div>
       </div>
-      <button class="btn sm danger" onclick="dismissNotification(${n.id})" style="align-self:center">Delete</button>
+      <button class="btn sm danger" data-action="dismiss-notification" data-id="${n.id}" style="align-self:center">Delete</button>
     </div>`).join('');
+  $('userNotifContainer').querySelectorAll('[data-modal-contest]').forEach(el=>{
+    const n=list.find(item=>item.id===Number(el.dataset.modalContest));
+    el.textContent=n?.contestTitle||'';
+  });
 }
 
 function openUserNotifHistory(username){
@@ -1686,21 +1722,21 @@ async function loadContests(){
   // their own explicit log(...) message.
   const {body}=await api('GET','/api/admin/contests',null,true);
   if(!Array.isArray(body)) return;
+  lastContests=body;
   if($('tileContestsTotal')){
     $('tileContestsTotal').textContent=body.length;
     $('tileContestsLive').textContent=body.filter(c=>c.state==='LOBBY'||c.state==='ACTIVE'||c.state==='PAUSED'||c.state==='FROZEN').length;
   }
   $('cTable').querySelector('tbody').innerHTML = body.length? body.map(c=>`
-    <tr class="${c.id===selected?'sel':''}" style="cursor:pointer"
-        onclick="if(!event.target.closest('input,button'))selectContest(${c.id})">
-      <td><input type="radio" name="csel" ${c.id===selected?'checked':''} onchange="selectContest(${c.id})"></td>
+    <tr class="${c.id===selected?'sel':''}" style="cursor:pointer" data-action="select-contest" data-id="${c.id}">
+      <td><input type="radio" name="csel" ${c.id===selected?'checked':''}></td>
       <td><b>${esc(c.title)}</b>${c.passwordProtected?' <span class="badge" style="background:var(--purple)">🔒 Password</span>':''}</td>
       <td><span class="badge b-${c.state}">${c.state}</span></td>
       <td>${c.problemCount}</td><td>${c.durationMinutes} min</td>
       <td style="white-space:nowrap">
-        <button class="btn sm" onclick="event.stopPropagation();cloneContest(${c.id},'${esc(c.title)}')">Clone</button>
+        <button class="btn sm" data-action="clone-contest" data-id="${c.id}">Clone</button>
         <button class="btn sm danger${c.state==='DRAFT'||c.state==='ENDED'?'':' locked'}"
-                onclick="event.stopPropagation();deleteContest(${c.id},'${esc(c.title)}','${c.state}')"
+                data-action="delete-contest" data-id="${c.id}"
                 title="${c.state==='DRAFT'||c.state==='ENDED'?'Delete':'End the contest first'}">Delete</button>
       </td>
     </tr>`).join('') : '<tr><td colspan="6" class="empty">No contests yet — create one below.</td></tr>';
@@ -1710,6 +1746,8 @@ async function loadContests(){
     await selectContest(live.id);
   } else if(selected!=null){ await refreshSelected(); }
 }
+
+let lastContests=[];
 
 async function selectContest(id){
   selected=id; await loadContests(); await refreshSelected();
@@ -1986,9 +2024,9 @@ async function listProblems(){
         <td class="drag-handle" title="Drag to reorder">&#8942;&#8942;</td>
         <td><span class="chip">${esc(p.code)}</span></td><td>${esc(p.title)}</td>
         <td style="white-space:nowrap">
-          <button class="btn sm" onclick="viewProblem(${p.id})">View</button>
-          <button class="btn sm" onclick="editProblem(${p.id})">Edit</button>
-          <button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
+          <button class="btn sm" data-action="view-problem" data-id="${p.id}">View</button>
+          <button class="btn sm" data-action="edit-problem" data-id="${p.id}">Edit</button>
+          <button class="btn sm danger" data-action="delete-problem" data-id="${p.id}">Delete</button></td>
       </tr>`).join('')
     : '<tr><td colspan="4" class="empty">No problems yet — upload a package below.</td></tr>';
   wireProblemDragAndDrop();
@@ -2045,9 +2083,9 @@ function renderProblemRows(){
       <td class="drag-handle" title="Drag to reorder">&#8942;&#8942;</td>
       <td><b>${esc(p.code)}</b></td><td>${esc(p.title)}</td>
       <td style="white-space:nowrap">
-        <button class="btn sm" onclick="viewProblem(${p.id})">View</button>
-        <button class="btn sm" onclick="editProblem(${p.id})">Edit</button>
-        <button class="btn sm danger" onclick="delProblem(${p.id},'${esc(p.code)}')">Delete</button></td>
+        <button class="btn sm" data-action="view-problem" data-id="${p.id}">View</button>
+        <button class="btn sm" data-action="edit-problem" data-id="${p.id}">Edit</button>
+        <button class="btn sm danger" data-action="delete-problem" data-id="${p.id}">Delete</button></td>
     </tr>`).join('');
   wireProblemDragAndDrop();
 }
@@ -2191,14 +2229,16 @@ async function loadMonitor(){
   $('onlineCount').textContent=onlineNow;
   $('tbOnline').textContent=onlineNow;
   if($('tileJoined')){ $('tileJoined').textContent=body.length; $('tileOnline').textContent=onlineNow; }
-  $('partTable').querySelector('tbody').innerHTML = body.length? body.map(x=>`<tr>
+  const tbody=$('partTable').querySelector('tbody');
+  tbody.innerHTML = body.length? body.map((x,index)=>`<tr>
       <td><span class="dot ${x.online?'on':'off'}"></span></td>
-      <td>${nameCell(x.displayName,x.username)}</td>
+      <td>${nameCell(index)}</td>
       <td>${x.rank||'—'}</td><td>${x.solved}</td><td>${x.penaltyMinutes}</td>
       <td>${x.submissionCount}</td>
       <td>${x.lastSubmissionMs>0?new Date(x.lastSubmissionMs).toLocaleTimeString():'—'}</td>
       <td>${macCell(x)}</td>
     </tr>`).join('') : '<tr><td colspan="8" class="empty">Nobody has joined yet.</td></tr>';
+  hydrateNameCells(tbody,body);
 }
 
 /** Flags a recent change (last 10 min) so a device swap mid-contest stands out. */
@@ -2291,25 +2331,26 @@ function renderFeed(){
     tb.innerHTML='<tr><td colspan="5" class="empty">No submissions yet.</td></tr>'; return;
   }
   let html='';
-  feedData.forEach((g)=>{
+  feedData.forEach((g,userIndex)=>{
     // Keyed by username, not array index — sorting the Feed table reorders
     // feedData, and an index-keyed open-set would make a DIFFERENT
     // participant appear expanded after every sort/re-sort.
     const userOpen=openUsers.has(g.username);
-    html+=`<tr class="group-head ${userOpen?'open':''}" onclick="toggleUser('${esc(g.username)}')">
+    html+=`<tr class="group-head ${userOpen?'open':''}" data-action="toggle-feed-user" data-user-index="${userIndex}">
       <td>▶</td>
-      <td>${nameCell(g.displayName,g.username)}</td>
+      <td>${nameCell(userIndex)}</td>
       <td>${g.totalSubmissions}</td>
       <td>${g.acceptedCount}</td>
       <td class="${g.bestVerdict?'v-'+g.bestVerdict:'v-none'}">${g.bestVerdict||'—'}</td>
     </tr>`;
     if(!userOpen) return;
 
-    g.problems.forEach((p)=>{
+    g.problems.forEach((p,problemIndex)=>{
       const key=g.username+':'+p.code, problemOpen=openProblems.has(key);
       const accepted=p.list.filter(s=>s.verdict==='AC').length;
       const best=accepted ? 'AC' : ((p.list.find(s=>s.verdict)||{}).verdict||null);
-      html+=`<tr class="problem-head ${problemOpen?'open':''}" onclick="toggleProblem('${esc(key)}')">
+      html+=`<tr class="problem-head ${problemOpen?'open':''}" data-action="toggle-feed-problem"
+          data-user-index="${userIndex}" data-problem-index="${problemIndex}">
         <td style="text-align:right;color:var(--muted)">▶</td>
         <td style="padding-left:34px"><b>${esc(p.code)}</b></td>
         <td>${p.list.length}</td>
@@ -2326,12 +2367,13 @@ function renderFeed(){
             +` · ${new Date(s.submittedAtMs).toLocaleTimeString()}</span></td>
           <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
           <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
-          <td><button class="btn sm" onclick="event.stopPropagation();viewSource(${s.id})">View code</button></td>
+          <td><button class="btn sm" data-action="view-source" data-id="${s.id}">View code</button></td>
         </tr>`;
       });
     });
   });
   tb.innerHTML=html;
+  hydrateNameCells(tb,feedData);
 }
 
 function toggleUser(username){
@@ -2369,42 +2411,43 @@ async function loadStandings(){
   const codes=problemColumns(body);
   renderStandingsHeader(codes);
 
-  $('standingsTable').querySelector('tbody').innerHTML = body.length? body.map((s,i)=>`<tr>
+  const tbody=$('standingsTable').querySelector('tbody');
+  tbody.innerHTML = body.length? body.map((s,i)=>`<tr>
       <td class="standings-sticky sticky-0"><span class="rank-badge ${i===0?'r1':i===1?'r2':i===2?'r3':''}">${i+1}</span></td>
-      <td class="standings-sticky sticky-1">${nameCell(s.displayName,s.username)}</td>
+      <td class="standings-sticky sticky-1">${nameCell(i)}</td>
       <td class="standings-sticky sticky-2">${s.solved}</td>
-      <td class="standings-sticky sticky-3" style="white-space:nowrap"><b>${s.penaltyMinutes}m</b> <button class="btn sm" style="padding:2px 6px;margin-left:6px;font-size:11px" onclick="adjustPenaltyPrompt('${esc(s.username)}')">± Penalty</button></td>
+      <td class="standings-sticky sticky-3" style="white-space:nowrap"><b>${s.penaltyMinutes}m</b> <button class="btn sm" style="padding:2px 6px;margin-left:6px;font-size:11px" data-action="adjust-penalty" data-user-index="${i}">± Penalty</button></td>
       <td class="standings-sticky sticky-4"><input type="number" min="0" max="100" value="${s.marks!=null?s.marks:''}"
            style="width:70px" placeholder="—"
-           onchange="setParticipantMarks('${esc(s.username)}',this.value)"
-           onkeydown="if(event.key==='Enter'){setParticipantMarks('${esc(s.username)}',this.value);this.blur()}"
+           data-action="set-marks" data-user-index="${i}"
            ${s.bestSubmissionId!=null?'':'disabled title="No submissions yet"'}></td>
-      ${codes.map(code=>`<td style="padding:5px">${standingsBoxCell(s,code)}</td>`).join('')}
+      ${codes.map((code,codeIndex)=>`<td style="padding:5px">${standingsBoxCell(s,code,i,codeIndex)}</td>`).join('')}
     </tr>`).join('') : `<tr><td colspan="${5+codes.length}" class="empty">No submissions yet.</td></tr>`;
+  hydrateNameCells(tbody,body);
 }
 
 /** One problem's box for one row — same states/colours as the JavaFX client's
     ProblemCell (LeaderboardPanelController): first solve / solved / failed /
     blank. Blank cells aren't clickable — there's nothing to show. */
-function standingsBoxCell(row,code){
+function standingsBoxCell(row,code,userIndex,codeIndex){
   const cell=(row.cells||[]).find(c=>c.problemCode===code);
   const untouched=!cell||(!cell.solved&&cell.failedAttempts===0&&!cell.ceAttempts);
   if(untouched) return '<div class="standings-box sb-empty">—</div>';
 
-  const onclick=`openParticipantProblemSubmissions('${esc(row.username)}','${esc(row.displayName)}','${esc(code)}')`;
+  const action=`data-action="open-participant-problem" data-user-index="${userIndex}" data-code-index="${codeIndex}"`;
   // BR-04: CE never counts as a reject, so a problem only ever compile-errored
   // still needs to read as "touched" rather than blank.
   if(!cell.solved&&cell.failedAttempts===0&&cell.ceAttempts>0){
-    return `<div class="standings-box sb-ce" onclick="${onclick}" title="Click to see all attempts">
+    return `<div class="standings-box sb-ce" ${action} title="Click to see all attempts">
       <span class="sb-time">-1</span></div>`;
   }
   if(cell.solved){
     const cls=cell.firstSolve?'sb-first':'sb-solved';
     const tries=cell.failedAttempts>0?`<span class="sb-tries">(-${cell.failedAttempts})</span>`:'';
-    return `<div class="standings-box ${cls}" onclick="${onclick}" title="Click to see all attempts">
+    return `<div class="standings-box ${cls}" ${action} title="Click to see all attempts">
       <span class="sb-time">${elapsedClock(cell.solvedAtSeconds)}</span>${tries}</div>`;
   }
-  return `<div class="standings-box sb-failed" onclick="${onclick}" title="Click to see all attempts">
+  return `<div class="standings-box sb-failed" ${action} title="Click to see all attempts">
     <span class="sb-time">(-${cell.failedAttempts})</span></div>`;
 }
 
@@ -2488,13 +2531,13 @@ async function openParticipantProblemSubmissions(username, displayName, problemC
         <th>Submitted</th><th>Verdict</th><th>Language</th><th>Time</th><th>Tests</th><th></th>
       </tr></thead><tbody>
       ${attempts.map(s=>`
-        <tr class="attempt-row" style="cursor:pointer" onclick="closeModal('bestSourceModal');viewSource(${s.id})">
+        <tr class="attempt-row" style="cursor:pointer" data-action="view-attempt" data-id="${s.id}">
           <td>${esc(new Date(s.submittedAtMs).toLocaleString())}</td>
           <td class="${s.verdict?'v-'+s.verdict:'v-none'}">${s.verdict||'judging…'}</td>
           <td>${esc(s.language||'—')}</td>
           <td>${s.execTimeMs>=0?s.execTimeMs+' ms':'—'}</td>
           <td>${s.totalTestCases>0?`${s.passedTestCount}/${s.totalTestCases}`:'—'}</td>
-          <td><button class="btn sm" onclick="event.stopPropagation();closeModal('bestSourceModal');viewSource(${s.id})">View submission</button></td>
+          <td><button class="btn sm" data-action="view-attempt" data-id="${s.id}">View submission</button></td>
         </tr>`).join('')}
       </tbody></table></div>`;
   }
@@ -2606,8 +2649,8 @@ async function loadMaterials(){
         <div>${esc(m.filename)}</div>
         <div class="hint">${humanFileSize(m.sizeBytes)} &middot; ${esc(new Date(m.uploadedAtMs).toLocaleString())}</div>
       </div>
-      <button class="btn sm" onclick="downloadMaterial(${m.id})" style="align-self:center">⬇ Download</button>
-      <button class="btn sm danger" onclick="deleteMaterial(${m.id})" style="align-self:center">Delete</button>
+      <button class="btn sm" data-action="download-material" data-id="${m.id}" style="align-self:center">⬇ Download</button>
+      <button class="btn sm danger" data-action="delete-material" data-id="${m.id}" style="align-self:center">Delete</button>
     </div>`).join('') : '<div class="empty">No materials uploaded yet.</div>';
 }
 
@@ -2711,7 +2754,7 @@ async function loadClarifications(){
         <b>${scope}</b>
         ${c.isPublic ? '' : '<span class="badge" style="background:var(--purple)">PRIVATE</span>'}
         ${c.isPublic && c.answer && !c.approved ? '<span class="badge" style="background:var(--amber)">PENDING APPROVAL</span>' : ''}
-        <span class="hint">asked by <b>${esc(c.askedBy||'unknown')}</b></span>
+        <span class="hint">asked by <b data-asked-by="${c.id}"></b></span>
         <span class="hint">${esc(new Date(c.askedAtMs).toLocaleString())}</span>
         <span class="spacer"></span>
         ${c.answer ? '<span class="v-AC">answered</span>' : '<span class="v-TLE">waiting</span>'}
@@ -2723,22 +2766,25 @@ async function loadClarifications(){
              <div>${esc(c.answer)}</div>
            </div>
            <div class="row" style="margin-top:8px">
-             <button class="btn sm" onclick="answerClarification(${c.id},true)">Revise answer</button>
+             <button class="btn sm" data-action="answer-clarification" data-id="${c.id}" data-revise="true">Revise answer</button>
              ${c.isPublic
                ? (c.approved
-                   ? `<button class="btn sm" onclick="setClarificationApproved(${c.id},false)">Unapprove</button>`
-                   : `<button class="btn primary sm" onclick="setClarificationApproved(${c.id},true)">Approve \u2014 show to everyone</button>`)
+                   ? `<button class="btn sm" data-action="approve-clarification" data-id="${c.id}" data-approved="false">Unapprove</button>`
+                   : `<button class="btn primary sm" data-action="approve-clarification" data-id="${c.id}" data-approved="true">Approve \u2014 show to everyone</button>`)
                : ''}
            </div>`
         : `<div class="row">
              <input type="text" id="ans-${c.id}" placeholder="Your answer \u2014 ${answerReach}"
-                    style="flex:1;min-width:240px"
-                    onkeydown="if(event.key==='Enter')answerClarification(${c.id})">
-             <button class="btn primary sm" onclick="answerClarification(${c.id})">Answer</button>
+                    style="flex:1;min-width:240px" data-enter-action="answer-clarification" data-id="${c.id}">
+             <button class="btn primary sm" data-action="answer-clarification" data-id="${c.id}">Answer</button>
            </div>`}
       </div>
     </div>`;
   }).join('') : '<div class="empty">No questions yet.</div>';
+  $('clarifyList').querySelectorAll('[data-asked-by]').forEach(el=>{
+    const clarification=body.find(c=>c.id===Number(el.dataset.askedBy));
+    el.textContent=clarification?.askedBy||'unknown';
+  });
 
   if(draftId){
     const restored=$(draftId);
@@ -3452,6 +3498,92 @@ function rankListCard(title,items,cls){
     <div class="dash-rank">${rows}</div>
   </div>`;
 }
+
+/* Dynamic rows carry only numeric ids/indices in data attributes. Values such
+   as usernames, display names, contest titles and problem codes are resolved
+   from the already-fetched model here, never compiled as inline JavaScript. */
+document.addEventListener('click',event=>{
+  if(!(event.target instanceof Element)) return;
+  const el=event.target.closest('[data-action]');
+  if(!el) return;
+  const id=Number(el.dataset.id);
+  switch(el.dataset.action){
+    case 'dismiss-notification': dismissNotification(id); break;
+    case 'open-notification-history': openUserNotifHistory(el.dataset.username||''); break;
+    case 'dismiss-user-notifications':
+      event.stopPropagation(); dismissUserNotifications(el.dataset.username||''); break;
+    case 'select-contest': selectContest(id); break;
+    case 'clone-contest': {
+      event.stopPropagation();
+      const contest=lastContests.find(c=>c.id===id);
+      if(contest) cloneContest(id,contest.title);
+      break;
+    }
+    case 'delete-contest': {
+      event.stopPropagation();
+      const contest=lastContests.find(c=>c.id===id);
+      if(contest) deleteContest(id,contest.title,contest.state);
+      break;
+    }
+    case 'view-problem': viewProblem(id); break;
+    case 'edit-problem': editProblem(id); break;
+    case 'delete-problem': {
+      const problem=currentProblems.find(p=>p.id===id);
+      if(problem) delProblem(id,problem.code);
+      break;
+    }
+    case 'toggle-feed-user': {
+      const group=feedData[Number(el.dataset.userIndex)];
+      if(group) toggleUser(group.username);
+      break;
+    }
+    case 'toggle-feed-problem': {
+      const group=feedData[Number(el.dataset.userIndex)];
+      const problem=group?.problems?.[Number(el.dataset.problemIndex)];
+      if(group&&problem) toggleProblem(group.username+':'+problem.code);
+      break;
+    }
+    case 'view-source': event.stopPropagation(); viewSource(id); break;
+    case 'adjust-penalty': {
+      const row=standingsData[Number(el.dataset.userIndex)];
+      if(row) adjustPenaltyPrompt(row.username);
+      break;
+    }
+    case 'open-participant-problem': {
+      const row=standingsData[Number(el.dataset.userIndex)];
+      const code=problemColumns(standingsData)[Number(el.dataset.codeIndex)];
+      if(row&&code) openParticipantProblemSubmissions(row.username,row.displayName,code);
+      break;
+    }
+    case 'view-attempt':
+      event.stopPropagation(); closeModal('bestSourceModal'); viewSource(id); break;
+    case 'download-material': downloadMaterial(id); break;
+    case 'delete-material': deleteMaterial(id); break;
+    case 'answer-clarification': answerClarification(id,el.dataset.revise==='true'); break;
+    case 'approve-clarification': setClarificationApproved(id,el.dataset.approved==='true'); break;
+  }
+});
+
+document.addEventListener('change',event=>{
+  if(!(event.target instanceof Element)) return;
+  const el=event.target.closest('[data-action="set-marks"]');
+  if(!el) return;
+  const row=standingsData[Number(el.dataset.userIndex)];
+  if(row) setParticipantMarks(row.username,el.value);
+});
+
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Enter'||!(event.target instanceof Element)) return;
+  const marks=event.target.closest('[data-action="set-marks"]');
+  if(marks){
+    const row=standingsData[Number(marks.dataset.userIndex)];
+    if(row) setParticipantMarks(row.username,marks.value);
+    marks.blur();
+    return;
+  }
+  const clarification=event.target.closest('[data-enter-action="answer-clarification"]');
+  if(clarification) answerClarification(Number(clarification.dataset.id));
+});
 </script>
 </body>
 </html>

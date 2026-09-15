@@ -1,5 +1,7 @@
 package com.arbitrator.client.controller;
 
+import java.util.regex.Pattern;
+
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.dto.LoginResponse;
@@ -22,6 +24,9 @@ import javafx.scene.control.TextField;
 public class RegisterController {
 
     private static final int MIN_PASSWORD_LENGTH = 8;
+    private static final int MAX_DISPLAY_NAME_LENGTH = 128;
+    private static final Pattern STUDENT_ID_PATTERN =
+            Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
 
     @FXML private TextField usernameField;
     @FXML private TextField displayNameField;
@@ -62,8 +67,13 @@ public class RegisterController {
             showError(SceneRouter.bundle().getString("register.error.empty"));
             return;
         }
-        if (username.contains(" ")) {
-            showError(SceneRouter.bundle().getString("register.error.username.spaces"));
+        if (!STUDENT_ID_PATTERN.matcher(username).matches()) {
+            showError(SceneRouter.bundle().getString("register.error.username.invalid"));
+            return;
+        }
+        if (displayName.codePointCount(0, displayName.length()) > MAX_DISPLAY_NAME_LENGTH
+                || displayName.codePoints().anyMatch(Character::isISOControl)) {
+            showError(SceneRouter.bundle().getString("register.error.display.invalid"));
             return;
         }
         if (password.length() < MIN_PASSWORD_LENGTH) {

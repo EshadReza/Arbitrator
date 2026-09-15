@@ -65,6 +65,16 @@ public class LeaderboardService {
         return forContest(contestService.requireCurrent());
     }
 
+    /** Student-safe view: a lobby must not reveal even the problem codes. */
+    @Transactional(readOnly = true)
+    public LeaderboardDto forStudents(Contest contest) {
+        if (!contest.getState().releasesProblems()) {
+            return new LeaderboardDto(contest.getId(), false, System.currentTimeMillis(),
+                    List.of(), List.of());
+        }
+        return forContest(contest);
+    }
+
     @Transactional(readOnly = true)
     public LeaderboardDto forContest(Contest contest) {
         List<Problem> contestProblems =

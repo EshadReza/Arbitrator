@@ -20,15 +20,6 @@ public final class AppState {
     private LoginResponse session;
     private ContestStateDto contest;
 
-    /**
-     * The password used to successfully enter the current contest (empty
-     * string when it has none). Kept only so a refresh/reconnect of {@link
-     * #contest} doesn't re-prompt the student every time — the server still
-     * re-checks it on every call, this just saves it having to be re-typed.
-     * Never persisted to disk, cleared on sign-out or contest switch.
-     */
-    private String contestPassword = "";
-
     /** serverTime - localTime at the moment the contest state was fetched;
         the client NEVER trusts its own clock alone (FMEA-06). */
     private long clockOffsetMs;
@@ -75,14 +66,6 @@ public final class AppState {
         this.clockOffsetMs = contest.serverTimeMs() - System.currentTimeMillis();
     }
 
-    public String contestPassword() {
-        return contestPassword;
-    }
-
-    public void setContestPassword(String contestPassword) {
-        this.contestPassword = contestPassword == null ? "" : contestPassword;
-    }
-
     /** Best estimate of the authoritative server clock, right now. */
     public long serverNowMs() {
         return System.currentTimeMillis() + clockOffsetMs;
@@ -92,7 +75,6 @@ public final class AppState {
     public void setContestCleared() {
         this.contest = null;
         this.clockOffsetMs = 0;
-        this.contestPassword = "";
     }
 
     public boolean darkMode() {

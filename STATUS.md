@@ -12,13 +12,13 @@ The full Maven server suite was run during the 2026-09-15 repository audit:
 
 | Result | Count |
 |---|---:|
-| Tests discovered | 58 |
-| Passed | 58 |
+| Tests discovered | 86 |
+| Passed | 86 |
 | Failed | 0 |
 | Errors | 0 |
 | Skipped | 0 |
 
-The latest run used local MySQL and Docker: all sandbox, worker, checker, STOMP, and material-deletion integration tests passed without skips. Six new tests cover material cleanup on commit, rollback preservation, unrelated contests, missing files, filesystem errors, empty contests, and the transaction requirement. This run does not replace a real LAN rehearsal.
+The latest run used local MySQL and Docker: all sandbox, worker, checker, STOMP, contest-access, material-deletion, registration-policy, duplicate-policy, ZIP-import, and admin-rendering tests passed without skips. Six tests cover material cleanup and rollback behavior; four cover the contest entry boundary; eleven cover registration input policy and the admin XSS boundary; three cover active-session replacement, including a live HTTP/WebSocket integration scenario; seven cover exact duplicate semantics; and three new importer tests cover exact-cap reading, unknown-size overflow, and normalized-path collisions. This run does not replace a real LAN rehearsal.
 
 The JavaFX client has no automated UI suite. The React experiment was not built during this audit because its `node_modules` directory was absent; it is outside the root Maven build.
 
@@ -27,13 +27,13 @@ The JavaFX client has no automated UI suite. The React experiment was not built 
 ### Platform, data, and security
 
 - Spring Boot 3.2.5, Java 17, MySQL 8, Spring Data JPA, Flyway, Spring Security, and JJWT
-- Student registration plus seeded student/instructor accounts for development
+- Student registration with a server-enforced 1–64 character student-ID policy (`A-Z`, `a-z`, `0-9`, `.`, `_`, `-`) plus seeded student/instructor accounts for development
 - BCrypt cost 12 and 12-hour HS256 JWTs
 - In-memory single-active-session registry with confirm-to-replace login behavior
-- Explicit logout and REST-token invalidation
+- Explicit logout plus immediate REST-token and live-WebSocket invalidation
 - Optional client MAC reporting and instructor notifications when a student's reported MAC changes
 - Loopback filter for `/admin/**` and `/api/admin/**`, with `ADMIN` authorization on admin APIs
-- Flyway schema through V65, including contests, users, problems, tests, submissions, results, announcements, clarifications, PDF statements, MAC data, and materials
+- Flyway schema through V80, including contests, users, problems, tests, submissions, results, announcements, clarifications, PDF statements, MAC data, materials, and persistent contest-access grants
 - Persistent uploaded materials on disk with metadata in MySQL
 
 ### Contest and problem administration
@@ -42,7 +42,7 @@ The JavaFX client has no automated UI suite. The React experiment was not built 
 - One joinable/live contest at a time
 - Open lobby, start, pause/resume, schedule, extend/remove time, freeze/unfreeze, end, clone, and delete operations
 - Authoritative server clock and pause-aware deadline adjustment
-- Optional contest password field and client password prompt
+- Optional contest password field and one-time client prompt; successful entry stores a server-side per-user grant rather than retaining or retransmitting plaintext
 - ZIP problem import with aggregate validation and atomic persistence
 - HTML, HTM, plain-text, Markdown, and PDF statements
 - Paired input/output tests, hidden-test control, exact/custom checker configuration, statement replacement, problem editing, reordering, and deletion
@@ -80,6 +80,7 @@ The JavaFX client has no automated UI suite. The React experiment was not built 
 ### Instructor console
 
 - Browser login gate and loopback-restricted serving
+- Delegated event binding for generated controls; student-controlled names are assigned with `textContent` rather than embedded in executable HTML attributes
 - Dashboard, live server/contest clock, contest controls, problem management, participant presence, submission feed, source/test inspection, standings, marks, penalty/verdict controls, and exports
 - Announcements, materials, clarification answering/approval, notification feed, test visibility, clarification privacy, and server-address display
 
@@ -96,6 +97,12 @@ The JavaFX client has no automated UI suite. The React experiment was not built 
 
 ## Confirmed fixes
 
+### Contest-password authorization boundary — fixed 2026-09-15
+
+`POST /api/contests/{id}/join` now verifies the password and records an opaque `(contest_id, user_id)` grant. All student contest-state, problem/PDF, custom-run/submission, announcement, material, clarification, leaderboard/attempt, and contest-topic STOMP paths enforce that grant; admins bypass the student gate. Problem detail/PDF and leaderboard problem codes remain hidden in `LOBBY` even after admission. V80 backfills grants from existing submissions and deletes grants automatically with their contest or user. The JavaFX client no longer stores the contest password or sends it in a query parameter.
+
+The live replay used disposable contest 45 with problem 272 and material 17. The old `?password=` URL and direct contest, problem-list, problem-detail, and material-download requests all returned 403 before joining; a wrong join also returned 403. A correct join returned 200, later refresh succeeded without a password, the lobby returned an empty problem list and no leaderboard problem codes, and direct problem detail remained 403 until the contest started. Active problem/material access returned 200 and submission returned 202. Contest deletion returned 204 and left no fixture contest row. `ContestAccessIntegrationTest` adds four MySQL-backed HTTP/STOMP regression tests.
+
 ### Contest deletion with materials — fixed 2026-09-15
 
 The live reproduction cloned Lab Contest #1 into contest 42, copied three text materials, ran a C++ submission (AC, 5/5), and ended the contest. Deletion initially returned HTTP 500 naming `fk_materials_contest`; the database transaction rolled back and all files remained.
@@ -104,18 +111,35 @@ The live reproduction cloned Lab Contest #1 into contest 42, copied three text m
 
 After the fix, deleting the same contest returned HTTP 204. Its problems, submission, material rows, and three files were removed; material downloads returned 404. All original contest summaries, material records, and remaining file checksums were unchanged. `ContestMaterialDeletionTest` verifies the transaction behavior against the separate `arbitrator_test` MySQL schema and temporary files, including a real FK failure after deletion to prove rollback safety.
 
+### Instructor-console stored XSS — fixed 2026-09-15
+
+Generated admin rows no longer interpolate usernames, display names, contest titles, or problem codes into inline JavaScript handlers. They carry numeric IDs/indices in `data-*` attributes and a delegated listener resolves the corresponding object from the last fetched model. Participant and notification names are inserted with `textContent`, so markup-like display names remain literal text. Existing static handlers with fixed source literals remain, but no template expression is placed inside an inline `onclick`, `onchange`, or `onkeydown` attribute.
+
+Registration trims the student ID before both uniqueness checking and storage, then requires `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`. Display names remain Unicode-friendly but are limited to 128 code points and reject control characters. The live browser replay registered `<img src=x onerror=alert(1)>` as a display name, triggered a MAC-change notification, and showed the payload literally with zero inserted `img` elements, zero payload-bearing handler attributes, no dialog, and a working delegated notification-history control. A `<script>` student ID returned HTTP 400. The disposable notification and account were removed afterward.
+
+### Forced-login WebSocket invalidation — fixed 2026-09-15
+
+`JwtHandshakeInterceptor` now requires the JWT's `sid` to match `ActiveSessionRegistry` and stores both username and session ID in the WebSocket attributes. `AuthenticatedWebSocketSessions` tracks established transports by `sid`; replacement login and logout invalidation events immediately close every corresponding socket with policy-violation status. Registration performs a second active-session check after tracking the transport, closing the race between HTTP handshake validation and WebSocket establishment.
+
+The MySQL-backed integration replay registered a disposable account, opened its first STOMP session, force-logged in again, and verified that the old socket received a transport close within five seconds. The old token then returned HTTP 401 and could not establish another WebSocket, while the replacement token connected successfully. The disposable account was deleted by test cleanup. Two focused registry tests also verify exact old-`sid` notification on replacement/logout and that transport-cleanup failure cannot undo authentication state.
+
+### Duplicate-submission semantics — fixed 2026-09-15
+
+Duplicate detection now compares the submitted source with prior active submissions for the same user and problem using exact Java `String` equality. Only an exact repeat is rejected; whitespace is no longer removed, so Python indentation, spaces inside strings, token boundaries, line endings, and trailing whitespace retain their program meaning. Reusing identical source for a different problem remains allowed.
+
+Seven focused tests cover an exact repeat, five representative whitespace changes, and problem scoping. They are included in the current 86-test full build, which passes without skips.
+
+### ZIP size and path enforcement — fixed 2026-09-15
+
+The importer no longer trusts `ZipEntry.getSize()`, which is commonly unknown for streamed entries. It reads through the 32 MiB per-file cap and probes one additional byte, rejecting the whole package instead of accepting a truncated prefix. Existing 5,000-entry and 256 MiB aggregate-uncompressed limits remain enforced.
+
+Entry names are canonicalized before validation and storage: backslashes become forward slashes, redundant separators and `.` segments are removed, and absolute paths, `..` traversal, NUL characters, empty paths, and duplicate canonical names are rejected. This prevents later entries from replacing an earlier configuration, statement, or test through a path alias. Three new tests cover the exact boundary, a streamed unknown-size 32 MiB + 1 byte entry, and a slash/backslash collision. The full Maven build passes with 86 tests and no skips.
+
 ## Open defects and risks
-
-### Priority 0 — fix before an untrusted contest
-
-1. **Contest access is not a server-side authorization boundary.** `ContestController.byId()` checks a submitted password, but no durable membership/grant is created. Problem list/detail/PDF and related contest resources do not consistently verify that the student passed the password gate. Direct problem-ID access can also bypass intended release behavior.
-2. **Credible stored XSS in the instructor console.** HTML-escaped student-controlled strings are interpolated into single-quoted inline JavaScript handler attributes. Browser entity decoding occurs before handler execution, so HTML escaping alone does not make these values safe in JavaScript context. Registration does not enforce a restrictive server-side student-ID character policy.
 
 ### Priority 1 — correctness and security hardening
 
-3. **Forced-login invalidation is incomplete for WebSockets.** `JwtAuthFilter` checks the JWT `sid` against `ActiveSessionRegistry`; `JwtHandshakeInterceptor` validates the token but does not perform the equivalent active-session check.
-4. **Duplicate-source normalization is semantically unsafe.** `SubmissionService` removes all whitespace before comparison. This can collapse distinct Python programs and can alter string/token meaning in Java or C++.
-6. **ZIP size enforcement has edge cases.** Unknown-size entries are read exactly to the cap without an extra-byte probe, so an oversized entry can be silently truncated. Duplicate normalized ZIP paths can overwrite earlier entries.
+No Priority 1 findings from the audit remain open.
 
 ### Priority 2 — operational and quality risks
 
@@ -143,13 +167,11 @@ After the fix, deleting the same contest returned HTTP 204. Its problems, submis
 
 Recommended order:
 
-1. Close both Priority 0 findings and add regression tests.
-2. Fix WebSocket session invalidation, duplicate detection, and ZIP validation.
-3. Repair `.gitignore`/tracked local artifacts and the packaging scripts without committing real credentials.
-4. Add controller/security integration tests for contest access, session replacement, material authorization, and admin rendering; deletion transaction tests now exist.
-5. Run the complete Docker-enabled suite, a multi-client LAN soak test, and a visual acceptance pass on Ubuntu 22.04.
-6. Implement rejudge and float tolerance only after the correctness/security backlog is green.
-7. Produce a repeatable server/client distribution, backup/restore procedure, and operator checklist before tagging v1.0.
+1. Repair `.gitignore`/tracked local artifacts and the packaging scripts without committing real credentials.
+2. Extend controller/security integration coverage beyond the now-tested session replacement, contest-access, deletion-transaction, registration-policy, admin-rendering, duplicate-policy, and ZIP-import paths.
+3. Run a multi-client LAN soak test and visual acceptance pass on Ubuntu 22.04; the complete Docker/MySQL suite is currently green without skips.
+4. Implement rejudge and float tolerance now that the correctness/security audit backlog is green.
+5. Produce a repeatable server/client distribution, backup/restore procedure, and operator checklist before tagging v1.0.
 
 ## Definition of v1.0-ready
 

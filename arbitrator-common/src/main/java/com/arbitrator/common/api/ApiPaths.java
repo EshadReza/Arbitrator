@@ -22,6 +22,8 @@ public final class ApiPaths {
     public static final String CONTESTS = "/api/contests";                 // GET joinable list
     public static final String CONTEST_CURRENT = "/api/contests/current";
     public static final String CONTEST_BY_ID = "/api/contests/{id}";       // GET one contest's state
+    /** Verifies the contest password and records server-side access for this student. */
+    public static final String CONTEST_JOIN = "/api/contests/{id}/join";  // POST
     public static final String PROBLEMS = "/api/problems";                 // GET list
     public static final String PROBLEM_BY_ID = "/api/problems/{id}";       // GET detail
     /** Raw PDF bytes, when the problem's statement is a PDF (FR-05). */

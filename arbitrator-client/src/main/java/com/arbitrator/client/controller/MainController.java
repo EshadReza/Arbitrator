@@ -415,9 +415,9 @@ public class MainController {
                 long id = state.contest().contestId();
                 // Contest state first: it decides whether problems are released
                 // at all, so fetching problems before it can show a stale list.
-                // Password (if any) is whatever unlocked this contest in the
-                // picker — see AppState.contestPassword() — not re-prompted here.
-                var contestState = state.api().contest(id, state.contestPassword());
+                // Entry was granted server-side by the picker; refresh never
+                // retains or retransmits the plaintext contest password.
+                var contestState = state.api().contest(id);
                 onContestState(contestState);
                 if (contestState.state().releasesProblems()) {
                     List<ProblemSummaryDto> items = state.api().problems();

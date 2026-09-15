@@ -1,6 +1,7 @@
 package com.arbitrator.server.controller;
 
 import java.nio.file.Path;
+import java.security.Principal;
 import java.util.List;
 
 import org.springframework.core.io.FileSystemResource;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.MaterialDto;
 import com.arbitrator.server.entity.Material;
+import com.arbitrator.server.service.ContestAccessService;
 import com.arbitrator.server.service.ContestService;
 import com.arbitrator.server.service.MaterialService;
 
@@ -29,10 +31,13 @@ public class MaterialController {
 
     private final MaterialService materials;
     private final ContestService contestService;
+    private final ContestAccessService contestAccess;
 
-    public MaterialController(MaterialService materials, ContestService contestService) {
+    public MaterialController(MaterialService materials, ContestService contestService,
+                              ContestAccessService contestAccess) {
         this.materials = materials;
         this.contestService = contestService;
+        this.contestAccess = contestAccess;
     }
 
     /**
@@ -42,14 +47,17 @@ public class MaterialController {
      */
     @GetMapping(ApiPaths.MATERIALS)
     public List<MaterialDto> list(
-            @RequestParam(value = "contestId", required = false) Long contestId) {
+            @RequestParam(value = "contestId", required = false) Long contestId,
+            Principal principal) {
         long target = contestId != null ? contestId : contestService.requireCurrent().getId();
+        contestAccess.requireAccess(target, principal.getName());
         return materials.forContest(target);
     }
 
     @GetMapping(ApiPaths.MATERIAL_DOWNLOAD)
-    public ResponseEntity<Resource> download(@PathVariable long id) {
+    public ResponseEntity<Resource> download(@PathVariable long id, Principal principal) {
         Material m = materials.require(id);
+        contestAccess.requireAccess(m.getContestId(), principal.getName());
         Path file = materials.fileOf(m);
         Resource body = new FileSystemResource(file);
         return ResponseEntity.ok()

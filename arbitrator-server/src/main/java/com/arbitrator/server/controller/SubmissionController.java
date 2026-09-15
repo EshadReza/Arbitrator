@@ -53,8 +53,8 @@ public class SubmissionController {
      * submission cooldown.
      */
     @PostMapping(ApiPaths.RUN_CUSTOM)
-    public CustomRunResultDto runCustom(@RequestBody CustomRunRequest req) {
-        return customRunService.run(req);
+    public CustomRunResultDto runCustom(@RequestBody CustomRunRequest req, Principal principal) {
+        return customRunService.run(principal.getName(), req);
     }
 
     /** UIF-12: the code behind one of my submissions. */

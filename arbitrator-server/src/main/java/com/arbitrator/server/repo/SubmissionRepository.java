@@ -39,11 +39,9 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
      * archives a contest's submissions on restart/clone, and a fresh run
      * must not treat a previous run's attempt as a duplicate.
      *
-     * Whitespace-insensitive by design, so the comparison happens in
-     * SubmissionService rather than as a SQL equality predicate here — see
-     * SubmissionService.isDuplicate. A byte-for-byte SQL match let a single
-     * deleted space count as "new" code, which defeats the guard's whole
-     * point (the verdict cannot change from whitespace alone).
+     * Comparison remains in SubmissionService so Java String equality defines
+     * the policy independent of the database column's collation. Whitespace is
+     * semantically significant and is never normalized.
      */
     @Query("select s.sourceCode from Submission s "
             + "where s.userId = ?1 and s.problemId = ?2 and s.active = true")

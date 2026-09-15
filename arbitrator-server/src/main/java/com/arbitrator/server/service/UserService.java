@@ -2,6 +2,7 @@ package com.arbitrator.server.service;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -23,6 +24,9 @@ public class UserService {
 
     /** Thrown-message marker AuthController's response body carries for a 409. */
     public static final String ALREADY_LOGGED_IN = "ALREADY_LOGGED_IN";
+    public static final int MAX_DISPLAY_NAME_LENGTH = 128;
+    public static final Pattern STUDENT_ID_PATTERN =
+            Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
 
     private final UserRepository users;
     private final PasswordEncoder encoder;
@@ -44,18 +48,28 @@ public class UserService {
 
     /** FR-01: unique username, >= 8 char password, bcrypt storage. */
     public LoginResponse register(LoginRequest req) {
-        if (req.username() == null || req.username().isBlank()
-                || req.password() == null || req.password().length() < 8) {
+        String username = req.username() == null ? "" : req.username().trim();
+        if (!STUDENT_ID_PATTERN.matcher(username).matches()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Username required and password must be at least 8 characters");
+                    "Student ID must be 1-64 characters using only letters, numbers, dots, underscores or hyphens");
         }
-        if (users.existsByUsername(req.username())) {
+        if (req.password() == null || req.password().length() < 8) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Password must be at least 8 characters");
+        }
+        String displayName = req.displayName() == null || req.displayName().isBlank()
+                ? username : req.displayName().trim();
+        if (displayName.codePointCount(0, displayName.length()) > MAX_DISPLAY_NAME_LENGTH
+                || displayName.codePoints().anyMatch(Character::isISOControl)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Display name must be at most 128 characters and cannot contain control characters");
+        }
+        if (users.existsByUsername(username)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already taken");
         }
         User u = new User();
-        u.setUsername(req.username().trim());
-        u.setDisplayName(req.displayName() == null || req.displayName().isBlank()
-                ? req.username().trim() : req.displayName().trim());
+        u.setUsername(username);
+        u.setDisplayName(displayName);
         u.setPasswordHash(encoder.encode(req.password()));
         u.setRole(Role.STUDENT);           // admins are created server-side only
         recordMac(u, req.macAddress());    // first-ever login: record, never a "change"

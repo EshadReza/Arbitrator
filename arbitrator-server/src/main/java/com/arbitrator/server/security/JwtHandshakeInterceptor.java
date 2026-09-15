@@ -23,11 +23,14 @@ import io.jsonwebtoken.Claims;
 public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
     public static final String ATTR_USERNAME = "arbitrator.username";
+    public static final String ATTR_SESSION_ID = "arbitrator.sessionId";
 
     private final JwtService jwtService;
+    private final ActiveSessionRegistry sessions;
 
-    public JwtHandshakeInterceptor(JwtService jwtService) {
+    public JwtHandshakeInterceptor(JwtService jwtService, ActiveSessionRegistry sessions) {
         this.jwtService = jwtService;
+        this.sessions = sessions;
     }
 
     @Override
@@ -45,7 +48,14 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
             return false;
         }
-        attributes.put(ATTR_USERNAME, claims.getSubject());
+        String username = claims.getSubject();
+        String sid = claims.get("sid", String.class);
+        if (username == null || sid == null || !sessions.isActive(username, sid)) {
+            response.setStatusCode(HttpStatus.UNAUTHORIZED);
+            return false;
+        }
+        attributes.put(ATTR_USERNAME, username);
+        attributes.put(ATTR_SESSION_ID, sid);
         return true;
     }
 

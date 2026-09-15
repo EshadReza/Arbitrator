@@ -1,30 +1,35 @@
 package com.arbitrator.server.controller;
 
+import java.security.Principal;
 import java.util.List;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.api.ApiPaths;
+import com.arbitrator.common.dto.ContestJoinRequest;
 import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.dto.ContestSummaryDto;
 import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.repo.ProblemRepository;
+import com.arbitrator.server.service.ContestAccessService;
 import com.arbitrator.server.service.ContestService;
 
 @RestController
 public class ContestController {
 
     private final ContestService contestService;
+    private final ContestAccessService contestAccess;
     private final ProblemRepository problems;
 
-    public ContestController(ContestService contestService, ProblemRepository problems) {
+    public ContestController(ContestService contestService,
+                             ContestAccessService contestAccess,
+                             ProblemRepository problems) {
         this.contestService = contestService;
+        this.contestAccess = contestAccess;
         this.problems = problems;
     }
 
@@ -36,35 +41,24 @@ public class ContestController {
 
     /** Convenience for a single-contest lab: whichever contest is live. */
     @GetMapping(ApiPaths.CONTEST_CURRENT)
-    public ContestStateDto current() {
-        return contestService.currentState();
+    public ContestStateDto current(Principal principal) {
+        Contest contest = contestService.requireCurrent();
+        contestAccess.requireAccess(contest.getId(), principal.getName());
+        return contestService.stateOf(contest);
     }
 
-    /**
-     * The chosen contest's live state — drives the client countdown (FR-06).
-     *
-     * {@code password} is required, and checked against the stored hash,
-     * whenever the contest has one — never trust the client's own
-     * {@code passwordProtected} flag, that's just what tells it to prompt.
-     *
-     * ADMIN callers skip this check: this same endpoint is what the admin
-     * console polls every few seconds to paint Contest Control (clocks,
-     * lifecycle, state badge), and an admin's own ADMIN JWT is already a
-     * stronger credential than the contest's join password — without this
-     * exemption a password-protected contest was unmanageable from its own
-     * control page, repeatedly 403ing on every poll.
-     */
     @GetMapping(ApiPaths.CONTEST_BY_ID)
-    public ContestStateDto byId(@PathVariable long id,
-                                @RequestParam(required = false) String password,
-                                Authentication authentication) {
-        Contest c = contestService.require(id);
-        boolean isAdmin = authentication != null && authentication.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-        if (!isAdmin && !contestService.verifyPassword(c, password)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Incorrect contest password");
-        }
-        return contestService.stateOf(c);
+    public ContestStateDto byId(@PathVariable long id, Principal principal) {
+        return contestService.stateOf(contestAccess.requireAccess(id, principal.getName()));
+    }
+
+    /** Validate the password once and persist an opaque user/contest grant. */
+    @PostMapping(ApiPaths.CONTEST_JOIN)
+    public ContestStateDto join(@PathVariable long id,
+                                @RequestBody(required = false) ContestJoinRequest request,
+                                Principal principal) {
+        String password = request == null ? null : request.password();
+        return contestService.stateOf(contestAccess.join(id, principal.getName(), password));
     }
 
     private ContestSummaryDto summarise(Contest c) {

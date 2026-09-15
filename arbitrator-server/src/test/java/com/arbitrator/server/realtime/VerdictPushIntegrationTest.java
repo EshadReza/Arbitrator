@@ -1,16 +1,23 @@
 package com.arbitrator.server.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.lang.reflect.Type;
 import java.net.Socket;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +28,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.messaging.converter.MappingJackson2MessageConverter;
 import org.springframework.messaging.simp.stomp.StompHeaders;
@@ -28,6 +37,7 @@ import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
@@ -36,6 +46,7 @@ import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.api.StompDestinations;
 import com.arbitrator.common.dto.LoginRequest;
 import com.arbitrator.common.dto.LoginResponse;
+import com.arbitrator.common.dto.ContestJoinRequest;
 import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.common.dto.VerdictEventDto;
@@ -46,6 +57,8 @@ import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.repo.ContestRepository;
 import com.arbitrator.server.repo.ProblemRepository;
+import com.arbitrator.server.repo.UserRepository;
+import com.arbitrator.server.security.ActiveSessionRegistry;
 
 /**
  * Closes the checkpoint-I2 gate (WORKFLOW_PLAN §6) and retires risk #1 in §9:
@@ -75,7 +88,14 @@ class VerdictPushIntegrationTest {
     @Autowired
     private ProblemRepository problems;
 
+    @Autowired
+    private UserRepository users;
+
+    @Autowired
+    private ActiveSessionRegistry activeSessions;
+
     private final RestTemplate rest = new RestTemplateBuilder().build();
+    private final List<String> disposableUsers = new ArrayList<>();
 
     /** The contest {@link #ensureContestIsOpen()} put live, shared with the tests. */
     private long openContestId;
@@ -102,6 +122,15 @@ class VerdictPushIntegrationTest {
         openContestId = contest.getId();
     }
 
+    @AfterEach
+    void removeDisposableUsers() {
+        disposableUsers.forEach(username -> {
+            activeSessions.clear(username);
+            users.findByUsername(username).ifPresent(users::delete);
+        });
+        disposableUsers.clear();
+    }
+
     @Test
     @DisplayName("verdict reaches the submitting client over STOMP within 30s")
     void verdictIsPushedToTheSubmittingClient() throws Exception {
@@ -115,6 +144,7 @@ class VerdictPushIntegrationTest {
                 "docker (with arbitrator-judge image) not available");
 
         String token = login("alice", "alice123").token();
+        join(token, openContestId);
         long problemId = firstProblemId();
 
         // --- connect exactly as the JavaFX client does: JWT as a handshake header
@@ -190,11 +220,83 @@ class VerdictPushIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("forced login closes the old socket and rejects its token")
+    void forcedLoginInvalidatesExistingAndFutureWebSockets() throws Exception {
+        String username = "ws_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        String password = "password1";
+        disposableUsers.add(username);
+        LoginResponse first = register(username, password);
+
+        WebSocketStompClient oldClient = stompClient();
+        DisconnectHandler oldHandler = new DisconnectHandler();
+        WebSocketStompClient replacementClient = stompClient();
+        WebSocketStompClient staleReconnectClient = stompClient();
+        StompSession replacementSession = null;
+        try {
+            StompSession oldSession = connect(oldClient, first.token(), oldHandler);
+            assertTrue(oldSession.isConnected());
+
+            LoginResponse replacement = login(username, password, true);
+
+            assertTrue(oldHandler.disconnected.await(5, TimeUnit.SECONDS),
+                    "the superseded socket must be closed immediately");
+            assertFalse(oldSession.isConnected());
+
+            HttpHeaders oldHeaders = new HttpHeaders();
+            oldHeaders.setBearerAuth(first.token());
+            HttpClientErrorException oldRest = assertThrows(HttpClientErrorException.class,
+                    () -> rest.exchange(base() + ApiPaths.CONTESTS, HttpMethod.GET,
+                            new HttpEntity<>(oldHeaders), String.class));
+            assertEquals(HttpStatus.UNAUTHORIZED, oldRest.getStatusCode());
+
+            assertThrows(Exception.class,
+                    () -> connect(staleReconnectClient, first.token(), new StompSessionHandlerAdapter() { }),
+                    "a superseded token must not open another WebSocket");
+
+            replacementSession = connect(replacementClient, replacement.token(),
+                    new StompSessionHandlerAdapter() { });
+            assertTrue(replacementSession.isConnected(),
+                    "the replacement session must still be able to connect");
+        } finally {
+            if (replacementSession != null && replacementSession.isConnected()) {
+                replacementSession.disconnect();
+            }
+            oldClient.stop();
+            staleReconnectClient.stop();
+            replacementClient.stop();
+        }
+    }
+
     // ------------------------------------------------------------------
 
     private LoginResponse login(String user, String password) {
         return rest.postForObject(base() + ApiPaths.AUTH_LOGIN,
                 new LoginRequest(user, null, password), LoginResponse.class);
+    }
+
+    private LoginResponse login(String user, String password, boolean force) {
+        return rest.postForObject(base() + ApiPaths.AUTH_LOGIN,
+                new LoginRequest(user, null, password, null, force), LoginResponse.class);
+    }
+
+    private LoginResponse register(String user, String password) {
+        return rest.postForObject(base() + ApiPaths.AUTH_REGISTER,
+                new LoginRequest(user, "WebSocket Probe", password), LoginResponse.class);
+    }
+
+    private WebSocketStompClient stompClient() {
+        WebSocketStompClient client = new WebSocketStompClient(new StandardWebSocketClient());
+        client.setMessageConverter(new MappingJackson2MessageConverter());
+        return client;
+    }
+
+    private StompSession connect(WebSocketStompClient client, String token,
+                                 StompSessionHandlerAdapter handler) throws Exception {
+        WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
+        headers.setBearerAuth(token);
+        return client.connectAsync("ws://localhost:" + port + StompDestinations.WS_ENDPOINT,
+                headers, handler).get(10, TimeUnit.SECONDS);
     }
 
     private SubmitAckDto submit(String token, SubmitRequest request) {
@@ -203,6 +305,14 @@ class VerdictPushIntegrationTest {
         headers.setBearerAuth(token);
         return rest.postForObject(base() + ApiPaths.SUBMISSIONS,
                 new HttpEntity<>(request, headers), SubmitAckDto.class);
+    }
+
+    private void join(String token, long contestId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(token);
+        rest.postForObject(base() + ApiPaths.CONTESTS + "/" + contestId + "/join",
+                new HttpEntity<>(new ContestJoinRequest(null), headers), Object.class);
     }
 
     private long firstProblemId() {
@@ -237,6 +347,15 @@ class VerdictPushIntegrationTest {
             return p.waitFor() == 0;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private static final class DisconnectHandler extends StompSessionHandlerAdapter {
+        private final CountDownLatch disconnected = new CountDownLatch(1);
+
+        @Override
+        public void handleTransportError(StompSession session, Throwable exception) {
+            disconnected.countDown();
         }
     }
 }

@@ -305,6 +305,44 @@ class ProblemPackageServiceTest {
         assertFalse(r.errors().isEmpty());
     }
 
+    @Test
+    void cappedReadAcceptsTheExactLimitAndDetectsOneExtraByte() throws IOException {
+        ProblemPackageService.CappedRead exact = ProblemPackageService.readCapped(
+                new java.io.ByteArrayInputStream(new byte[8]), 8);
+        ProblemPackageService.CappedRead oversized = ProblemPackageService.readCapped(
+                new java.io.ByteArrayInputStream(new byte[9]), 8);
+
+        assertFalse(exact.exceeded());
+        assertEquals(8, exact.data().length);
+        assertTrue(oversized.exceeded());
+        assertEquals(9, oversized.data().length, "the extra-byte probe must be observed");
+    }
+
+    @Test
+    void unknownSizeEntryOverTheSingleFileLimitIsRejectedInsteadOfTruncated() {
+        List<ZipContent> entries = zipContents(baseFiles());
+        entries.add(new ZipContent("attachments/oversized.bin",
+                new byte[Math.toIntExact(ProblemPackageService.MAX_SINGLE_FILE + 1)]));
+
+        ProblemPackageResultDto r = service.importPackage(zip(entries));
+
+        assertFalse(r.accepted());
+        assertTrue(r.errors().stream().anyMatch(e -> e.contains("File too large")
+                && e.contains("attachments/oversized.bin")));
+    }
+
+    @Test
+    void duplicateCanonicalPathsAreRejectedInsteadOfOverwritten() {
+        List<ZipContent> entries = zipContents(baseFiles());
+        entries.add(new ZipContent("tests\\01.in", "different input".getBytes(StandardCharsets.UTF_8)));
+
+        ProblemPackageResultDto r = service.importPackage(zip(entries));
+
+        assertFalse(r.accepted());
+        assertTrue(r.errors().stream().anyMatch(e -> e.contains("Duplicate path")
+                && e.contains("tests/01.in")));
+    }
+
     // --- helpers --------------------------------------------------------
 
     private static final String CONFIG = """
@@ -327,11 +365,22 @@ class ProblemPackageServiceTest {
     }
 
     private static byte[] zip(Map<String, String> files) {
+        return zip(zipContents(files));
+    }
+
+    private static List<ZipContent> zipContents(Map<String, String> files) {
+        List<ZipContent> contents = new ArrayList<>();
+        files.forEach((name, value) -> contents.add(
+                new ZipContent(name, value.getBytes(StandardCharsets.UTF_8))));
+        return contents;
+    }
+
+    private static byte[] zip(List<ZipContent> files) {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(bos)) {
-            for (Map.Entry<String, String> e : files.entrySet()) {
-                zos.putNextEntry(new ZipEntry(e.getKey()));
-                zos.write(e.getValue().getBytes(StandardCharsets.UTF_8));
+            for (ZipContent file : files) {
+                zos.putNextEntry(new ZipEntry(file.name()));
+                zos.write(file.data());
                 zos.closeEntry();
             }
         } catch (IOException e) {
@@ -339,6 +388,8 @@ class ProblemPackageServiceTest {
         }
         return bos.toByteArray();
     }
+
+    private record ZipContent(String name, byte[] data) {}
 
     /**
      * Minimal stand-in for a Spring Data interface: a dynamic proxy that

@@ -6,9 +6,11 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -55,7 +57,7 @@ public class ProblemPackageService {
     /** Zip-bomb guards. A real lab package is a few hundred KB. */
     private static final int MAX_ENTRIES = 5_000;
     private static final long MAX_TOTAL_UNCOMPRESSED = 256L * 1024 * 1024;   // 256 MiB
-    private static final long MAX_SINGLE_FILE = 32L * 1024 * 1024;           // 32 MiB
+    static final long MAX_SINGLE_FILE = 32L * 1024 * 1024;                   // 32 MiB
 
     /** A statement is a few pages; anything larger is a mistake, not a problem. */
     private static final long MAX_STATEMENT_PDF_BYTES = 16L * 1024 * 1024;
@@ -407,6 +409,7 @@ public class ProblemPackageService {
      */
     private Map<String, byte[]> readZip(byte[] zipBytes, List<String> errors) throws IOException {
         Map<String, byte[]> out = new LinkedHashMap<>();
+        Set<String> entryNames = new HashSet<>();
         long total = 0;
         int count = 0;
 
@@ -417,13 +420,16 @@ public class ProblemPackageService {
                     errors.add("Package has too many entries (limit " + MAX_ENTRIES + ")");
                     return out;
                 }
-                String name = entry.getName().replace('\\', '/');
+                String name = canonicalEntryName(entry.getName());
 
-                // Zip-slip: an entry like ../../etc/passwd must never be honoured.
-                // We keep everything in memory, but a normalised name is still
-                // required so nothing downstream can be tricked by the path.
-                if (name.startsWith("/") || name.contains("../")) {
+                // Nothing is extracted to disk, but all downstream lookups must
+                // see one unambiguous, traversal-free representation of a path.
+                if (name == null || name.isEmpty()) {
                     errors.add("Unsafe path in package: " + entry.getName());
+                    return out;
+                }
+                if (!entryNames.add(name)) {
+                    errors.add("Duplicate path in package: " + name);
                     return out;
                 }
                 if (entry.isDirectory()) {
@@ -434,7 +440,12 @@ public class ProblemPackageService {
                     return out;
                 }
 
-                byte[] data = readCapped(zis, MAX_SINGLE_FILE);
+                CappedRead read = readCapped(zis, MAX_SINGLE_FILE);
+                if (read.exceeded()) {
+                    errors.add("File too large in package: " + name);
+                    return out;
+                }
+                byte[] data = read.data();
                 total += data.length;
                 if (total > MAX_TOTAL_UNCOMPRESSED) {
                     errors.add("Package expands to more than "
@@ -450,9 +461,43 @@ public class ProblemPackageService {
         return out;
     }
 
-    private static byte[] readCapped(InputStream in, long cap) throws IOException {
-        byte[] buf = in.readNBytes((int) Math.min(cap, Integer.MAX_VALUE));
-        return buf;
+    /**
+     * Reads through the limit and probes one extra byte. ZIP entries commonly
+     * report an unknown size until their data descriptor has been consumed, so
+     * trusting {@link ZipEntry#getSize()} alone is not a size boundary.
+     */
+    static CappedRead readCapped(InputStream in, long cap) throws IOException {
+        if (cap < 0 || cap >= Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("cap must be between 0 and Integer.MAX_VALUE - 1");
+        }
+        byte[] data = in.readNBytes((int) cap + 1);
+        return new CappedRead(data, data.length > cap);
+    }
+
+    static record CappedRead(byte[] data, boolean exceeded) {}
+
+    /**
+     * Canonical ZIP path used both for validation and map keys. Backslashes,
+     * repeated separators, and dot segments cannot create aliases; parent
+     * traversal and absolute paths are rejected rather than resolved.
+     */
+    private static String canonicalEntryName(String rawName) {
+        String slashName = rawName.replace('\\', '/');
+        if (slashName.startsWith("/")) {
+            return null;
+        }
+
+        List<String> segments = new ArrayList<>();
+        for (String segment : slashName.split("/", -1)) {
+            if (segment.isEmpty() || ".".equals(segment)) {
+                continue;
+            }
+            if ("..".equals(segment) || segment.indexOf('\0') >= 0) {
+                return null;
+            }
+            segments.add(segment);
+        }
+        return String.join("/", segments);
     }
 
     /**

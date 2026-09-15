@@ -137,17 +137,17 @@ The original “Bundle 1” terminology now refers only to an old vertical-slice
 
 ### Phase A — authorization and injection safety
 
-1. Replace the contest-password picker check with a server-side contest-access grant or equivalent authorization rule.
-2. Enforce contest release/access checks consistently on problem, PDF, material, clarification, submission, and standings endpoints.
-3. Remove inline JavaScript handlers from the admin console or pass untrusted values through safe DOM event binding and context-appropriate encoding.
-4. Add a restrictive, documented server-side student-ID validation policy.
-5. Apply active-session `sid` validation during WebSocket handshakes and test forced-login replacement end to end.
+1. **Completed 2026-09-15:** replace the contest-password picker check with persistent server-side contest-access grants established by `POST /api/contests/{id}/join`; the client no longer retains or retransmits plaintext.
+2. **Completed 2026-09-15:** enforce grants across contest state, problem/PDF, material, clarification, custom-run/submission, standings, and contest-topic STOMP paths; keep lobby statements and problem codes hidden. Four MySQL-backed HTTP/STOMP tests and a live bypass replay verify the boundary.
+3. **Completed 2026-09-15:** generated admin controls use delegated `data-action` event binding rather than interpolating fetched values into inline handlers; student-controlled names are hydrated with `textContent`. Static and live-browser regression checks cover the prior stored-XSS path.
+4. **Completed 2026-09-15:** registration normalizes and restricts student IDs to `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; Unicode display names are capped at 128 code points and reject control characters.
+5. **Completed 2026-09-15:** WebSocket handshakes require an active JWT `sid`; live sockets are tracked by `sid` and closed immediately on replacement or logout. A MySQL-backed HTTP/STOMP test verifies old-socket closure, REST rejection, stale reconnect rejection, and replacement-token connectivity.
 
 ### Phase B — correctness and data lifecycle
 
-1. Replace whitespace-stripping duplicate detection with exact hashing or a language-safe normalization policy.
+1. **Completed 2026-09-15:** duplicate detection uses exact source equality within the same user/problem scope. Seven tests verify exact-repeat rejection without collapsing indentation, string whitespace, token boundaries, line endings, or trailing spaces.
 2. **Completed 2026-09-15:** delete material metadata within the contest transaction and remove files after commit. MySQL regression tests verify rollback preservation and filesystem-failure handling; the live reproduction now deletes successfully. Post-commit file cleanup remains best-effort, with failures logged for manual cleanup.
-3. Harden ZIP import with an extra-byte limit probe, duplicate normalized-path rejection, entry-count limits, and tests.
+3. **Completed 2026-09-15:** ZIP import probes beyond the per-entry cap, canonicalizes paths, and rejects traversal and duplicate canonical names while retaining entry-count and aggregate-size limits. Tests cover exact-cap reads, unknown-size overflow, and path aliases.
 4. Reconcile the 64 MB multipart limit with the material service's advertised 200 MB cap.
 5. Decide and document queue capacity/backpressure behavior.
 6. Replace raw source-ban regex scanning with a safer policy or explicitly accept and test its false-positive behavior.
@@ -161,7 +161,7 @@ The original “Bundle 1” terminology now refers only to an old vertical-slice
 ### Phase D — verification
 
 1. Run all Docker-dependent tests without skips on the target server.
-2. Add integration tests for contest access, session replacement, materials, contest deletion, and admin rendering safety.
+2. Extend integration coverage beyond the now-tested session replacement, contest access, materials, contest deletion, registration policy, and admin rendering safety paths.
 3. Add TestFX coverage for login, contest picker, submit/verdict, reconnect banner, standings freeze, and PDF display.
 4. Add a 30-user load test for REST, STOMP broadcasting, and judge backlog behavior.
 5. Conduct a two-hour rehearsal with 20+ Ubuntu clients, multiple languages, at least six problems, network interruption, restart/recovery, and a frozen scoreboard.
@@ -204,7 +204,7 @@ Keep branches scoped to one behavior. Changes spanning ownership domains should 
 | Layer | Current coverage | Required next coverage |
 |---|---|---|
 | Pure judge/scoring | Exact verdict and leaderboard unit tests | Float checker, duplicate policy, source-ban edge cases |
-| Problem importer | Broad package validation tests | Unknown-size/over-cap and duplicate-path cases |
+| Problem importer | Broad package validation tests, including unknown-size/over-cap and duplicate canonical-path cases | Aggregate-limit and entry-count stress cases |
 | Docker execution | Sandbox/worker/checker tests, environment-skippable | Mandatory target-host run and long-run cleanup checks |
 | WebSocket | Server integration test, environment-skippable | Active-session invalidation and real JavaFX reconnect |
 | Services/controllers | Material/contest deletion commit and rollback tests on MySQL | Authorization matrix, material authorization, restart behavior |

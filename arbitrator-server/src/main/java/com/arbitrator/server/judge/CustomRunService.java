@@ -14,6 +14,7 @@ import com.arbitrator.common.dto.CustomRunRequest;
 import com.arbitrator.common.dto.CustomRunResultDto;
 import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.repo.ProblemRepository;
+import com.arbitrator.server.service.ContestAccessService;
 
 /**
  * Runs a student's code against input they typed themselves.
@@ -34,15 +35,17 @@ public class CustomRunService {
     private final ProblemRepository problems;
     private final SandboxExecutor sandbox;
     private final JudgeProperties props;
+    private final ContestAccessService contestAccess;
 
     public CustomRunService(ProblemRepository problems, SandboxExecutor sandbox,
-                            JudgeProperties props) {
+                            JudgeProperties props, ContestAccessService contestAccess) {
         this.problems = problems;
         this.sandbox = sandbox;
         this.props = props;
+        this.contestAccess = contestAccess;
     }
 
-    public CustomRunResultDto run(CustomRunRequest req) {
+    public CustomRunResultDto run(String username, CustomRunRequest req) {
         if (req.sourceCode() == null || req.sourceCode().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Empty source code");
         }
@@ -57,6 +60,7 @@ public class CustomRunService {
 
         Problem problem = problems.findById(req.problemId()).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
+        contestAccess.requireReleasedAccess(problem.getContestId(), username);
 
         JudgeProperties.LanguageSpec spec =
                 props.getLanguages().get(req.language().configKey());

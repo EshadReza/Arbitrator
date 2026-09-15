@@ -1,5 +1,6 @@
 package com.arbitrator.server.leaderboard;
 
+import java.security.Principal;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -24,6 +25,7 @@ import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
 import com.arbitrator.server.repo.UserRepository;
 import com.arbitrator.server.service.ContestService;
+import com.arbitrator.server.service.ContestAccessService;
 
 /**
  * REST view of the standings. The live path is the STOMP broadcast
@@ -36,6 +38,7 @@ public class LeaderboardController {
 
     private final LeaderboardService leaderboard;
     private final ContestService contestService;
+    private final ContestAccessService contestAccess;
     private final UserRepository users;
     private final ProblemRepository problems;
     private final SubmissionRepository submissions;
@@ -43,12 +46,14 @@ public class LeaderboardController {
 
     public LeaderboardController(LeaderboardService leaderboard,
                                  ContestService contestService,
+                                 ContestAccessService contestAccess,
                                  UserRepository users,
                                  ProblemRepository problems,
                                  SubmissionRepository submissions,
                                  TestCaseRepository testCases) {
         this.leaderboard = leaderboard;
         this.contestService = contestService;
+        this.contestAccess = contestAccess;
         this.users = users;
         this.problems = problems;
         this.submissions = submissions;
@@ -56,8 +61,10 @@ public class LeaderboardController {
     }
 
     @GetMapping(ApiPaths.LEADERBOARD)
-    public LeaderboardDto current() {
-        return leaderboard.current();
+    public LeaderboardDto current(Principal principal) {
+        Contest contest = contestService.requireCurrent();
+        contestAccess.requireAccess(contest.getId(), principal.getName());
+        return leaderboard.forStudents(contest);
     }
 
     /**
@@ -75,8 +82,9 @@ public class LeaderboardController {
     @GetMapping(ApiPaths.CONTEST_PARTICIPANT_PROBLEM_ATTEMPTS)
     public List<AttemptSummaryDto> attempts(@PathVariable long id,
                                             @PathVariable String username,
-                                            @PathVariable String code) {
-        Contest contest = contestService.require(id);
+                                            @PathVariable String code,
+                                            Principal principal) {
+        Contest contest = contestAccess.requireReleasedAccess(id, principal.getName());
         User user = users.findByUsername(username)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
         Problem problem = problems.findByContestIdOrderByOrderingAscCodeAsc(id).stream()

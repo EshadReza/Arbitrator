@@ -18,9 +18,10 @@ The root Maven reactor contains three modules: `arbitrator-common`, `arbitrator-
 
 ## Implemented features
 
-- Student registration, login/logout, bcrypt passwords, 12-hour JWTs, single-active-session handling, and optional MAC-address change notifications
+- Student registration with server-enforced student-ID/display-name policy, login/logout, bcrypt passwords, 12-hour JWTs, single-active-session enforcement across REST and live WebSockets, and optional MAC-address change notifications
+- One-time contest-password entry backed by persistent per-user access grants; contest REST resources and contest-topic subscriptions enforce the grant server-side, while lobby problem statements and codes remain hidden
 - Contest states `DRAFT`, `LOBBY`, `ACTIVE`, `PAUSED`, `FROZEN`, and `ENDED`, including scheduling, pause/resume, time adjustment, freeze/unfreeze, cloning, and ending
-- ZIP problem packages with HTML, text, Markdown, or PDF statements; paired test files; exact or custom checkers; editing and reordering
+- Hardened ZIP problem packages with per-entry, aggregate-size, entry-count, path-traversal, and duplicate-path guards; HTML, text, Markdown, or PDF statements; paired test files; exact or custom checkers; editing and reordering
 - C++17, Java 17, and Python 3.10 compilation and execution
 - Docker isolation for compilation, execution, and custom checkers: no network, read-only root filesystem, non-root user, capability drop, PID/CPU/memory/output limits, and temporary workspaces
 - Persist-before-queue submissions, crash recovery for pending work, per-test results, source viewing, custom runs, and verdicts `AC`, `WA`, `TLE`, `MLE`, `CE`, `RE`, and `OLE`
@@ -28,6 +29,7 @@ The root Maven reactor contains three modules: `arbitrator-common`, `arbitrator-
 - STOMP/WebSocket delivery for verdicts, contest state, standings, announcements, and participant presence
 - Participant announcements, downloadable materials, public/private clarifications, and instructor approval for public answers
 - Instructor monitoring, exports, notification feed, participant drill-downs, and test-case visibility controls
+- Injection-safe generated admin controls using delegated event binding and text-only rendering for student-controlled names
 - JavaFX drafts, file upload, syntax highlighting, automatic indentation/brackets, custom input, submission history, themes, fullscreen views, zoom, shortcuts, and reconnect watchdog
 
 Not yet implemented: float-tolerance judging, rejudge, a supported installer, Bengali localization, automated JavaFX UI tests, load tests, and a complete backup/deployment workflow.
@@ -142,7 +144,7 @@ Run the server suite with:
 mvn test -pl arbitrator-server
 ```
 
-The latest server test run on 2026-09-15 completed with 58 tests, 0 failures, 0 errors, and 0 skips, with MySQL and Docker available. This includes six regression tests for contest/material deletion and rollback safety. Database integration tests use the separate `arbitrator_test` schema. Tests can skip when external prerequisites are unavailable; a green run with skips is not equivalent to a full deployment verification.
+The latest server test run on 2026-09-15 completed with 86 tests, 0 failures, 0 errors, and 0 skips, with MySQL and Docker available. This includes six contest/material-deletion tests, four HTTP/STOMP contest-access tests, nine registration-policy tests, two admin-rendering safety tests, three active-session invalidation tests including forced-login WebSocket revocation, seven duplicate-submission policy tests, and three ZIP boundary/path-collision tests. Database integration tests use the separate `arbitrator_test` schema. Tests can skip when external prerequisites are unavailable; a green run with skips is not equivalent to a full deployment verification.
 
 The React experiment can be checked separately and is not part of Maven:
 

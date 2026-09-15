@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.ClarificationDto;
 import com.arbitrator.server.service.ClarificationService;
+import com.arbitrator.server.service.ContestAccessService;
 import com.arbitrator.server.service.ContestService;
 
 /**
@@ -27,11 +28,14 @@ public class ClarificationController {
 
     private final ClarificationService clarifications;
     private final ContestService contestService;
+    private final ContestAccessService contestAccess;
 
     public ClarificationController(ClarificationService clarifications,
-                                   ContestService contestService) {
+                                   ContestService contestService,
+                                   ContestAccessService contestAccess) {
         this.clarifications = clarifications;
         this.contestService = contestService;
+        this.contestAccess = contestAccess;
     }
 
     @GetMapping(ApiPaths.CLARIFICATIONS)
@@ -39,6 +43,7 @@ public class ClarificationController {
             @RequestParam(value = "contestId", required = false) Long contestId,
             Principal principal) {
         long target = contestId != null ? contestId : contestService.requireCurrent().getId();
+        contestAccess.requireAccess(target, principal.getName());
         // admin=false: no name attached, and private questions from anyone
         // else are left out of the list entirely, not merely unlabelled.
         return clarifications.forContest(target, false, principal.getName());
@@ -68,7 +73,8 @@ public class ClarificationController {
      * client never needs to know in advance.
      */
     @GetMapping(ApiPaths.CONTEST_CLARIFICATION_PRIVACY)
-    public Map<String, Boolean> privacyAllowed(@PathVariable long id) {
-        return Map.of("allowed", contestService.require(id).isAllowPrivateClarifications());
+    public Map<String, Boolean> privacyAllowed(@PathVariable long id, Principal principal) {
+        return Map.of("allowed", contestAccess.requireAccess(id, principal.getName())
+                .isAllowPrivateClarifications());
     }
 }
