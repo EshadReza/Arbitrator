@@ -1,9 +1,15 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.judge;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
@@ -69,47 +75,46 @@ public class CheckerRunner {
             return Verdict.RE;
         }
 
-        List<String> cmd = List.of(
-                binaryPath.toAbsolutePath().toString(),
-                inputFile.toAbsolutePath().toString(),
-                contestantOutputFile.toAbsolutePath().toString(),
-                expectedOutputFile.toAbsolutePath().toString());
-
-        // Scratch dir of the checker's own, inside the submission's work dir —
-        // never the directory holding the cached binary. That one is shared by
-        // every submission to this problem, and SandboxExecutor writes
-        // __stdout/__stderr/__metrics into whatever cwd it is handed, so with
-        // ten judge threads two submissions to the same problem would read each
-        // other's exit code. JudgeWorker's cleanup() takes this away with the
-        // rest of the submission's directory.
-        Path workDir = contestantOutputFile.toAbsolutePath().getParent().resolve("__checker");
-        Files.createDirectories(workDir);
-        SandboxExecutor.permitContainerAccess(workDir);
-        int timeLimitMs = (int) props.getCheckerTimeLimitMs();
-        int memoryLimitKb = (int) props.getCheckerMemoryLimitKb();
-
-        ExecutionResult r;
+        // Stage only the four files this invocation needs in a fresh private
+        // directory. SandboxExecutor mounts this directory alone, so neither
+        // the cached checker source/binary nor any sibling submission becomes
+        // visible inside the container.
+        Path parent = contestantOutputFile.toAbsolutePath().getParent();
+        Path workDir = Files.createTempDirectory(parent, "__checker-");
         try {
-            r = sandbox.run(workDir, cmd, inputFile, timeLimitMs, memoryLimitKb);
+            SandboxExecutor.permitContainerAccess(workDir);
+            Path stagedBinary = copyExecutable(binaryPath, workDir.resolve("checker_bin"));
+            Path stagedInput = SafeSandboxFiles.copy(inputFile, workDir.resolve("input.txt"));
+            Path stagedActual = SafeSandboxFiles.copy(contestantOutputFile, workDir.resolve("actual.txt"));
+            Path stagedExpected = SafeSandboxFiles.copy(expectedOutputFile, workDir.resolve("expected.txt"));
+
+            List<String> cmd = List.of(
+                    stagedBinary.toString(), stagedInput.toString(),
+                    stagedActual.toString(), stagedExpected.toString());
+            int timeLimitMs = (int) props.getCheckerTimeLimitMs();
+            int memoryLimitKb = (int) props.getCheckerMemoryLimitKb();
+            ExecutionResult r = sandbox.run(workDir, cmd, stagedInput, timeLimitMs, memoryLimitKb);
+
+            if (r.timedOut()) {
+                log.error("Checker execution timed out after {} ms for problem {}", timeLimitMs, problem.getId());
+                return Verdict.RE;
+            }
+
+            int exitCode = r.exitCode();
+            if (exitCode == 0) {
+                return Verdict.AC;
+            } else if (exitCode == 1 || exitCode == 2) {
+                return Verdict.WA;
+            } else {
+                log.error("Checker for problem {} failed with unmapped exit code {}: {}",
+                        problem.getId(), exitCode, r.stderr().isBlank() ? r.stdout() : r.stderr());
+                return Verdict.RE;
+            }
         } catch (Exception e) {
             log.error("Checker execution threw exception for problem {}", problem.getId(), e);
             return Verdict.RE;
-        }
-
-        if (r.timedOut()) {
-            log.error("Checker execution timed out after {} ms for problem {}", timeLimitMs, problem.getId());
-            return Verdict.RE;
-        }
-
-        int exitCode = r.exitCode();
-        if (exitCode == 0) {
-            return Verdict.AC;
-        } else if (exitCode == 1 || exitCode == 2) {
-            return Verdict.WA;
-        } else {
-            log.error("Checker for problem {} failed with unmapped exit code {}: {}",
-                    problem.getId(), exitCode, r.stderr().isBlank() ? r.stdout() : r.stderr());
-            return Verdict.RE;
+        } finally {
+            sandbox.cleanup(workDir);
         }
     }
 
@@ -125,13 +130,13 @@ public class CheckerRunner {
             Path workRoot = Path.of(props.getWorkRoot());
             Path root = workRoot.resolve("checkers");
             Files.createDirectories(root);
-            SandboxExecutor.permitContainerAccess(workRoot);
-            SandboxExecutor.permitContainerAccess(root);
+            SandboxExecutor.restrictToOwner(workRoot);
+            SandboxExecutor.restrictToOwner(root);
             tempDir = Files.createTempDirectory(root, "checker-val-");
             SandboxExecutor.permitContainerAccess(tempDir);
             Path src = tempDir.resolve("checker.cpp");
             Path exe = tempDir.resolve("checker_bin");
-            Files.writeString(src, source, StandardCharsets.UTF_8);
+            SafeSandboxFiles.writeString(src, source);
 
             List<String> compileCmd = List.of("g++", "-O2", "-std=c++17", "-o", exe.toString(), src.toString());
             ExecutionResult c = sandbox.compile(tempDir, compileCmd);
@@ -163,8 +168,8 @@ public class CheckerRunner {
         Path root = workRoot.resolve("checkers");
         try {
             Files.createDirectories(root);
-            SandboxExecutor.permitContainerAccess(workRoot);
-            SandboxExecutor.permitContainerAccess(root);
+            SandboxExecutor.restrictToOwner(workRoot);
+            SandboxExecutor.restrictToOwner(root);
             Path problemDir = (problemId != null)
                     ? root.resolve("problem-" + problemId)
                     : Files.createTempDirectory(root, "checker-compile-");
@@ -173,7 +178,7 @@ public class CheckerRunner {
 
             Path src = problemDir.resolve("checker.cpp");
             Path exe = problemDir.resolve("checker_bin");
-            Files.writeString(src, source, StandardCharsets.UTF_8);
+            SafeSandboxFiles.writeString(src, source);
 
             List<String> compileCmd = List.of("g++", "-O2", "-std=c++17", "-o", exe.toString(), src.toString());
             ExecutionResult c = sandbox.compile(problemDir, compileCmd);
@@ -211,5 +216,16 @@ public class CheckerRunner {
         } catch (NoSuchAlgorithmException e) {
             return String.valueOf(source.hashCode());
         }
+    }
+
+    private static Path copyExecutable(Path source, Path target) throws IOException {
+        SafeSandboxFiles.copy(source, target);
+        try {
+            Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rwxr-xr-x"));
+        } catch (UnsupportedOperationException ignored) {
+            // Docker Desktop preserves executable files copied from its Linux VM.
+            target.toFile().setExecutable(true, false);
+        }
+        return target;
     }
 }

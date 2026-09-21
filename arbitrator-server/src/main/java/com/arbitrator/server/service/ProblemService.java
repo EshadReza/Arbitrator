@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.service;
 
 import java.util.List;
@@ -14,6 +19,7 @@ import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.Submission;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
+import com.arbitrator.server.security.RichTextSanitizer;
 
 @Service
 public class ProblemService {
@@ -66,7 +72,8 @@ public class ProblemService {
     public ProblemDetailDto detail(long problemId) {
         Problem p = require(problemId);
         return new ProblemDetailDto(p.getId(), p.getCode(), p.getTitle(),
-                p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb(),
+                RichTextSanitizer.sanitize(p.getStatementHtml()),
+                p.getTimeLimitMs(), p.getMemoryLimitKb(),
                 p.isStatementIsPdf());
     }
 

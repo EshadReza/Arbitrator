@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -203,7 +208,7 @@ class ContestAccessIntegrationTest {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         String username = "gate_" + suffix;
         LoginResponse student = rest.postForObject(base() + ApiPaths.AUTH_REGISTER,
-                new LoginRequest(username, "Gate Test", "password123"), LoginResponse.class);
+                new LoginRequest(username, "Gate Test", "Orbit7!Lake"), LoginResponse.class);
         User user = users.findByUsername(username).orElseThrow();
         userIds.add(user.getId());
 

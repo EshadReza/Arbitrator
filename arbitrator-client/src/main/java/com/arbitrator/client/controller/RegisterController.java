@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.client.controller;
 
 import java.util.regex.Pattern;
@@ -5,6 +10,7 @@ import java.util.regex.Pattern;
 import com.arbitrator.client.app.AppState;
 import com.arbitrator.client.app.SceneRouter;
 import com.arbitrator.common.dto.LoginResponse;
+import com.arbitrator.common.security.AccountPasswordPolicy;
 
 import javafx.application.Platform;
 import javafx.fxml.FXML;
@@ -15,7 +21,7 @@ import javafx.scene.control.TextField;
 
 /**
  * FR-01 registration (EARS: unique username + password of at least eight
- * characters -> 201 Created). The account is always a STUDENT; admins are
+ * characters, without whitespace/common choices -> 201 Created). The account is always a STUDENT; admins are
  * provisioned server-side, so nobody can self-register into contest control.
  *
  * The server validates all of this too — these checks exist to give an
@@ -23,7 +29,6 @@ import javafx.scene.control.TextField;
  */
 public class RegisterController {
 
-    private static final int MIN_PASSWORD_LENGTH = 8;
     private static final int MAX_DISPLAY_NAME_LENGTH = 128;
     private static final Pattern STUDENT_ID_PATTERN =
             Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
@@ -76,8 +81,9 @@ public class RegisterController {
             showError(SceneRouter.bundle().getString("register.error.display.invalid"));
             return;
         }
-        if (password.length() < MIN_PASSWORD_LENGTH) {
-            showError(SceneRouter.bundle().getString("register.error.password.short"));
+        String passwordError = AccountPasswordPolicy.validationError(password);
+        if (passwordError != null) {
+            showError(passwordError);
             return;
         }
         if (!password.equals(confirm)) {

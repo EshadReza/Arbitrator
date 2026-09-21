@@ -1,6 +1,12 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.judge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -95,6 +101,10 @@ class CheckerRunnerTest {
         assertEquals(Verdict.AC, checkerRunner.check(p, in, out1, exp));
         assertEquals(Verdict.AC, checkerRunner.check(p, in, out2, exp));
         assertEquals(Verdict.WA, checkerRunner.check(p, in, out3, exp));
+        try (var files = Files.list(workDir)) {
+            assertFalse(files.anyMatch(path -> path.getFileName().toString().startsWith("__checker-")),
+                    "per-invocation checker staging directories must be removed immediately");
+        }
     }
 
     @Test

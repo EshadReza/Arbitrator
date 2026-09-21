@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.entity;
 
 import org.hibernate.annotations.JdbcTypeCode;
@@ -13,6 +18,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 @Entity
 @Table(name = "problems")
@@ -21,6 +27,10 @@ public class Problem {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "contest_id", nullable = false)
     private Long contestId;
@@ -143,4 +153,3 @@ public class Problem {
         this.checkerSource = checkerSource;
     }
 }
-

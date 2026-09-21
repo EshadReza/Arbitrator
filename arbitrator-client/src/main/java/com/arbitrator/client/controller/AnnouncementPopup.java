@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.client.controller;
 
 import java.time.Instant;
@@ -82,6 +87,7 @@ public final class AnnouncementPopup {
 
         String bg = dark ? "#232a36" : "#ffffff";
         WebView body = new WebView();
+        body.getEngine().setJavaScriptEnabled(false);
         body.setPrefHeight(190);
         // Belt-and-suspenders: an inline -fx-background-color paints from the
         // node's very first frame, so there's no gap between this WebView

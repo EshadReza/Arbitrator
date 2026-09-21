@@ -13,6 +13,5 @@ arbitrator:
     # this stays at the default "docker", so this override is no longer
     # required, but it's left here since it's harmless and one line faster.
     docker-binary: /usr/local/bin/docker
-    # Production default is 10s (application.yml); 0 here so rapid manual
-    # testing against a locally-run server isn't rate-limited.
-    submit-cooldown-seconds: 0
+    # Keep the production cooldown active locally; tests explicitly override it in their test profile.
+    submit-cooldown-seconds: 10

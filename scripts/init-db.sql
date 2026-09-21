@@ -1,3 +1,5 @@
+-- Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+-- All rights reserved.
 -- One-time local setup, per developer (rules.md Rule 6):
 --   sudo mysql < scripts/init-db.sql
 -- Then put YOUR chosen password in application-local.yml (git-ignored).

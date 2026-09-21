@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+  All rights reserved.
+-->
+
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -38,6 +43,7 @@
     <!-- Rasterises PDF statements in the client (FR-05). Pure Java, no native
          bits, so it works on every lab machine and needs no install step. -->
     <pdfbox.version>3.0.3</pdfbox.version>
+    <jsoup.version>1.23.2</jsoup.version>
   </properties>
 
   <dependencyManagement>
@@ -86,6 +92,11 @@
         <groupId>io.jsonwebtoken</groupId>
         <artifactId>jjwt-jackson</artifactId>
         <version>${jjwt.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jsoup</groupId>
+        <artifactId>jsoup</artifactId>
+        <version>${jsoup.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

@@ -1,3 +1,5 @@
+-- Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+-- All rights reserved.
 -- DEVELOPMENT ONLY. Wipes all submissions so you can test from a clean slate.
 --
 --   mysql -u root arbitrator < scripts/reset-dev-data.sql

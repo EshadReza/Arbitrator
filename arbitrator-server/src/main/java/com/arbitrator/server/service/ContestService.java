@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.service;
 
 import java.time.Instant;
@@ -13,6 +18,7 @@ import com.arbitrator.common.dto.ContestStateDto;
 import com.arbitrator.common.enums.ContestState;
 import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.repo.ContestRepository;
+import com.arbitrator.server.security.PasswordLengthPolicy;
 
 @Service
 public class ContestService {
@@ -88,6 +94,11 @@ public class ContestService {
      * a bare "not accepting submissions" is impossible to act on.
      */
     public void assertAcceptingSubmissions(Contest c) {
+        assertAcceptingSubmissions(c, Instant.now());
+    }
+
+    /** Trusted server admission instant, also persisted as the submission time. */
+    public void assertAcceptingSubmissions(Contest c, Instant admittedAt) {
         if (c.getState() == ContestState.PAUSED) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest is paused — wait for the instructor to resume it");
@@ -96,15 +107,16 @@ public class ContestService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Contest is " + c.getState() + " and is not accepting submissions");
         }
-        if (c.getStartTime() == null || Instant.now().isBefore(c.getStartTime())) {
+        if (c.getStartTime() == null || admittedAt.isBefore(c.getStartTime())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest has not started yet");
         }
-        if (c.endTime() == null) {
+        Instant end = c.endTime();
+        if (end == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest has not started yet");
         }
-        if (!Instant.now().isBefore(c.endTime())) {
+        if (!admittedAt.isBefore(end)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The contest has ended");
         }
@@ -122,6 +134,7 @@ public class ContestService {
      * bcrypt hash is ever persisted (see {@link Contest#passwordHash}).
      */
     public Contest create(String title, int durationMinutes, String password) {
+        PasswordLengthPolicy.requireWithinBcryptLimit(password);
         Contest c = new Contest();
         c.setTitle(title);
         c.setDurationMinutes(durationMinutes);
@@ -139,6 +152,7 @@ public class ContestService {
      * client-side "I have the password" flag.
      */
     public boolean verifyPassword(Contest c, String suppliedPassword) {
+        PasswordLengthPolicy.requireWithinBcryptLimit(suppliedPassword);
         if (!c.hasPassword()) {
             return true;
         }

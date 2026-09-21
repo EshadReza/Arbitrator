@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,6 +39,15 @@ class AdminRenderingSafetyTest {
         assertTrue(html.contains("el.textContent=grouped[Number(el.dataset.notifName)]"));
         assertFalse(html.contains("cloneContest(${c.id},'${esc(c.title)}')"));
         assertFalse(html.contains("openUserNotifHistory('${esc(n.username)}')"));
+    }
+
+    @Test
+    void richHtmlPreviewsCannotExecuteBeforeServerSanitization() throws IOException {
+        String html = adminHtml();
+
+        assertTrue(html.contains("<iframe id=\"pvStatement\" sandbox=\"\""));
+        assertTrue(html.contains("$('annPreview').textContent = source"));
+        assertFalse(html.contains("$('annPreview').innerHTML = $('annBody').value"));
     }
 
     private static String adminHtml() throws IOException {

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+# All rights reserved.
 """
 Prepares zero-download standalone distribution packages for Admin PC and Participant PCs.
 Usage:

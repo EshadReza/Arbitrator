@@ -1,5 +1,6 @@
-# FR-21: per-language compile/run commands. Adding a language = adding a block
-# here + an enum constant in arbitrator-common; no judge-engine code changes.
+# FR-21: per-language compile/run commands. LanguageCommandPolicy validates
+# these at startup against an executable/option allowlist. Adding a language
+# therefore also requires an explicit policy entry in the judge engine.
 # Owner: Mahir (rules.md Rule 1).
 #
 # Placeholders:
@@ -11,11 +12,8 @@ arbitrator:
     languages:
       cpp17:
         source-file: main.cpp
-        # No -static: the sandbox's isolation comes from unshare/prlimit/fsize,
-        # not static linking, and -static fails outright on macOS dev machines
-        # (no static libc — "ld: library 'crt0.o' not found"). Dynamic linking
-        # works fine inside the Linux sandbox too, since unshare -Urn doesn't
-        # hide the filesystem, only the network namespace.
+        # Dynamic linking is safe because both compilation and execution occur
+        # in the pinned Docker image. The runtime root and workspace are read-only.
         compile: "g++ -O2 -std=c++17 -o {exe} {src}"
         run: "{exe}"
       java17:

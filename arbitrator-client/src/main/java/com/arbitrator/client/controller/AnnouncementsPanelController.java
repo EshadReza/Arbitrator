@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.client.controller;
 
 import java.time.Instant;
@@ -67,6 +72,7 @@ public class AnnouncementsPanelController {
         boolean dark = state.darkMode();
         String bg = dark ? "#1c222c" : "#ffffff";
         WebView body = new WebView();
+        body.getEngine().setJavaScriptEnabled(false);
         body.setPrefHeight(120);
         // Belt-and-suspenders: setPageFill only paints once the engine has a
         // page to lay out, and the node's own background can otherwise show

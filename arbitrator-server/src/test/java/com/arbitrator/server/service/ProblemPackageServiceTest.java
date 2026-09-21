@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +47,7 @@ class ProblemPackageServiceTest {
     private RecordingJdbc recordingJdbc;
     private List<TestCase> savedTests;
     private List<Problem> existingProblems;
+    private Problem savedProblem;
 
     @BeforeEach
     void setUp() {
@@ -53,6 +59,7 @@ class ProblemPackageServiceTest {
             case "findByContestIdOrderByOrderingAscCodeAsc" -> List.copyOf(existingProblems);
             case "save" -> {
                 Problem p = (Problem) args[0];
+                savedProblem = p;
                 setId(p, ids.incrementAndGet());
                 yield p;
             }
@@ -344,6 +351,26 @@ class ProblemPackageServiceTest {
     }
 
     // --- helpers --------------------------------------------------------
+
+    @Test
+    void importedStatementIsSanitizedBeforePersistence() {
+        Map<String, String> files = baseFiles();
+        files.put("statement/statement.html",
+                "<script>alert(1)</script><p onclick=\"alert(2)\">n &le; 10<sup>9</sup></p>");
+
+        assertTrue(service.importPackage(zip(files)).accepted());
+        assertFalse(savedProblem.getStatementHtml().contains("script"));
+        assertFalse(savedProblem.getStatementHtml().contains("onclick"));
+        assertTrue(savedProblem.getStatementHtml().contains("<sup>9</sup>"));
+    }
+
+    @Test
+    void statementContainingOnlyActiveContentIsRejected() {
+        Map<String, String> files = baseFiles();
+        files.put("statement/statement.html", "<script>alert(1)</script>");
+
+        assertFalse(service.importPackage(zip(files)).accepted());
+    }
 
     private static final String CONFIG = """
             {"code":"A","title":"Two Sum","timeLimitMs":2000,"memoryLimitKb":262144}""";

@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
 // Infinite loop: the sandbox must terminate it at 2x the time limit
 // (Gherkin scenario 2, NFR-R04).
 #include <iostream>

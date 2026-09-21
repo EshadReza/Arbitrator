@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.client.controller;
 
 import java.util.HashMap;
@@ -28,6 +33,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -155,6 +161,7 @@ public class MainController {
 
         // A WebView paints its own opaque white backdrop behind the page, so a
         // dark statement needs the fill changed too — page CSS alone can't fix it.
+        statementView.getEngine().setJavaScriptEnabled(false);
         applyWebViewFill();
         editorPanelController.setSubmitHandler(this::submit);
         editorPanelController.setFullscreenHandler(this::toggleEditorFullscreen);
@@ -456,21 +463,30 @@ public class MainController {
         // thread, in that order, keeps the sequence deterministic instead of
         // racing a local socket close against a LAN round trip — and keeps a
         // slow/dead network from stalling the sign-out the user already asked
-        // for; logout() failing is a lost nicety, not a reason to stay signed in.
+        // for. Failed server revocation is reported explicitly after local sign-out.
         JudgeApi api = state.api();
         Thread worker = new Thread(() -> {
+            boolean confirmed = true;
             try {
                 api.logout();
             } catch (ApiException ignored) {
-                // Best-effort — see JudgeApi.logout()'s javadoc. PresenceTracker's
-                // own grace-period fallback still catches this via the socket
-                // close below, just without the immediacy.
+                confirmed = false;
             }
             api.dropConnection();
+            final boolean serverLogoutConfirmed = confirmed;
             Platform.runLater(() -> {
                 state.setSession(null);
                 state.setContestCleared();
                 SceneRouter.showLogin();
+                if (!serverLogoutConfirmed) {
+                    Alert warning = new Alert(Alert.AlertType.WARNING);
+                    warning.setTitle("Server logout not confirmed");
+                    warning.setHeaderText("You signed out on this device only");
+                    warning.setContentText("The server could not confirm logout. A copied token may still work "
+                            + "until it expires or you sign in again with replacement login. "
+                            + "Reconnect and sign in again to replace the old session.");
+                    warning.showAndWait();
+                }
             });
         }, "sign-out");
         worker.setDaemon(true);

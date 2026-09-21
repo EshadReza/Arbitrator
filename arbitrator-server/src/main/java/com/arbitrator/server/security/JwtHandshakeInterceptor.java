@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.security;
 
 import java.util.Map;
@@ -10,6 +15,7 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import io.jsonwebtoken.Claims;
+import com.arbitrator.server.repo.UserRepository;
 
 /**
  * Authenticates the WebSocket handshake (FR-15 prerequisite).
@@ -27,10 +33,12 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
     private final JwtService jwtService;
     private final ActiveSessionRegistry sessions;
+    private final UserRepository users;
 
-    public JwtHandshakeInterceptor(JwtService jwtService, ActiveSessionRegistry sessions) {
+    public JwtHandshakeInterceptor(JwtService jwtService, ActiveSessionRegistry sessions, UserRepository users) {
         this.jwtService = jwtService;
         this.sessions = sessions;
+        this.users = users;
     }
 
     @Override
@@ -51,6 +59,11 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
         String username = claims.getSubject();
         String sid = claims.get("sid", String.class);
         if (username == null || sid == null || !sessions.isActive(username, sid)) {
+            response.setStatusCode(HttpStatus.UNAUTHORIZED);
+            return false;
+        }
+        if (!sessions.validateRole(username, sid,
+                users.findByUsername(username).map(user -> user.getRole()).orElse(null))) {
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
             return false;
         }

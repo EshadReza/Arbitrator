@@ -109,6 +109,7 @@ code,pre,.addr,.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,mo
          background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:13px}
 .nav.on .ic{background:rgba(255,255,255,.22)}
 .side-foot{margin-top:auto;padding:10px;color:var(--muted);font-size:11px;line-height:1.5}
+.side-foot #adminSignOut{display:block;width:100%;margin-top:16px;padding:9px 12px}
 
 /* min-width:0 overrides the grid item's default min-width:auto — without it,
    a wide table (e.g. Standings, All contests) forces this whole 1fr track to
@@ -702,6 +703,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
       <div><span class="dot on"></span> <span id="onlineCount">0</span> online</div>
       <div style="margin-top:6px" id="whoami"></div>
       <div style="margin-top:6px" id="sideAddress"></div>
+      <button class="btn sm danger" id="adminSignOut" type="button">Sign out</button>
     </div>
   </aside>
 
@@ -999,7 +1001,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
             <code>&amp;infin;</code> &infin; <code>&amp;alpha;</code> &alpha;.
           </p>
           <div>
-            <div class="hint" style="font-weight:600;margin-bottom:6px">Preview</div>
+            <div class="hint" style="font-weight:600;margin-bottom:6px">Safe HTML source preview</div>
             <div id="annPreview" style="border:1px solid var(--border);border-radius:8px;
                                         padding:11px;background:var(--surface2);min-height:44px"></div>
           </div>
@@ -1265,7 +1267,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
       <button class="btn sm" onclick="closeModal('problemViewModal')">Close</button></header>
     <div class="body">
       <div class="hint" style="margin-bottom:5px;flex:none">Statement, rendered exactly as the client shows it</div>
-      <iframe id="pvStatement" style="width:100%;border:1px solid var(--border);
+      <iframe id="pvStatement" sandbox="" style="width:100%;border:1px solid var(--border);
               border-radius:8px;background:#fff"></iframe>
       <div class="row" id="pvTestToggle" onclick="toggleProblemViewTests()"
            style="cursor:pointer;user-select:none;flex:none;margin:12px 0 0;gap:6px">
@@ -1470,6 +1472,10 @@ async function api(method,path,params,quiet){
   const res=await fetch(url,{method,headers:token?{Authorization:'Bearer '+token}:{}});
   const text=await res.text(); let body;
   try{body=JSON.parse(text)}catch{body=text}
+  if(res.status===401&&token){
+    token=null; alert('Your session ended. Please sign in again.'); window.location.reload();
+    return {status:res.status,body};
+  }
   // An export fetches once per participant. Logging each one would bury
   // whatever the instructor was actually watching in the activity panel.
   if(!quiet) log(res.status,body);
@@ -1530,6 +1536,33 @@ async function login(force){
     if(selected!=null && !$('sec-dashboard').classList.contains('hide')) loadDashboard();
   },8000);
 }
+
+async function adminSignOut(){
+  const btn=$('adminSignOut'); btn.disabled=true;
+  let confirmed=false;
+  try{
+    const res=await fetch('/api/auth/logout', {method:'POST',
+      headers:token?{Authorization:'Bearer '+token}:{}});
+    confirmed=res.ok||res.status===401;
+  }catch{}
+  token=null;
+  if(!confirmed) alert('Signed out on this device only. Server logout was not confirmed. '
+    +'A copied token may still work until expiry or replacement login. Reconnect and sign in again to replace it.');
+  // Reload discards pending polls, sensitive DOM content, and in-memory credentials.
+  window.location.reload();
+}
+$('adminSignOut').addEventListener('click',adminSignOut);
+let lastAdminActivity=0;
+async function recordAdminActivity(){
+  if(!token||Date.now()-lastAdminActivity<30000) return;
+  lastAdminActivity=Date.now();
+  try{
+    const res=await fetch('/api/auth/activity',{method:'POST',headers:{Authorization:'Bearer '+token}});
+    if(res.status===401&&token){token=null;alert('Your session ended. Please sign in again.');window.location.reload();}
+  }catch{} // Network failure cannot extend server-side idle time.
+}
+document.addEventListener('pointerdown',recordAdminActivity);
+document.addEventListener('keydown',recordAdminActivity);
 
 /* ── notifications: disconnect / reconnect ─────────────────────────────────
    One entry each, raised by the server exactly once per genuine state
@@ -2574,10 +2607,11 @@ async function copyAddress(){
 
 /* \u2500\u2500 announcements (FR-07) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
 
-/* The preview is the whole safety net for HTML-as-math: the instructor sees
-   exactly what the room will see before it is published and cannot be recalled. */
+/* Never execute text before the server-side sanitizer has inspected it. The
+   published list below renders only the sanitized body returned by the API. */
 function renderAnnouncementPreview(){
-  $('annPreview').innerHTML = $('annBody').value || '<span class="hint">Nothing yet.</span>';
+  const source=$('annBody').value;
+  $('annPreview').textContent = source || 'Nothing yet.';
 }
 
 async function publishAnnouncement(){

@@ -1,8 +1,14 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -224,7 +230,7 @@ class VerdictPushIntegrationTest {
     @DisplayName("forced login closes the old socket and rejects its token")
     void forcedLoginInvalidatesExistingAndFutureWebSockets() throws Exception {
         String username = "ws_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-        String password = "password1";
+        String password = "Orbit7!Lake";
         disposableUsers.add(username);
         LoginResponse first = register(username, password);
 
@@ -265,6 +271,44 @@ class VerdictPushIntegrationTest {
             oldClient.stop();
             staleReconnectClient.stop();
             replacementClient.stop();
+        }
+    }
+
+    @Test
+    @DisplayName("logout revokes copied tokens, closes sockets, and permits a fresh login")
+    void logoutInvalidatesExistingAndFutureWebSockets() throws Exception {
+        String username = "logout_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        disposableUsers.add(username);
+        LoginResponse first = register(username, "Orbit7!Lake");
+        WebSocketStompClient oldClient = stompClient();
+        WebSocketStompClient reconnect = stompClient();
+        WebSocketStompClient freshClient = stompClient();
+        DisconnectHandler handler = new DisconnectHandler();
+        StompSession freshSession = null;
+        try {
+            StompSession oldSession = connect(oldClient, first.token(), handler);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(first.token());
+            assertTrue(rest.exchange(base() + ApiPaths.AUTH_LOGOUT, HttpMethod.POST,
+                    new HttpEntity<>(headers), Void.class).getStatusCode().is2xxSuccessful());
+            assertTrue(handler.disconnected.await(5, TimeUnit.SECONDS));
+            assertFalse(oldSession.isConnected());
+            HttpClientErrorException copied = assertThrows(HttpClientErrorException.class,
+                    () -> rest.exchange(base() + ApiPaths.CONTESTS, HttpMethod.GET,
+                            new HttpEntity<>(headers), String.class));
+            assertEquals(HttpStatus.UNAUTHORIZED, copied.getStatusCode());
+            assertThrows(Exception.class,
+                    () -> connect(reconnect, first.token(), new StompSessionHandlerAdapter() { }));
+            LoginResponse fresh = login(username, "Orbit7!Lake");
+            assertNotEquals(first.token(), fresh.token());
+            freshSession = connect(freshClient, fresh.token(), new StompSessionHandlerAdapter() { });
+            assertTrue(freshSession.isConnected());
+            assertThrows(HttpClientErrorException.class,
+                    () -> rest.exchange(base() + ApiPaths.CONTESTS, HttpMethod.GET,
+                            new HttpEntity<>(headers), String.class));
+        } finally {
+            if (freshSession != null && freshSession.isConnected()) freshSession.disconnect();
+            oldClient.stop(); reconnect.stop(); freshClient.stop();
         }
     }
 

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.config;
 
 import org.springframework.context.annotation.Bean;
@@ -11,6 +16,10 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import com.arbitrator.server.security.ApiRateLimiter;
+import com.arbitrator.server.security.ApiRateLimitFilter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.arbitrator.server.security.JwtAuthFilter;
 
@@ -37,7 +46,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, ApiRateLimiter limiter, ObjectMapper json) throws Exception {
         http
             .csrf(csrf -> csrf.disable())   // stateless JWT, no cookies
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -50,7 +59,8 @@ public class SecurityConfig {
                     .requestMatchers("/ws/**").permitAll()      // gated by JwtHandshakeInterceptor
                     .requestMatchers("/api/**").authenticated()
                     .anyRequest().permitAll())
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(new ApiRateLimitFilter(limiter, json, true), AuthorizationFilter.class);
         return http.build();
     }
 }

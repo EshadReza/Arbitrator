@@ -1,7 +1,13 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,12 +56,15 @@ public class SubmissionService {
     private final TestCaseRepository testCases;
     private final JdbcTemplate jdbc;
     private final Duration cooldown;
+    private final int maxSourceBytes;
 
     /** Per-field cap on disclosed test data; a test file can be megabytes. */
     private static final int MAX_TEST_DATA_CHARS = 4096;
 
     /** userId -> last accepted submission instant (BR-01). */
     private final Map<Long, Instant> lastSubmit = new ConcurrentHashMap<>();
+    /** Fixed stripes bound memory and serialize cooldown/backlog/persist admission for each user. */
+    private final Object[] submitLocks = java.util.stream.Stream.generate(Object::new).limit(64).toArray();
 
     /**
      * Queue-flooding guard (hysteresis, not a hard per-user cap): once a
@@ -95,6 +104,7 @@ public class SubmissionService {
         this.testCases = testCases;
         this.jdbc = jdbc;
         this.cooldown = Duration.ofSeconds(props.getSubmitCooldownSeconds());
+        this.maxSourceBytes = props.getMaxSourceBytes();
     }
 
     public SubmitAckDto submit(String username, SubmitRequest req, String workstationIp) {
@@ -104,8 +114,15 @@ public class SubmissionService {
         if (req.language() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Language is required");
         }
+        requireSourceWithinLimit(req.sourceCode());
 
         User user = userService.requireByUsername(username);
+        synchronized (submitLocks[Math.floorMod(user.getId().hashCode(), submitLocks.length)]) {
+            return submitForUser(username, user, req, workstationIp);
+        }
+    }
+
+    private SubmitAckDto submitForUser(String username, User user, SubmitRequest req, String workstationIp) {
 
         // BR-01: at most one submission per cooldown window -> 429 (UC-04 exception)
         Instant last = lastSubmit.get(user.getId());
@@ -145,7 +162,9 @@ public class SubmissionService {
         contestAccess.requireReleasedAccess(contest.getId(), username);
 
         // BR-02: the server clock decides whether that contest is still open.
-        contestService.assertAcceptingSubmissions(contest);
+        // Match MySQL TIMESTAMP(6) precision before validation and storage.
+        Instant admittedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        contestService.assertAcceptingSubmissions(contest, admittedAt);
 
         // A contestant resubmitting the same code for the same problem gains
         // nothing (the verdict cannot change) and only spends a slot in the
@@ -159,20 +178,39 @@ public class SubmissionService {
                     "You already submitted this exact code for this problem");
         }
 
-        Submission sub = new Submission();
-        sub.setUserId(user.getId());
-        sub.setProblemId(problem.getId());
-        sub.setContestId(contest.getId());
-        sub.setLanguage(req.language());
-        sub.setSourceCode(req.sourceCode());
-        sub.setWorkstationIp(workstationIp);          // NFR-C02
-        sub.setQueuedAt(Instant.now());
-        submissions.save(sub);                        // persist FIRST (FMEA-01)
+        if (!queue.tryReserve()) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "The judge backlog is full; try again after some submissions finish");
+        }
+        boolean enqueued = false;
+        try {
+            Submission sub = new Submission();
+            sub.setUserId(user.getId());
+            sub.setProblemId(problem.getId());
+            sub.setContestId(contest.getId());
+            sub.setLanguage(req.language());
+            sub.setSourceCode(req.sourceCode());
+            sub.setWorkstationIp(workstationIp);          // NFR-C02
+            sub.setQueuedAt(admittedAt);
+            submissions.save(sub);                        // persist FIRST (FMEA-01)
 
-        lastSubmit.put(user.getId(), Instant.now());
-        int position = queue.enqueue(sub.getId());
+            enqueued = true;
+            int position = queue.enqueueReserved(sub.getId());
+            lastSubmit.put(user.getId(), Instant.now());
+            return new SubmitAckDto(sub.getId(), position);
+        } finally {
+            if (!enqueued) {
+                queue.releaseReservation();
+            }
+        }
+    }
 
-        return new SubmitAckDto(sub.getId(), position);
+    private void requireSourceWithinLimit(String source) {
+        int cap = maxSourceBytes;
+        if (source.length() > cap || source.getBytes(StandardCharsets.UTF_8).length > cap) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
+                    "Source code is limited to " + cap + " UTF-8 bytes");
+        }
     }
 
     /**

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+# Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+# All rights reserved.
 # scripts/docker/build-sandbox-image.sh — owner: Mahir (rules.md Rule 1)
 #
 # Builds the judge's sandbox image. Run once per machine (and again whenever

@@ -31,6 +31,7 @@ spring:
       max-request-size: 64MB
 
 server:
+  forward-headers-strategy: none # Login IP limits use the socket peer, never untrusted forwarded headers.
   port: 8080                   # §3.3.4; HTTP only for v1.0 (decision D4)
   error:
     # Without this Spring returns a bare {"error":"Forbidden"} and every
@@ -40,16 +41,46 @@ server:
     include-message: always
 
 arbitrator:
+  api-rate-limit:
+    window-seconds: 60
+    max-keys: 20000
+    account-total: 1200
+    ip-total: 12000 # Headroom for polling from many students behind one lab address.
+    account: {read: 600, write: 120, join: 10, run: 12, submit: 6, clarification: 5}
+    ip: {read: 12000, write: 2400, registration: 30, login: 600, join: 240, run: 240, submit: 240, clarification: 120}
+  auth:
+    login:
+      account-attempts: 20
+      ip-attempts: 120 # Shared lab IPs need more headroom than individual accounts.
+      account-failures: 5
+      ip-failures: 20
+      account-concurrent: 2
+      ip-concurrent: 16
+      window-seconds: 60
+      base-cooldown-seconds: 5
+      max-cooldown-seconds: 300
+      max-keys: 10000
   jwt:
-    # NFR-S07: >= 256-bit secret from environment. The default below is for
-    # local development ONLY and must be overridden in any shared deployment.
-    secret: ${ARBITRATOR_JWT_SECRET:dev-only-secret-change-me-0123456789abcdef0123456789abcdef}
+    # Optional override; absent/blank generates a private in-memory key per startup.
+    secret: ${ARBITRATOR_JWT_SECRET:}
     expiry-hours: 12
+  session:
+    admin-idle-minutes: 30
+    student-idle-minutes: 0  # Disabled during long coding sessions; absolute JWT expiry still applies.
+    sweep-millis: 15000
   judge:
     threads: 10                # NFR-P04: >= 10 parallel judging jobs
+    max-backlog: ${ARBITRATOR_JUDGE_MAX_BACKLOG:500}
+    max-active-containers: ${ARBITRATOR_JUDGE_MAX_CONTAINERS:10}
+    # 0 = automatically reserve at most 70% of physical RAM across all
+    # simultaneous compiler, checker, submission, and custom-run containers.
+    max-total-memory-mb: ${ARBITRATOR_JUDGE_MEMORY_BUDGET_MB:0}
+    max-custom-runs: ${ARBITRATOR_MAX_CUSTOM_RUNS:2}
+    max-source-bytes: ${ARBITRATOR_MAX_SOURCE_BYTES:262144}
     # Every compile and every test run happens inside a container built from
     # this image (scripts/docker/build-sandbox-image.sh) — no participant
-    # code ever runs directly on this machine. See SandboxExecutor.
+    # code ever runs directly on this machine. At startup the tag is resolved
+    # once to an immutable sha256 image ID used for every subsequent run.
     docker-binary: ${ARBITRATOR_DOCKER_BIN:docker}
     docker-image: ${ARBITRATOR_DOCKER_IMAGE:arbitrator-judge:latest}
     work-root: ${java.io.tmpdir}/arbitrator

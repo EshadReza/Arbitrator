@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+# All rights reserved.
 """Packs the labjudge tree into one self-extracting text file.
 
 Usage:  python3 scripts/make-bundle.py

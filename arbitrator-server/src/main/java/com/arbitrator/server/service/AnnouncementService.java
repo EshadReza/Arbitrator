@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.service;
 
 import java.time.Instant;
@@ -14,6 +19,7 @@ import com.arbitrator.common.api.StompDestinations;
 import com.arbitrator.common.dto.AnnouncementDto;
 import com.arbitrator.server.entity.Announcement;
 import com.arbitrator.server.repo.AnnouncementRepository;
+import com.arbitrator.server.security.RichTextSanitizer;
 
 /**
  * FR-07: instructor announcements.
@@ -55,11 +61,16 @@ public class AnnouncementService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "An announcement is limited to " + MAX_BODY_CHARS + " characters");
         }
+        String safeBody = RichTextSanitizer.sanitize(body);
+        if (safeBody == null || safeBody.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "The announcement contains no permitted content");
+        }
         contestService.require(contestId);      // 404 rather than an orphan row
 
         Announcement a = new Announcement();
         a.setContestId(contestId);
-        a.setBody(body.trim());
+        a.setBody(safeBody.trim());
         a.setCreatedAt(Instant.now());
         announcements.save(a);
 
@@ -87,7 +98,10 @@ public class AnnouncementService {
     }
 
     private static AnnouncementDto toDto(Announcement a) {
-        return new AnnouncementDto(a.getId(), a.getContestId(), a.getBody(),
+        // Clean on read as well so rows created by an older build cannot run
+        // active content after this version is deployed.
+        return new AnnouncementDto(a.getId(), a.getContestId(),
+                RichTextSanitizer.sanitize(a.getBody()),
                 a.getCreatedAt().toEpochMilli());
     }
 }

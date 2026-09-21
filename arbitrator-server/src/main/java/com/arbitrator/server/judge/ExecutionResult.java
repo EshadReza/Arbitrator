@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.judge;
 
 /**
@@ -11,7 +16,8 @@ public record ExecutionResult(
         String stderr,
         long wallTimeMs,
         long peakMemoryKb,
-        boolean timedOut
+        boolean timedOut,
+        boolean outputLimitExceeded
 ) {
 
     public boolean ok() {

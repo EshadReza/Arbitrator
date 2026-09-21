@@ -1,11 +1,14 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.judge;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -126,11 +129,12 @@ public class JudgeWorker {
 
         Path src = workDir.resolve(spec.getSourceFile());
         Path exe = workDir.resolve("prog");
-        Files.writeString(src, sub.getSourceCode(), StandardCharsets.UTF_8);
+        SafeSandboxFiles.writeString(src, sub.getSourceCode());
 
         // --- compile (skipped for interpreted languages) ---
         if (spec.getCompile() != null && !spec.getCompile().isBlank()) {
-            ExecutionResult c = sandbox.compile(workDir, render(spec.getCompile(), src, exe, workDir));
+            ExecutionResult c = sandbox.compile(workDir,
+                    LanguageCommandPolicy.render(spec.getCompile(), src, exe, workDir));
             if (!c.ok()) {
                 String raw = c.stderr().isBlank() ? c.stdout() : c.stderr();
                 // Students see a clean "main.cpp:4:5: error", not the sandbox path.
@@ -142,7 +146,7 @@ public class JudgeWorker {
 
         Problem problem = problems.findById(sub.getProblemId()).orElseThrow();
         List<TestCase> tests = testCases.findByProblemIdOrderByIdxAsc(problem.getId());
-        List<String> runCmd = render(spec.getRun(), src, exe, workDir);
+        List<String> runCmd = LanguageCommandPolicy.render(spec.getRun(), src, exe, workDir);
 
         long maxTime = 0;
         long maxMem = -1;
@@ -151,7 +155,7 @@ public class JudgeWorker {
         for (TestCase tc : tests) {
             testIndex++;
             Path input = workDir.resolve("__input.txt");
-            Files.writeString(input, tc.getInputData(), StandardCharsets.UTF_8);
+            SafeSandboxFiles.writeString(input, tc.getInputData());
 
             ExecutionResult r = sandbox.run(workDir, runCmd, input,
                     problem.getTimeLimitMs(), problem.getMemoryLimitKb());
@@ -164,18 +168,23 @@ public class JudgeWorker {
                 v = Verdict.TLE;
             } else if (r.peakMemoryKb() > 0 && r.peakMemoryKb() > problem.getMemoryLimitKb()) {
                 v = Verdict.MLE;
-            } else if (r.stdout().length() >= SandboxExecutor.OUTPUT_CAP) {
-                // A program printing without bound would otherwise be judged on
-                // truncated output and look like a plain WA.
+            } else if (r.outputLimitExceeded()) {
                 v = Verdict.OLE;
             } else if (r.exitCode() != 0) {
                 v = Verdict.RE;
             } else if (problem.getCheckerType() == CheckerType.CUSTOM) {
                 Path contestantOut = workDir.resolve("__actual_output_" + tc.getIdx() + ".txt");
                 Path expectedOut = workDir.resolve("__expected_output_" + tc.getIdx() + ".txt");
-                Files.writeString(contestantOut, r.stdout(), StandardCharsets.UTF_8);
-                Files.writeString(expectedOut, tc.getExpectedOutput(), StandardCharsets.UTF_8);
-                v = checkerRunner.check(problem, input, contestantOut, expectedOut);
+                try {
+                    SafeSandboxFiles.writeString(contestantOut, r.stdout());
+                    SafeSandboxFiles.writeString(expectedOut, tc.getExpectedOutput());
+                    v = checkerRunner.check(problem, input, contestantOut, expectedOut);
+                } finally {
+                    // Hidden expected output must not survive until the next
+                    // contestant execution in this reused submission workspace.
+                    Files.deleteIfExists(expectedOut);
+                    Files.deleteIfExists(contestantOut);
+                }
             } else if (evaluator.matches(tc.getExpectedOutput(), r.stdout())) {
                 v = Verdict.AC;
             } else {
@@ -224,7 +233,7 @@ public class JudgeWorker {
 
     /**
      * What the program printed, kept only in the quantity a person would read.
-     * The sandbox already caps capture at 10 MiB; storing that per test, per
+     * The sandbox already caps capture at 1 MiB; storing that per test, per
      * submission, would grow the table faster than the submissions themselves.
      */
     private static String clipOutput(String out) {
@@ -302,18 +311,6 @@ public class JudgeWorker {
             }
         }
         return null;
-    }
-
-    /** Fills {src} {exe} {dir} into a whitespace-separated command template. */
-    private static List<String> render(String template, Path src, Path exe, Path dir) {
-        List<String> out = new ArrayList<>();
-        for (String token : template.trim().split("\\s+")) {
-            out.add(token
-                    .replace("{src}", src.toString())
-                    .replace("{exe}", exe.toString())
-                    .replace("{dir}", dir.toString()));
-        }
-        return out;
     }
 
     private static String truncate(String s) {

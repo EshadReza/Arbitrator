@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+  All rights reserved.
+-->
+
 <!-- Shared Eclipse formatter (rules.md Rule 4). Import via:
      Window > Preferences > Java > Code Style > Formatter > Import...
      Then enable Save Actions: format source code + organize imports.
      Everyone uses THIS profile — whitespace-only diffs are half of all
      false merge conflicts. -->
+
 <profiles version="21">
   <profile kind="CodeFormatterProfile" name="Arbitrator" version="21">
     <setting id="org.eclipse.jdt.core.formatter.tabulation.char" value="space"/>

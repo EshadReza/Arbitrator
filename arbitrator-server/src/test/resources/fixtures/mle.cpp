@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
 // Memory hog: allocates and TOUCHES far more than any sane limit,
 // so peak RSS blows past memory_limit_kb -> MLE (TBD-02 resolved).
 #include <cstring>

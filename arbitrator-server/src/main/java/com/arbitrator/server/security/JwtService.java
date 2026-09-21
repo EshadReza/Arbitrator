@@ -1,9 +1,15 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.security;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.Locale;
 
 import javax.crypto.SecretKey;
 
@@ -18,42 +24,41 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 
 /**
- * Stateless JWT, HS256, 12-hour expiry (FR-02 EARS).
- * Secret comes from ARBITRATOR_JWT_SECRET env var in any real deployment
- * (NFR-S07); the application.yml default exists only for local dev.
+ * Stateless JWT with a private per-process signing key unless explicitly configured.
+ * No public/shared fallback key and no mandatory environment setup.
  */
 @Service
 public class JwtService {
+
+    private static final int MIN_SECRET_BYTES = 32;
 
     private final SecretKey key;
     private final Duration expiry;
 
     public JwtService(
-            @Value("${arbitrator.jwt.secret}") String secret,
+            @Value("${arbitrator.jwt.secret:}") String secret,
             @Value("${arbitrator.jwt.expiry-hours}") long expiryHours) {
-        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        if (secret == null || secret.isBlank()) {
+            this.key = Jwts.SIG.HS256.key().build();
+        } else {
+            validateSecret(secret);
+            this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        }
         this.expiry = Duration.ofHours(expiryHours);
     }
 
-    public String generate(String username, Role role) {
-        return generate(username, role, null);
-    }
-
-    /**
-     * @param sid session id (ActiveSessionRegistry's key) — null keeps the
-     *            token valid for as long as it hasn't expired, with no
-     *            single-session enforcement (used only where that doesn't
-     *            apply, e.g. tests). Real logins always pass one.
-     */
+    /** @param sid the mandatory ActiveSessionRegistry session identifier. */
     public String generate(String username, Role role, String sid) {
-        Instant now = Instant.now();
-        var builder = Jwts.builder()
-                .subject(username)
-                .claim("role", role.name());
-        if (sid != null) {
-            builder.claim("sid", sid);
+        if (sid == null || sid.isBlank()) {
+            throw new IllegalArgumentException("JWT session id must not be blank");
         }
-        return builder
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(username)
+                // Kept for UI compatibility only. Authorization always uses the
+                // user's current database role in JwtAuthFilter.
+                .claim("role", role.name())
+                .claim("sid", sid)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(expiry)))
                 .signWith(key)
@@ -70,6 +75,18 @@ public class JwtService {
                     .getPayload();
         } catch (JwtException | IllegalArgumentException e) {
             return null;
+        }
+    }
+
+    private static void validateSecret(String secret) {
+        String normalized = secret.toLowerCase(Locale.ROOT);
+        if (secret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES
+                || normalized.contains("change-me")
+                || normalized.contains("changeme")
+                || normalized.contains("your-jwt-secret")
+                || normalized.startsWith("dev-only-secret")) {
+            throw new IllegalStateException(
+                    "ARBITRATOR_JWT_SECRET must be a non-placeholder secret of at least 32 UTF-8 bytes");
         }
     }
 }

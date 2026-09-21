@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.judge;
 
 import java.io.File;
@@ -6,6 +11,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -16,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
@@ -48,10 +56,11 @@ import jakarta.annotation.PreDestroy;
  *  - {@code --pids-limit}                    fork-bomb containment (FMEA-08)
  *  - {@code --cap-drop ALL} + no-new-privileges, {@code --read-only} root fs
  *    with a small tmpfs for scratch space
- *  - only {@link JudgeProperties#getWorkRoot()} is ever bind-mounted (read-
- *    only) plus the specific call's own work dir (read-write) — the rest of
- *    the host filesystem is never visible, closing the gap the previous
- *    Linux path left open (STATUS.md known issue 10a)
+ *  - only the specific call's own work dir is bind-mounted (writable for
+ *    compilation, read-only for contestant/checker execution).
+ *    The shared judge work root is deliberately never mounted: doing so
+ *    would let a submission read concurrent submissions and cached checker
+ *    material even if the mount itself were read-only.
  *
  * The command runs wrapped as {@code timeout -k1 <2xTL>s /usr/bin/time -o
  * <rusage> -v <cmd>} *inside* the container — the same technique
@@ -66,17 +75,19 @@ public class SandboxExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(SandboxExecutor.class);
 
-    private static final ExecutorService STREAM_POOL = Executors.newCachedThreadPool(r -> {
+    private static final ExecutorService STREAM_POOL = Executors.newFixedThreadPool(64, r -> {
         Thread t = new Thread(r, "sandbox-stream");
         t.setDaemon(true);
         return t;
     });
 
     /** Captured output cap; hitting it means OLE, not a host memory problem. */
-    public static final int OUTPUT_CAP = 10 * 1024 * 1024;                   // 10 MiB
+    public static final int OUTPUT_CAP = 1024 * 1024;                        // 1 MiB per stream
 
     private static final long COMPILE_MEMORY_KB = 2L * 1024 * 1024;          // 2 GiB
     private static final long MAX_FILE_SIZE_BYTES = 64L * 1024 * 1024;       // 64 MiB
+    private static final long MAX_COMPILE_WORKSPACE_BYTES = 128L * 1024 * 1024;
+    private static final long MAX_COMPILE_FILES = 4096;
 
     /**
      * Process cap inside the container. Compile gets more headroom than run:
@@ -157,11 +168,20 @@ public class SandboxExecutor {
 
     /** Resolved once at startup — see {@link #resolveDockerBinary}. Used for every docker invocation. */
     private final String dockerBinary;
+    /** Immutable image ID after startup verification; tag only before Spring invokes {@link #verifyDockerReady()}. */
+    private volatile String sandboxImageReference;
+    private final Semaphore containerSlots;
+    private final Semaphore memorySlots;
+    private final int memoryBudgetMb;
 
     public SandboxExecutor(JudgeProperties props) {
         this.props = props;
         this.dockerBinary = resolveDockerBinary(props.getDockerBinary());
+        this.sandboxImageReference = props.getDockerImage();
         dockerBinaryStatic = this.dockerBinary;
+        this.containerSlots = new Semaphore(Math.max(1, props.getMaxActiveContainers()), true);
+        this.memoryBudgetMb = resolveMemoryBudgetMb(props.getMaxTotalMemoryMb());
+        this.memorySlots = new Semaphore(memoryBudgetMb, true);
     }
 
     /**
@@ -210,6 +230,7 @@ public class SandboxExecutor {
      */
     @PostConstruct
     void verifyDockerReady() {
+        LanguageCommandPolicy.validateAll(props);
         String failure = runCapture(dockerBinary, "version");
         if (failure != null) {
             log.error("Docker sandbox is NOT ready — every submission will fail (as a judge-error RE) "
@@ -219,13 +240,21 @@ public class SandboxExecutor {
             log.error("Sandbox image '{}' not found. Run this platform's image-load/build script before "
                     + "judging any submission.", props.getDockerImage());
         } else {
-            log.info("Docker sandbox ready: image {} via {}", props.getDockerImage(), dockerBinary);
+            String imageId = captureSuccessfulOutput(dockerBinary, "image", "inspect",
+                    "--format={{.Id}}", props.getDockerImage());
+            if (imageId == null || !imageId.matches("sha256:[0-9a-fA-F]{64}")) {
+                throw new IllegalStateException("Could not resolve sandbox image '"
+                        + props.getDockerImage() + "' to an immutable Docker image ID");
+            }
+            sandboxImageReference = imageId;
+            log.info("Docker sandbox ready: image {} pinned for this server run as {} via {}",
+                    props.getDockerImage(), imageId, dockerBinary);
         }
 
         Path root = Path.of(props.getWorkRoot());
         try {
             Files.createDirectories(root);
-            permitContainerAccess(root);
+            restrictToOwner(root);
         } catch (IOException ignored) {
             // best effort; createWorkDir() will surface any real problem per-submission
         }
@@ -243,62 +272,34 @@ public class SandboxExecutor {
         } catch (IOException ignored) {
             // root does not exist yet on a first run — nothing to sweep
         }
-        warnIfMemoryOversubscribed();
+        logAdmissionCapacity();
     }
 
-    /**
-     * Pure diagnostic, log-only: {@code arbitrator.judge.threads} concurrent
-     * runs can each demand up to {@code MAX_MEMORY_KB * MEMORY_HEADROOM_MULTIPLIER}
-     * (a problem's own upper bound, doubled for headroom — see
-     * ProblemPackageService and MEMORY_HEADROOM_MULTIPLIER) at the same
-     * time. Each container's own {@code --memory} is a hard per-container
-     * cap, so no single run can overshoot it — but nothing relates the
-     * THREAD COUNT to how much RAM is actually on the box, so a lab PC with
-     * modest RAM and a full judge pool of high-memory-limit problems could
-     * still be driven into real host-level swapping/OOM by ordinary
-     * (non-malicious) contest load. This can't safely auto-correct itself —
-     * NFR-P04 requires >= 10 parallel jobs as a product requirement, and
-     * silently shrinking the pool would just make the contest slower with no
-     * explanation — so it only logs, loud, once, at startup.
-     */
-    private void warnIfMemoryOversubscribed() {
-        long totalPhysicalBytes;
+    private void logAdmissionCapacity() {
+        long worstCaseMb = (long) props.getThreads() * 2048; // 1 GiB problem limit, doubled for measurement
+        log.info("Sandbox admission: at most {} active containers and {} MiB aggregate reserved memory",
+                props.getMaxActiveContainers(), memoryBudgetMb);
+        if (worstCaseMb > memoryBudgetMb) {
+            log.info("The {} judge workers could request {} MiB at maximum problem limits; memory admission "
+                    + "will safely serialize some executions to remain within the {} MiB budget.",
+                    props.getThreads(), worstCaseMb, memoryBudgetMb);
+        }
+    }
+
+    private static int resolveMemoryBudgetMb(int configuredMb) {
+        if (configuredMb > 0) {
+            return configuredMb;
+        }
         try {
             var os = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
-            if (!(os instanceof com.sun.management.OperatingSystemMXBean sunOs)) {
-                return;                          // non-HotSpot JVM — nothing to report
+            if (os instanceof com.sun.management.OperatingSystemMXBean sunOs) {
+                long derived = sunOs.getTotalMemorySize() * 70 / 100 / (1024 * 1024);
+                return (int) Math.max(1, Math.min(Integer.MAX_VALUE, derived));
             }
-            totalPhysicalBytes = sunOs.getTotalMemorySize();
         } catch (Throwable ignored) {
-            return;                              // best-effort diagnostic only
+            // Conservative fallback below.
         }
-        if (totalPhysicalBytes <= 0) {
-            return;
-        }
-        // Duplicated from ProblemPackageService.MAX_MEMORY_KB rather than
-        // imported — that class already depends on this package (CheckerRunner
-        // et al.), and this is a one-line diagnostic, not worth introducing a
-        // package cycle over. Keep the two in sync if either changes.
-        long maxProblemMemoryKb = 1024 * 1024;   // 1 GiB — matches ProblemPackageService.MAX_MEMORY_KB
-        long worstCaseBytes = (long) props.getThreads() * maxProblemMemoryKb * 1024L * MEMORY_HEADROOM_MULTIPLIER;
-        double totalGiB = totalPhysicalBytes / (1024.0 * 1024 * 1024);
-        double worstCaseGiB = worstCaseBytes / (1024.0 * 1024 * 1024);
-        if (worstCaseBytes > totalPhysicalBytes * 0.7) {
-            log.warn("Judge capacity check: {} threads x this judge's max allowed problem memory limit "
-                    + "({} MiB, doubled for headroom) = {} GiB worst case, against {} GiB of RAM on this "
-                    + "machine. A contest that actually hits that ceiling (several concurrent high-memory-"
-                    + "limit submissions) risks real host-level swapping or an OOM kill outside any "
-                    + "container. If problems here don't need memory limits anywhere near the {} MiB "
-                    + "maximum, this is nothing to act on — but if this machine's RAM is genuinely tight, "
-                    + "lower arbitrator.judge.threads or keep problem memory limits well under the max.",
-                    props.getThreads(), maxProblemMemoryKb / 1024,
-                    String.format("%.1f", worstCaseGiB), String.format("%.1f", totalGiB),
-                    maxProblemMemoryKb / 1024);
-        } else {
-            log.info("Judge capacity check: {} threads x worst-case per-submission memory = {} GiB against "
-                    + "{} GiB RAM — comfortable headroom.", props.getThreads(),
-                    String.format("%.1f", worstCaseGiB), String.format("%.1f", totalGiB));
-        }
+        return 2048;
     }
 
     /** Every container this process has ever started is named with this prefix. */
@@ -328,7 +329,7 @@ public class SandboxExecutor {
     public Path createWorkDir(long submissionId) throws IOException {
         Path root = Path.of(props.getWorkRoot());
         Files.createDirectories(root);
-        permitContainerAccess(root);
+        restrictToOwner(root);
         Path dir = Files.createTempDirectory(root, "sub-" + submissionId + "-");
         permitContainerAccess(dir);
         return dir;
@@ -342,8 +343,16 @@ public class SandboxExecutor {
      */
     public ExecutionResult compile(Path workDir, List<String> command)
             throws IOException, InterruptedException {
-        return runInContainer(workDir, command, null, props.getCompileTimeoutMs(),
-                COMPILE_MEMORY_KB, COMPILE_PIDS_LIMIT);
+        ExecutionResult result = runInContainer(workDir, command, null, props.getCompileTimeoutMs(),
+                COMPILE_MEMORY_KB, COMPILE_PIDS_LIMIT, false);
+        if (result.ok()) {
+            String violation = compileWorkspaceViolation(workDir);
+            if (violation != null) {
+                return new ExecutionResult(1, result.stdout(), violation, result.wallTimeMs(),
+                        result.peakMemoryKb(), false, false);
+            }
+        }
+        return result;
     }
 
     /**
@@ -356,7 +365,7 @@ public class SandboxExecutor {
                                int timeLimitMs, int memoryLimitKb)
             throws IOException, InterruptedException {
         return runInContainer(workDir, command, inputFile, timeLimitMs,
-                (long) memoryLimitKb * MEMORY_HEADROOM_MULTIPLIER, RUN_PIDS_LIMIT);
+                (long) memoryLimitKb * MEMORY_HEADROOM_MULTIPLIER, RUN_PIDS_LIMIT, true);
     }
 
     // ------------------------------------------------------------------
@@ -365,27 +374,43 @@ public class SandboxExecutor {
      * Below this much free space on the filesystem backing {@code workRoot},
      * refuse to start another container rather than let it run.
      *
-     * {@code --tmpfs /tmp:...,size=64m} caps the container's OWN scratch
-     * space, but {@code /sandbox} (this call's work dir) is a plain host
-     * bind-mount with no size limit at all — Docker has no portable,
-     * driver-independent way to cap a bind mount's total size the way it
-     * caps a tmpfs. A submission's own {@code fsize} ulimit only bounds a
-     * SINGLE file (64 MiB); nothing stopped one from writing many such files
-     * as fast as the disk allows for the full length of its time limit —
-     * multiplied by up to {@code RUN_PIDS_LIMIT} processes doing it at once,
-     * and again by every concurrent submission across the thread pool. On a
-     * lab PC with limited free disk, that is a real path to filling it
-     * entirely, which does not fail cleanly: MySQL, the OS, and this very
-     * process can all start erroring or hanging once there is nowhere left
-     * to write. Checking free space before every run turns that into a
-     * same-submission RE instead — cheap (one syscall) and checked often
-     * enough that a burst gets stopped within a run or two, not after the
-     * disk is actually gone.
+     * {@code --tmpfs /tmp:...,size=64m} is the only general-purpose writable
+     * area during execution; the submission workspace is mounted read-only.
+     * Compilation still needs a writable workspace, so it is protected by
+     * the per-file ulimit plus a post-compile total-size and file-count check.
+     * This reserve check additionally refuses new work before the host disk
+     * reaches the point where Docker, MySQL, or the server could fail.
      */
     private static final long MIN_FREE_BYTES = 1L * 1024 * 1024 * 1024;   // 1 GiB
 
     private ExecutionResult runInContainer(Path workDir, List<String> command, Path inputFile,
-                                           long timeLimitMs, long memoryLimitKb, int pidsLimit)
+                                           long timeLimitMs, long memoryLimitKb, int pidsLimit,
+                                           boolean readOnlyWorkspace)
+            throws IOException, InterruptedException {
+
+        int requestedMemoryMb = Math.toIntExact((memoryLimitKb + 1023) / 1024);
+        if (requestedMemoryMb > memoryBudgetMb) {
+            throw new IOException("Sandbox requires " + requestedMemoryMb
+                    + " MiB but the aggregate judge memory budget is " + memoryBudgetMb + " MiB");
+        }
+        containerSlots.acquire();
+        boolean memoryAcquired = false;
+        try {
+            memorySlots.acquire(requestedMemoryMb);
+            memoryAcquired = true;
+            return runAdmittedContainer(workDir, command, inputFile, timeLimitMs,
+                    memoryLimitKb, pidsLimit, readOnlyWorkspace);
+        } finally {
+            if (memoryAcquired) {
+                memorySlots.release(requestedMemoryMb);
+            }
+            containerSlots.release();
+        }
+    }
+
+    private ExecutionResult runAdmittedContainer(Path workDir, List<String> command, Path inputFile,
+                                                  long timeLimitMs, long memoryLimitKb, int pidsLimit,
+                                                  boolean readOnlyWorkspace)
             throws IOException, InterruptedException {
 
         long freeBytes = Files.getFileStore(workDir).getUsableSpace();
@@ -396,10 +421,6 @@ public class SandboxExecutor {
                     + "Free up space under the judge work root or increase its filesystem.");
         }
 
-        Path root = Path.of(props.getWorkRoot());
-        if (Files.exists(root)) {
-            permitContainerAccess(root);
-        }
         permitContainerAccess(workDir);
 
         long hardKillS = Math.max(1, (timeLimitMs * 2 + 999) / 1000);   // SIGKILL at 2x, NFR-R04
@@ -408,29 +429,50 @@ public class SandboxExecutor {
         long seq = SEQ.incrementAndGet();
         String rusageName = "__rusage_" + seq + ".txt";
         Path rusageFile = workDir.resolve(rusageName);
+        Files.createFile(rusageFile);
+        permitContainerWrite(rusageFile);
         String name = NAME_PREFIX + workDir.getFileName() + "-" + seq;
 
         List<String> cmd = new ArrayList<>(List.of(
                 dockerBinary, "run", "--rm", "-i",
                 "--name", name,
                 "--network", "none",
+                "--ipc", "none",
                 "--memory", memoryLimitKb + "k",
                 "--memory-swap", memoryLimitKb + "k",
                 "--pids-limit", String.valueOf(pidsLimit),
                 "--cpus", "1",
+                "--cpu-shares", "256",
                 "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges",
                 "--read-only",
-                "--tmpfs", "/tmp:rw,size=64m,exec",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
                 "--ulimit", "fsize=" + MAX_FILE_SIZE_BYTES,
                 "--ulimit", "nofile=64:64",
-                "-v", props.getWorkRoot() + ":/base:ro",
-                "-v", workDir + ":/sandbox:rw",
+                "--ulimit", "core=0:0",
+                "--env", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "--env", "HOME=/tmp",
+                "--env", "LANG=C.UTF-8",
+                "--env", "LC_ALL=C.UTF-8",
+                "--env", "LD_PRELOAD=",
+                "--env", "LD_LIBRARY_PATH=",
+                "--env", "LIBRARY_PATH=",
+                "--env", "CPATH=",
+                "--env", "CPLUS_INCLUDE_PATH=",
+                "--env", "PYTHONHOME=",
+                "--env", "PYTHONPATH=",
+                "--env", "JAVA_TOOL_OPTIONS=",
+                "--env", "_JAVA_OPTIONS=",
+                "--env", "JDK_JAVA_OPTIONS=",
+                "--env", "ENV=",
+                "--env", "BASH_ENV=",
+                "-v", workDir + ":/sandbox:" + (readOnlyWorkspace ? "ro" : "rw"),
+                "-v", rusageFile + ":/run-metrics:rw",
                 "-w", "/sandbox",
                 "--user", SANDBOX_UID_GID,
-                props.getDockerImage(),
+                sandboxImageReference,
                 "timeout", "-k", "1", hardKillS + "s",
-                "/usr/bin/time", "-o", "/sandbox/" + rusageName, "-v"));
+                "/usr/bin/time", "-o", "/run-metrics", "-v"));
         for (String token : command) {
             cmd.add(translatePath(workDir, token));
         }
@@ -463,8 +505,18 @@ public class SandboxExecutor {
         }
         LIVE.add(name);
 
-        CompletableFuture<String> out = readAsync(p.getInputStream());
-        CompletableFuture<String> err = readAsync(p.getErrorStream());
+        CompletableFuture<CapturedOutput> out = readAsync(p.getInputStream());
+        CompletableFuture<CapturedOutput> err = readAsync(p.getErrorStream());
+        out.thenAccept(captured -> {
+            if (captured.exceeded()) {
+                killContainerQuietly(name);
+            }
+        });
+        err.thenAccept(captured -> {
+            if (captured.exceeded()) {
+                killContainerQuietly(name);
+            }
+        });
 
         try {
             boolean finished = p.waitFor(javaWaitMs, TimeUnit.MILLISECONDS);
@@ -475,10 +527,16 @@ public class SandboxExecutor {
                 // itself stalled) — same two-layer shape as before.
                 killContainerQuietly(name);
                 p.destroyForcibly();
-                return new ExecutionResult(124, safeJoin(out), safeJoin(err), wallMs, -1, true);
+                CapturedOutput stdout = safeJoin(out);
+                CapturedOutput stderr = safeJoin(err);
+                return new ExecutionResult(124, stdout.text(), stderr.text(), wallMs, -1, true,
+                        stdout.exceeded() || stderr.exceeded());
             }
 
             int exit = p.exitValue();
+            CapturedOutput stdout = safeJoin(out);
+            CapturedOutput stderr = safeJoin(err);
+            boolean outputLimitExceeded = stdout.exceeded() || stderr.exceeded();
             // 125 is docker's own documented code for "the daemon received
             // the request but failed to create/start the container" — but
             // it is NOT the only way docker can fail before anything inside
@@ -498,11 +556,13 @@ public class SandboxExecutor {
             // handled on its own above, /usr/bin/time killed mid-write).
             // So: non-zero, not a timeout, and no rusage file at all means
             // docker itself never got a container running, full stop.
-            if (exit == 125 || (exit != 0 && exit != 124 && !Files.exists(rusageFile))) {
+            boolean metricsMissing = !Files.exists(rusageFile) || Files.size(rusageFile) == 0;
+            if (exit == 125 || (exit != 0 && exit != 124 && metricsMissing && !outputLimitExceeded)) {
                 throw new IOException("docker run failed before the sandbox container started: "
-                        + safeJoin(err));
+                        + stderr.text());
             }
-            return parseContainerResult(exit, safeJoin(out), safeJoin(err), wallMs, rusageFile);
+            return parseContainerResult(exit, stdout.text(), stderr.text(), wallMs, rusageFile,
+                    outputLimitExceeded);
         } finally {
             LIVE.remove(name);
             Files.deleteIfExists(rusageFile);
@@ -526,7 +586,8 @@ public class SandboxExecutor {
      * JudgeWorker.evaluate(), unchanged.
      */
     private static ExecutionResult parseContainerResult(int exit, String stdout, String stderr,
-                                                         long wallMs, Path rusageFile) {
+                                                         long wallMs, Path rusageFile,
+                                                         boolean outputLimitExceeded) {
         boolean timedOut = exit == 124;
 
         long peakKb = -1;
@@ -550,7 +611,7 @@ public class SandboxExecutor {
             }
         }
 
-        return new ExecutionResult(exit, stdout, stderr, elapsedMs, peakKb, timedOut);
+        return new ExecutionResult(exit, stdout, stderr, elapsedMs, peakKb, timedOut, outputLimitExceeded);
     }
 
     /** Parses GNU time's {@code H:MM:SS} or {@code M:SS.ss} elapsed format into milliseconds. */
@@ -575,15 +636,14 @@ public class SandboxExecutor {
     /**
      * Rewrites an absolute host path token to its path inside the container.
      * Tokens under this call's own work dir map to the read-write mount
-     * ({@code /sandbox}); anything else under the shared work root (e.g. a
-     * cached compiled checker binary living in a sibling directory — see
-     * CheckerRunner) maps to the read-only mount ({@code /base}). Anything
-     * else (flags like {@code -O2}, relative binary names) passes through
-     * unchanged.
+     * ({@code /sandbox}). Anything else (flags like {@code -O2}, relative
+     * binary names) passes through unchanged. Callers must stage every file a
+     * process needs inside its private work directory; paths into sibling
+     * judge directories are intentionally inaccessible.
      *
      * The container is always Linux regardless of host OS, so the result
-     * must always use forward slashes — but only the matched PREFIX was
-     * being replaced with {@code /sandbox}/{@code /base}; the remainder of
+     * must always use forward slashes — but only the matched prefix is
+     * replaced with {@code /sandbox}; the remainder of
      * the token was left exactly as {@link Path#toString()} produced it,
      * which on Windows means backslashes (Windows' own separator). That
      * gave the compiler a literal path like {@code /sandbox\main.cpp} —
@@ -597,10 +657,6 @@ public class SandboxExecutor {
         String wd = workDir.toString();
         if (token.equals(wd) || token.startsWith(wd + File.separator)) {
             return "/sandbox" + token.substring(wd.length()).replace('\\', '/');
-        }
-        String root = Path.of(props.getWorkRoot()).toString();
-        if (token.equals(root) || token.startsWith(root + File.separator)) {
-            return "/base" + token.substring(root.length()).replace('\\', '/');
         }
         return token;
     }
@@ -618,6 +674,25 @@ public class SandboxExecutor {
         } catch (UnsupportedOperationException | IOException ignored) {
             // non-POSIX filesystem (Windows dev machine) — Docker Desktop's
             // own file sharing handles this case without help.
+        }
+    }
+
+    private static void permitContainerWrite(Path file) throws IOException {
+        try {
+            Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-rw-rw-"));
+        } catch (UnsupportedOperationException ignored) {
+            if (!file.toFile().setWritable(true, false)) {
+                throw new IOException("Could not make sandbox metrics file writable: " + file);
+            }
+        }
+    }
+
+    /** The shared parent must never be traversable by other host users. */
+    static void restrictToOwner(Path dir) {
+        try {
+            Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // Non-POSIX filesystem; platform ACLs govern access instead.
         }
     }
 
@@ -641,6 +716,23 @@ public class SandboxExecutor {
 
     private static boolean runsCleanly(String... cmd) {
         return runCapture(cmd) == null;
+    }
+
+    private static String captureSuccessfulOutput(String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return p.waitFor(10, TimeUnit.SECONDS) && p.exitValue() == 0 ? output : null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    String sandboxImageReference() {
+        return sandboxImageReference;
     }
 
     /** @return null on success, or the combined stdout/stderr (or exception message) on failure. */
@@ -703,22 +795,59 @@ public class SandboxExecutor {
         LIVE.clear();
     }
 
-    private static CompletableFuture<String> readAsync(InputStream in) {
+    private record CapturedOutput(String text, boolean exceeded) { }
+
+    private static CompletableFuture<CapturedOutput> readAsync(InputStream in) {
         return CompletableFuture.supplyAsync(() -> {
             try (in) {
-                return new String(in.readNBytes(OUTPUT_CAP), StandardCharsets.UTF_8);
+                byte[] bytes = in.readNBytes(OUTPUT_CAP + 1);
+                boolean exceeded = bytes.length > OUTPUT_CAP;
+                int kept = Math.min(bytes.length, OUTPUT_CAP);
+                return new CapturedOutput(new String(bytes, 0, kept, StandardCharsets.UTF_8), exceeded);
             } catch (IOException e) {
-                return "";
+                return new CapturedOutput("", false);
             }
         }, STREAM_POOL);
     }
 
-    private static String safeJoin(CompletableFuture<String> f) {
+    private static CapturedOutput safeJoin(CompletableFuture<CapturedOutput> f) {
         try {
             return f.get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
-            return "";
+            return new CapturedOutput("", false);
         }
+    }
+
+    private static String compileWorkspaceViolation(Path workDir) throws IOException {
+        long bytes = 0;
+        long files = 0;
+        try (var walk = Files.walk(workDir)) {
+            var paths = walk.iterator();
+            while (paths.hasNext()) {
+                Path path = paths.next();
+                BasicFileAttributes attributes = Files.readAttributes(path,
+                        BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                if (attributes.isSymbolicLink()) {
+                    return "Compilation produced a symbolic link (not allowed)";
+                }
+                if (attributes.isDirectory()) {
+                    continue;
+                }
+                if (!attributes.isRegularFile()) {
+                    return "Compilation produced a non-regular file (not allowed)";
+                }
+                files++;
+                bytes += attributes.size();
+                if (files > MAX_COMPILE_FILES) {
+                    return "Compilation produced too many files (limit " + MAX_COMPILE_FILES + ")";
+                }
+                if (bytes > MAX_COMPILE_WORKSPACE_BYTES) {
+                    return "Compilation workspace exceeded "
+                            + (MAX_COMPILE_WORKSPACE_BYTES / 1024 / 1024) + " MiB";
+                }
+            }
+        }
+        return null;
     }
 
     /** Kills any leftover container for this work dir, then deletes it. */

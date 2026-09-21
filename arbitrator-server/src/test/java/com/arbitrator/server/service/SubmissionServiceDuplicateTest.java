@@ -1,6 +1,13 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.service;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Proxy;
@@ -11,7 +18,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
+import com.arbitrator.common.dto.SubmitRequest;
+import com.arbitrator.common.enums.Language;
 import com.arbitrator.server.judge.JudgeProperties;
 import com.arbitrator.server.repo.SubmissionRepository;
 
@@ -54,6 +65,17 @@ class SubmissionServiceDuplicateTest {
 
         assertTrue(service.isDuplicate(41L, 7L, "shared template"));
         assertFalse(service.isDuplicate(41L, 8L, "shared template"));
+    }
+
+    @Test
+    void oversizedUtf8SourceIsRejectedBeforeAnyDatabaseWork() {
+        SubmissionService service = service((userId, problemId) -> List.of());
+        String source = "😀".repeat(70_000); // 140k UTF-16 chars, 280k UTF-8 bytes
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.submit("alice", new SubmitRequest(1L, Language.CPP17, source), "127.0.0.1"));
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, error.getStatusCode());
     }
 
     private static SubmissionService service(SourceLookup lookup) {

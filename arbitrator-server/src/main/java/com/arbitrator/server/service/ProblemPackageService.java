@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.service;
 
 import java.io.ByteArrayInputStream;
@@ -32,6 +37,7 @@ import com.arbitrator.server.judge.CheckerCompilationException;
 import com.arbitrator.server.judge.CheckerRunner;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
+import com.arbitrator.server.security.RichTextSanitizer;
 
 /**
  * FR-05: import a problem package ZIP.
@@ -150,6 +156,12 @@ public class ProblemPackageService {
 
         // --- statement (HTML preferred; PDF supported since V59) ---
         String statementHtml = findStatement(files, errors);
+        if (statementHtml != null) {
+            statementHtml = RichTextSanitizer.sanitize(statementHtml);
+            if (statementHtml.isBlank()) {
+                errors.add("The HTML statement contains no permitted content");
+            }
+        }
         byte[] statementPdf = findStatementPdf(files);
         if (statementPdf != null && statementPdf.length > MAX_STATEMENT_PDF_BYTES) {
             errors.add("The PDF statement is larger than "
@@ -370,7 +382,7 @@ public class ProblemPackageService {
             copy.setContestId(clone.getId());
             copy.setCode(p.getCode());
             copy.setTitle(p.getTitle());
-            copy.setStatementHtml(p.getStatementHtml());
+            copy.setStatementHtml(RichTextSanitizer.sanitize(p.getStatementHtml()));
             copy.setStatementIsPdf(p.isStatementIsPdf());
             copy.setTimeLimitMs(p.getTimeLimitMs());
             copy.setMemoryLimitKb(p.getMemoryLimitKb());

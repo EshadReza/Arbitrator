@@ -1,10 +1,16 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.judge;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -36,6 +42,8 @@ public class CustomRunService {
     private final SandboxExecutor sandbox;
     private final JudgeProperties props;
     private final ContestAccessService contestAccess;
+    private final Semaphore runSlots;
+    private final Set<String> activeUsers = ConcurrentHashMap.newKeySet();
 
     public CustomRunService(ProblemRepository problems, SandboxExecutor sandbox,
                             JudgeProperties props, ContestAccessService contestAccess) {
@@ -43,6 +51,7 @@ public class CustomRunService {
         this.sandbox = sandbox;
         this.props = props;
         this.contestAccess = contestAccess;
+        this.runSlots = new Semaphore(Math.max(1, props.getMaxCustomRuns()), true);
     }
 
     public CustomRunResultDto run(String username, CustomRunRequest req) {
@@ -51,6 +60,12 @@ public class CustomRunService {
         }
         if (req.language() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Language is required");
+        }
+        int sourceCap = props.getMaxSourceBytes();
+        if (req.sourceCode().length() > sourceCap
+                || req.sourceCode().getBytes(StandardCharsets.UTF_8).length > sourceCap) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
+                    "Source code is limited to " + sourceCap + " UTF-8 bytes");
         }
         String input = req.input() == null ? "" : req.input();
         if (input.length() > MAX_INPUT_CHARS) {
@@ -69,16 +84,26 @@ public class CustomRunService {
                     "Language not configured: " + req.language());
         }
 
+        if (!activeUsers.add(username)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "You already have a custom run in progress");
+        }
+        if (!runSlots.tryAcquire()) {
+            activeUsers.remove(username);
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "The custom-run service is busy; try again shortly");
+        }
+
         Path workDir = null;
         try {
             workDir = sandbox.createWorkDir(-System.nanoTime());   // negative: not a submission
             Path src = workDir.resolve(spec.getSourceFile());
             Path exe = workDir.resolve("prog");
-            Files.writeString(src, req.sourceCode(), StandardCharsets.UTF_8);
+            SafeSandboxFiles.writeString(src, req.sourceCode());
 
             if (spec.getCompile() != null && !spec.getCompile().isBlank()) {
                 ExecutionResult c = sandbox.compile(workDir,
-                        render(spec.getCompile(), src, exe, workDir));
+                        LanguageCommandPolicy.render(spec.getCompile(), src, exe, workDir));
                 if (!c.ok()) {
                     String msg = c.stderr().isBlank() ? c.stdout() : c.stderr();
                     return new CustomRunResultDto(false,
@@ -88,12 +113,17 @@ public class CustomRunService {
             }
 
             Path inputFile = workDir.resolve("__input.txt");
-            Files.writeString(inputFile, input, StandardCharsets.UTF_8);
+            SafeSandboxFiles.writeString(inputFile, input);
 
-            ExecutionResult r = sandbox.run(workDir, render(spec.getRun(), src, exe, workDir),
+            ExecutionResult r = sandbox.run(workDir,
+                    LanguageCommandPolicy.render(spec.getRun(), src, exe, workDir),
                     inputFile, problem.getTimeLimitMs(), problem.getMemoryLimitKb());
 
-            return new CustomRunResultDto(true, "", truncate(r.stdout()), truncate(r.stderr()),
+            String stderr = r.stderr();
+            if (r.outputLimitExceeded()) {
+                stderr = stderr + (stderr.isBlank() ? "" : "\n") + "Output limit exceeded.";
+            }
+            return new CustomRunResultDto(true, "", truncate(r.stdout()), truncate(stderr),
                     Math.max(r.wallTimeMs(), 0), r.timedOut());
 
         } catch (InterruptedException e) {
@@ -104,19 +134,9 @@ public class CustomRunService {
                     "Could not run: " + e.getMessage());
         } finally {
             sandbox.cleanup(workDir);
+            runSlots.release();
+            activeUsers.remove(username);
         }
-    }
-
-    /** Fills {src} {exe} {dir} into a whitespace-separated command template. */
-    private static List<String> render(String template, Path src, Path exe, Path dir) {
-        List<String> out = new ArrayList<>();
-        for (String token : template.trim().split("\\s+")) {
-            out.add(token
-                    .replace("{src}", src.toString())
-                    .replace("{exe}", exe.toString())
-                    .replace("{dir}", dir.toString()));
-        }
-        return out;
     }
 
     /**

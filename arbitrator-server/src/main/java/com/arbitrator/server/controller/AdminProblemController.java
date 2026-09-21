@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
+ * All rights reserved.
+ */
+
 package com.arbitrator.server.controller;
 
 import java.io.IOException;
@@ -30,6 +35,7 @@ import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.TestCaseRepository;
 import com.arbitrator.server.service.ContestService;
 import com.arbitrator.server.service.ProblemPackageService;
+import com.arbitrator.server.security.RichTextSanitizer;
 
 /**
  * Admin problem management (FR-05, UIF-21). Loopback + ADMIN JWT (decision D3).
@@ -109,7 +115,8 @@ public class AdminProblemController {
         Problem p = problems.findById(id).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "No such problem"));
         return new ProblemDetailDto(p.getId(), p.getCode(), p.getTitle(),
-                p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb(),
+                RichTextSanitizer.sanitize(p.getStatementHtml()),
+                p.getTimeLimitMs(), p.getMemoryLimitKb(),
                 p.isStatementIsPdf());
     }
 
@@ -126,7 +133,8 @@ public class AdminProblemController {
         List<ProblemTestCasesDto.Entry> entries = testCases.findByProblemIdOrderByIdxAsc(id).stream()
                 .map(tc -> new ProblemTestCasesDto.Entry(tc.getIdx(), tc.getInputData(), tc.getExpectedOutput()))
                 .toList();
-        return new ProblemTestCasesDto(p.getId(), p.getCode(), p.getTitle(), p.getStatementHtml(), entries);
+        return new ProblemTestCasesDto(p.getId(), p.getCode(), p.getTitle(),
+                RichTextSanitizer.sanitize(p.getStatementHtml()), entries);
     }
 
     /**
@@ -149,7 +157,12 @@ public class AdminProblemController {
             p.setTitle(edit.title().trim());
         }
         if (edit.statementHtml() != null && !edit.statementHtml().isBlank()) {
-            p.setStatementHtml(edit.statementHtml());
+            String safeStatement = RichTextSanitizer.sanitize(edit.statementHtml());
+            if (safeStatement.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "The statement contains no permitted content");
+            }
+            p.setStatementHtml(safeStatement);
         }
         // Limits are optional in the payload; 0 or negative means "leave alone"
         // rather than "set to zero", which would make the problem unjudgeable.
@@ -179,7 +192,8 @@ public class AdminProblemController {
         problems.save(p);
         notifyContestChanged();
         return new ProblemDetailDto(p.getId(), p.getCode(), p.getTitle(),
-                p.getStatementHtml(), p.getTimeLimitMs(), p.getMemoryLimitKb(),
+                RichTextSanitizer.sanitize(p.getStatementHtml()),
+                p.getTimeLimitMs(), p.getMemoryLimitKb(),
                 p.isStatementIsPdf());
     }
 
