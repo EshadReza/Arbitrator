@@ -2,6 +2,8 @@
 
 Arbitrator is an offline, LAN-first programming contest platform for university labs. An instructor runs one Spring Boot server with MySQL and Docker; students connect through a JavaFX desktop client. The system supports contest administration, problem distribution, sandboxed judging, live standings, announcements, materials, and clarifications without depending on an internet connection.
 
+> **Project Presentation:** [Watch Video (Google Drive)](https://drive.google.com/file/d/1u2Lf1WeJ11qpMlNYV6Lrm9vIo1zdsCJr/view?usp=drive_link)
+
 The repository currently represents a feature-rich beta rather than a production-hardened v1.0. See [`STATUS.md`](STATUS.md) for verified capabilities, open risks, and the release-readiness backlog.
 
 Latest targeted security check: 18 live Docker sandbox tests passed without skips, including three new filesystem attack tests. Host/sibling isolation and forbidden writes passed; submitted code's writable access to `/run-metrics` was confirmed and remains pending remediation approval. This targeted run does not replace the documented earlier full-suite result.
@@ -181,6 +183,7 @@ npm run lint
 
 ## Documentation
 
+- [**Project Presentation**](https://drive.google.com/file/d/1u2Lf1WeJ11qpMlNYV6Lrm9vIo1zdsCJr/view?usp=drive_link) — video presentation walkthrough
 - [`STATUS.md`](STATUS.md) — current implementation and remaining work
 - [`CLAUDE.md`](CLAUDE.md) — concise repository context for coding agents and contributors
 - [`WORKFLOW_PLAN.md`](WORKFLOW_PLAN.md) — current architecture, ownership, workflow, and roadmap
