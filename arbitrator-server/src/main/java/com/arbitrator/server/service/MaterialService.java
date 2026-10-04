@@ -7,7 +7,10 @@ package com.arbitrator.server.service;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.text.Normalizer;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +39,7 @@ import com.arbitrator.server.repo.MaterialRepository;
 /**
  * FR-07 sibling: downloadable instructor materials — slides, PDFs, any file.
  *
- * Owner: Mahir (rules.md Rule 1 — service/material, alongside announcement).
+ * Owner: Mahir (AGENTS.md Rule 1 — service/material, alongside announcement).
  *
  * Bytes live on disk under {@code arbitrator.materials.root}, not as a DB
  * blob like the couple of problem-statement PDFs (V59) — materials are
@@ -51,8 +54,10 @@ public class MaterialService {
 
     private static final Logger log = LoggerFactory.getLogger(MaterialService.class);
 
-    /** Generous enough for lecture slides/video without being unbounded. */
-    private static final long MAX_FILE_BYTES = 200L * 1024 * 1024;
+    /** Match the effective multipart file/request cap in application.yml. */
+    private static final long MAX_FILE_BYTES = 64L * 1024 * 1024;
+    private static final int MAX_DISPLAY_FILENAME_CODEPOINTS = 200;
+    private static final int MAX_PRESERVED_EXTENSION_CODEPOINTS = 20;
 
     private final MaterialRepository materials;
     private final ContestService contestService;
@@ -85,11 +90,19 @@ public class MaterialService {
         contestService.require(contestId);   // 404 rather than an orphan file on disk
 
         String original = sanitizeFilename(file.getOriginalFilename());
-        String storedName = UUID.randomUUID() + extensionOf(original);
-        Path target = root.resolve(storedName);
+        // The uploader's name is display-only. Keeping even its extension out
+        // of the physical name makes the filesystem boundary independent of
+        // attacker-controlled length, characters and platform conventions.
+        String storedName = UUID.randomUUID().toString();
+        Path target = storedPath(storedName);
         try {
-            file.transferTo(target);
+            Files.copy(file.getInputStream(), target);
         } catch (IOException e) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException | SecurityException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+            }
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Could not save the file", e);
         }
@@ -101,7 +114,18 @@ public class MaterialService {
         m.setContentType(contentTypeOr(file.getContentType()));
         m.setSizeBytes(file.getSize());
         m.setUploadedAt(Instant.now());
-        materials.save(m);
+        try {
+            materials.save(m);
+        } catch (RuntimeException e) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException | SecurityException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+                log.warn("Material metadata failed and its new file {} needs cleanup ({})",
+                        safeLogStoredName(storedName), cleanupFailure.getClass().getSimpleName());
+            }
+            throw e;
+        }
 
         broadcast(contestId);
         return toDto(m);
@@ -120,8 +144,15 @@ public class MaterialService {
 
     /** The file behind a catalog row — resolved and existence-checked. */
     public Path fileOf(Material m) {
-        Path p = root.resolve(m.getStoredName());
-        if (!Files.exists(p)) {
+        final Path p;
+        try {
+            p = storedPath(m.getStoredName());
+        } catch (IllegalArgumentException e) {
+            log.warn("Rejected unsafe stored material name for id {}", m.getId());
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "The file is missing on disk — re-upload it");
+        }
+        if (!Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "The file is missing on disk — re-upload it");
         }
@@ -131,12 +162,13 @@ public class MaterialService {
     public void delete(long id) {
         Material m = require(id);
         try {
-            Files.deleteIfExists(root.resolve(m.getStoredName()));
-        } catch (IOException e) {
+            Files.deleteIfExists(storedPath(m.getStoredName()));
+        } catch (IOException | SecurityException | IllegalArgumentException e) {
             // The catalog row is still removed below — a stray orphan file on
             // disk is a cheap failure mode, a delete the instructor can't get
             // rid of is not.
-            log.warn("Could not delete material file {} for id {}", m.getStoredName(), id, e);
+            log.warn("Could not delete material file {} for id {} ({})",
+                    safeLogStoredName(m.getStoredName()), id, e.getClass().getSimpleName());
         }
         materials.delete(m);
         broadcast(m.getContestId());
@@ -162,10 +194,10 @@ public class MaterialService {
             public void afterCommit() {
                 for (String storedName : storedNames) {
                     try {
-                        Files.deleteIfExists(root.resolve(storedName));
-                    } catch (IOException | SecurityException e) {
-                        log.warn("Contest {} was deleted, but material file {} needs cleanup",
-                                contestId, root.resolve(storedName), e);
+                        Files.deleteIfExists(storedPath(storedName));
+                    } catch (IOException | SecurityException | IllegalArgumentException e) {
+                        log.warn("Contest {} was deleted, but material file {} needs cleanup ({})",
+                                contestId, safeLogStoredName(storedName), e.getClass().getSimpleName());
                     }
                 }
             }
@@ -178,7 +210,7 @@ public class MaterialService {
             template.convertAndSend(StompDestinations.contestMaterials(contestId),
                     Map.of("contestId", contestId, "changedAtMs", System.currentTimeMillis()));
         } catch (RuntimeException e) {
-            log.warn("Material broadcast failed for contest {}", contestId, e);
+            log.warn("Material broadcast failed for contest {} ({})", contestId, e.getClass().getSimpleName());
         }
     }
 
@@ -189,17 +221,117 @@ public class MaterialService {
      * catalog and the download response show, not what ends up on disk
      * (that's {@code storedName}, a UUID).
      */
-    private static String sanitizeFilename(String name) {
+    static String sanitizeFilename(String name) {
         if (name == null || name.isBlank()) {
             return "material";
         }
-        String base = Path.of(name).getFileName().toString();
-        return base.replaceAll("[\\r\\n\"]", "_");
+
+        // Treat both separator styles as separators regardless of the host OS.
+        // Do this as string processing so malformed path syntax (including NUL)
+        // can be cleaned rather than throwing before validation.
+        String portable = name.replace('\\', '/');
+        int slash = portable.lastIndexOf('/');
+        String base = slash >= 0 ? portable.substring(slash + 1) : portable;
+        base = Normalizer.normalize(base, Normalizer.Form.NFC);
+
+        StringBuilder safe = new StringBuilder(base.length());
+        base.codePoints().forEach(cp -> safe.appendCodePoint(isUnsafeDisplayCodePoint(cp) ? '_' : cp));
+        base = stripUnsafeEdges(safe.toString());
+        if (base.isBlank() || base.equals(".") || base.equals("..")) {
+            base = "material";
+        }
+        if (isWindowsDeviceName(base)) {
+            base = "_" + base;
+        }
+
+        base = truncatePreservingExtension(base, MAX_DISPLAY_FILENAME_CODEPOINTS);
+        base = stripUnsafeEdges(base);
+        return base.isBlank() || base.equals(".") || base.equals("..") ? "material" : base;
     }
 
-    private static String extensionOf(String filename) {
+    private static boolean isUnsafeDisplayCodePoint(int cp) {
+        int type = Character.getType(cp);
+        return Character.isISOControl(cp)
+                || type == Character.FORMAT
+                || cp == '<' || cp == '>' || cp == ':' || cp == '"'
+                || cp == '/' || cp == '\\' || cp == '|' || cp == '?' || cp == '*';
+    }
+
+    private static String stripUnsafeEdges(String value) {
+        String stripped = value.strip();
+        int end = stripped.length();
+        while (end > 0) {
+            char last = stripped.charAt(end - 1);
+            if (last != '.' && last != ' ') {
+                break;
+            }
+            end--;
+        }
+        return stripped.substring(0, end);
+    }
+
+    private static boolean isWindowsDeviceName(String filename) {
+        int dot = filename.indexOf('.');
+        String stem = (dot < 0 ? filename : filename.substring(0, dot)).toUpperCase(java.util.Locale.ROOT);
+        if (stem.equals("CON") || stem.equals("PRN") || stem.equals("AUX") || stem.equals("NUL")) {
+            return true;
+        }
+        return stem.matches("(?:COM|LPT)[1-9]");
+    }
+
+    private static String truncatePreservingExtension(String filename, int maxCodePoints) {
+        int count = filename.codePointCount(0, filename.length());
+        if (count <= maxCodePoints) {
+            return filename;
+        }
         int dot = filename.lastIndexOf('.');
-        return dot >= 0 ? filename.substring(dot) : "";
+        if (dot > 0) {
+            String extension = filename.substring(dot);
+            int extensionLength = extension.codePointCount(0, extension.length());
+            if (extensionLength <= MAX_PRESERVED_EXTENSION_CODEPOINTS) {
+                return firstCodePoints(filename.substring(0, dot), maxCodePoints - extensionLength)
+                        + extension;
+            }
+        }
+        return firstCodePoints(filename, maxCodePoints);
+    }
+
+    private static String firstCodePoints(String value, int count) {
+        return value.substring(0, value.offsetByCodePoints(0, count));
+    }
+
+    /**
+     * Resolve a physical name only when it is exactly one relative component.
+     * Existing UUID-with-extension rows remain valid, but traversal, absolute
+     * paths and cross-platform separators never reach filesystem operations.
+     */
+    private Path storedPath(String storedName) {
+        if (storedName == null || storedName.isBlank()
+                || storedName.indexOf('/') >= 0 || storedName.indexOf('\\') >= 0
+                || storedName.equals(".") || storedName.equals("..")) {
+            throw new IllegalArgumentException("Unsafe stored material name");
+        }
+        final Path relative;
+        try {
+            relative = Path.of(storedName);
+        } catch (InvalidPathException e) {
+            throw new IllegalArgumentException("Unsafe stored material name", e);
+        }
+        if (relative.isAbsolute() || relative.getNameCount() != 1) {
+            throw new IllegalArgumentException("Unsafe stored material name");
+        }
+        Path resolved = root.resolve(relative).normalize();
+        if (!resolved.startsWith(root) || !root.equals(resolved.getParent())) {
+            throw new IllegalArgumentException("Stored material path escapes its root");
+        }
+        return resolved;
+    }
+
+    /** Only generated opaque file IDs are safe to put in an operational warning. */
+    private static String safeLogStoredName(String storedName) {
+        return storedName != null && storedName.matches(
+                "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:\\.[A-Za-z0-9]{1,16})?")
+                ? storedName : "[invalid stored name]";
     }
 
     private static String contentTypeOr(String contentType) {

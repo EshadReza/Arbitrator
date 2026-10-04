@@ -6,6 +6,7 @@
 package com.arbitrator.server.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.net.InetSocketAddress;
@@ -84,22 +85,42 @@ class RoleEscalationIntegrationTest {
     @Test
     void registrationCannotInjectAnAdministratorRole() {
         String username = unique("role-injection");
-        ResponseEntity<LoginResponse> response = rest.postForEntity(
+        ResponseEntity<String> rejected = rest.postForEntity(
                 base() + ApiPaths.AUTH_REGISTER,
                 Map.of(
                         "username", username,
                         "displayName", "Attempted Admin",
                         "password", "Orbit7!Lake",
                         "role", "ADMIN"),
-                LoginResponse.class);
+                String.class);
 
-        assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        assertNotNull(response.getBody());
+        assertEquals(HttpStatus.BAD_REQUEST, rejected.getStatusCode());
+        assertFalse(users.findByUsername(username).isPresent());
+
+        LoginResponse response = register(username);
         User user = tracked(username);
-        assertEquals(Role.STUDENT, response.getBody().role());
+        assertEquals(Role.STUDENT, response.role());
         assertEquals(Role.STUDENT, user.getRole());
         assertEquals(HttpStatus.FORBIDDEN,
-                get(response.getBody().token(), ApiPaths.ADMIN_CONTESTS).getStatusCode());
+                get(response.token(), ApiPaths.ADMIN_CONTESTS).getStatusCode());
+    }
+
+    @Test
+    void registrationRejectsUnicodeSpoofingButKeepsMultilingualNames() {
+        String deceptiveUser = unique("unicode-spoof");
+        var rejected = rest.postForEntity(base() + ApiPaths.AUTH_REGISTER,
+                new LoginRequest(deceptiveUser, "Ada\u202Eadmin", "Orbit7!Lake"), String.class);
+        assertEquals(HttpStatus.BAD_REQUEST, rejected.getStatusCode());
+        assertFalse(users.findByUsername(deceptiveUser).isPresent());
+
+        String normalUser = unique("unicode-normal");
+        var accepted = rest.postForEntity(base() + ApiPaths.AUTH_REGISTER,
+                new LoginRequest(normalUser, "Cafe\u0301 রাহিম \uD83D\uDE80", "Orbit7!Lake"),
+                LoginResponse.class);
+        assertEquals(HttpStatus.CREATED, accepted.getStatusCode());
+        assertNotNull(accepted.getBody());
+        assertEquals("Café রাহিম \uD83D\uDE80", accepted.getBody().displayName());
+        assertEquals(accepted.getBody().displayName(), tracked(normalUser).getDisplayName());
     }
 
     @Test

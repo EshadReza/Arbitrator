@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "ARBITRATOR_BUNDLE.txt")
 SKIP_DIRS = {"target", ".git", ".settings", "bin", ".metadata"}
 # Mirror .gitignore: anything git won't track must never enter the bundle.
-# application-local.yml holds each developer's real DB password (rules.md Rule 6).
+# application-local.yml holds each developer's real DB password (AGENTS.md Rule 6).
 SKIP_FILES = {
     ".DS_Store",
     "application-local.yml",
@@ -53,9 +53,8 @@ HEADER = """\
             print('wrote', path)
         os.chmod('scripts/sandbox-run.sh', 0o755)
         EOF
-   3. Then follow README.md, and WORKFLOW_PLAN.md section 8 for the
-      GitHub bootstrap (Eshad pushes this tree as ONE initial commit;
-      ownership starts at commit #2).
+   3. Then follow README.md for setup and AGENTS.md for the
+      development and collaboration rules.
 
  Everything below this line is project files, delimited by === FILE: === marks.
 ================================================================================

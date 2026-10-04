@@ -20,7 +20,7 @@
   <description>
     Shared contract between server and client: enums, DTOs, endpoint and topic
     constants. FROZEN after Sprint 1 day 3 — changes require a contract-change
-    issue approved by all three developers (rules.md Rule 2).
+    issue approved by all three developers (AGENTS.md Rule 2).
   </description>
 
   <!-- Deliberately zero dependencies beyond the JDK.

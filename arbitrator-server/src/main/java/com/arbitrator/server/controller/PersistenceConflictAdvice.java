@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
+import com.arbitrator.server.config.SafeErrorAttributes;
+import com.arbitrator.server.config.SecurityHeadersFilter;
 
 /** Translate only recognized conflicts, never expose database diagnostics. */
 @RestControllerAdvice
@@ -38,8 +40,9 @@ public class PersistenceConflictAdvice {
                         ? "Username already taken" : "Contest title already exists", request);
             }
         }
-        log.error("Unhandled persistence integrity failure", failure);
-        return response(500, "Unable to complete this operation", request);
+        log.error("Request {} had an unhandled persistence integrity failure ({})",
+                SecurityHeadersFilter.requestId(request), failure.getClass().getSimpleName());
+        return response(500, SafeErrorAttributes.PUBLIC_MESSAGE, request);
     }
 
     @ExceptionHandler({OptimisticLockingFailureException.class, OptimisticLockException.class})
@@ -49,6 +52,10 @@ public class PersistenceConflictAdvice {
 
     private static ResponseEntity<Map<String, Object>> response(int status, String message,
                                                                 HttpServletRequest request) {
+        if (status >= 500) return ResponseEntity.status(status).header("Cache-Control", "no-store").body(Map.of(
+                "timestamp", Instant.now().toString(), "status", status,
+                "error", "Internal Server Error", "message", SafeErrorAttributes.PUBLIC_MESSAGE,
+                "requestId", SecurityHeadersFilter.requestId(request)));
         return ResponseEntity.status(status).header("Cache-Control", "no-store").body(Map.of(
                 "timestamp", Instant.now().toString(), "status", status,
                 "error", status == 409 ? "Conflict" : "Internal Server Error",

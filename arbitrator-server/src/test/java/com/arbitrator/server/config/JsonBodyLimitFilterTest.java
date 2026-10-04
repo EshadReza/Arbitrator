@@ -35,6 +35,60 @@ class JsonBodyLimitFilterTest {
     }
 
     @Test
+    void oversizedStructuredJsonMediaTypesAreRejectedBeforeTheFilterChain() throws Exception {
+        for (String contentType : new String[]{
+                "application/problem+json",
+                "application/vnd.arbitrator+json; charset=UTF-8"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/login");
+            request.setContentType(contentType);
+            request.setContent(new byte[JsonBodyLimitFilter.MAX_JSON_BYTES + 1]);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            AtomicBoolean called = new AtomicBoolean();
+
+            filter.doFilterInternal(request, response, (req, res) -> called.set(true));
+
+            assertEquals(413, response.getStatus(), contentType);
+            assertFalse(called.get(), contentType);
+        }
+    }
+
+    @Test
+    void unknownContentLengthCannotBypassStructuredJsonLimit() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/login") {
+            @Override public long getContentLengthLong() { return -1; }
+        };
+        request.setContentType("application/problem+json");
+        request.setContent(new byte[JsonBodyLimitFilter.MAX_JSON_BYTES + 1]);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean called = new AtomicBoolean();
+
+        filter.doFilterInternal(request, response, (req, res) -> called.set(true));
+
+        assertEquals(413, response.getStatus());
+        assertFalse(called.get());
+    }
+
+    @Test
+    void structuredJsonExactlyAtLimitRemainsReadable() throws Exception {
+        byte[] body = new byte[JsonBodyLimitFilter.MAX_JSON_BYTES];
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/test");
+        request.setContentType("application/vnd.arbitrator+json");
+        request.setContent(body);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean bodyMatched = new AtomicBoolean();
+
+        filter.doFilterInternal(request, response, (req, res) -> {
+            try {
+                bodyMatched.set(java.util.Arrays.equals(body, req.getInputStream().readAllBytes()));
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        assertTrue(bodyMatched.get());
+    }
+
+    @Test
     void acceptedJsonCanStillBeReadDownstream() throws Exception {
         byte[] body = "{\"value\":42}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/test");

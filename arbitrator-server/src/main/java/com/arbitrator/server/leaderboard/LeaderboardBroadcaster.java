@@ -87,7 +87,8 @@ public class LeaderboardBroadcaster {
             } catch (RuntimeException e) {
                 // One bad contest must not stop the others, and must never kill
                 // the scheduler thread or fail a judging job (FMEA-10).
-                log.warn("Leaderboard broadcast failed for contest {}", contest.getId(), e);
+                log.warn("Leaderboard broadcast failed for contest {} ({})",
+                        contest.getId(), e.getClass().getSimpleName());
             }
         }
     }

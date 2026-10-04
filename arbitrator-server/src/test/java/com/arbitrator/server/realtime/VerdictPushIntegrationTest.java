@@ -227,6 +227,31 @@ class VerdictPushIntegrationTest {
     }
 
     @Test
+    @DisplayName("cross-origin browser handshake is refused even with a valid JWT")
+    void crossOriginHandshakeIsRejectedWithValidToken() throws Exception {
+        String username = "origin_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        disposableUsers.add(username);
+        String token = register(username, "Orbit7!Lake").token();
+        WebSocketStompClient stomp = stompClient();
+        WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
+        headers.setBearerAuth(token);
+        headers.setOrigin("https://evil.example");
+        try {
+            Exception rejected = assertThrows(Exception.class,
+                    () -> stomp.connectAsync(
+                                    "ws://localhost:" + port + StompDestinations.WS_ENDPOINT,
+                                    headers, new StompSessionHandlerAdapter() { })
+                            .get(10, TimeUnit.SECONDS));
+            assertTrue(rejected.toString().contains("403")
+                            || (rejected.getCause() != null
+                                && rejected.getCause().toString().contains("403")),
+                    "the failure should be Spring's forbidden Origin response: " + rejected);
+        } finally {
+            stomp.stop();
+        }
+    }
+
+    @Test
     @DisplayName("forced login closes the old socket and rejects its token")
     void forcedLoginInvalidatesExistingAndFutureWebSockets() throws Exception {
         String username = "ws_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);

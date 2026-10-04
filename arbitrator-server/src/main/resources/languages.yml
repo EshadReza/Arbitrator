@@ -1,7 +1,7 @@
 # FR-21: per-language compile/run commands. LanguageCommandPolicy validates
 # these at startup against an executable/option allowlist. Adding a language
 # therefore also requires an explicit policy entry in the judge engine.
-# Owner: Mahir (rules.md Rule 1).
+# Owner: Mahir (AGENTS.md Rule 1).
 #
 # Placeholders:
 #   {src}  absolute path of the source file inside the work dir

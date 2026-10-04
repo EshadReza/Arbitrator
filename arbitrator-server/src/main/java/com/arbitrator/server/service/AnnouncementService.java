@@ -24,7 +24,7 @@ import com.arbitrator.server.security.RichTextSanitizer;
 /**
  * FR-07: instructor announcements.
  *
- * Owner: Mahir (rules.md Rule 1 — service/announcement).
+ * Owner: Mahir (AGENTS.md Rule 1 — service/announcement).
  *
  * Publishing writes the row first and only then broadcasts, the same ordering
  * the judge uses for submissions (FMEA-01): a client that misses the push can
@@ -80,7 +80,7 @@ public class AnnouncementService {
         } catch (RuntimeException e) {
             // The row is committed; a failed broadcast costs a client its popup,
             // not the announcement itself. It still appears in the list.
-            log.warn("Announcement broadcast failed for contest {}", contestId, e);
+            log.warn("Announcement broadcast failed for contest {} ({})", contestId, e.getClass().getSimpleName());
         }
         return dto;
     }

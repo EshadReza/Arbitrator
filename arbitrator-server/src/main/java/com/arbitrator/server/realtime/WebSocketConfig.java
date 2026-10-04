@@ -76,8 +76,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        // Keep Spring's default same-origin policy. The JavaFX client is not a
+        // browser and sends no Origin header, while a web page from an
+        // unrelated origin must not be able to open this authenticated socket.
         registry.addEndpoint(StompDestinations.WS_ENDPOINT)
-                .setAllowedOriginPatterns("*")     // closed LAN (D4); revisit with HTTPS
                 .addInterceptors(jwtHandshakeInterceptor)
                 .setHandshakeHandler(new DefaultHandshakeHandler() {
                     @Override

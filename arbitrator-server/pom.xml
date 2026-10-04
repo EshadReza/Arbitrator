@@ -92,7 +92,7 @@
 
   <build>
     <!--
-      application-local.yml is git-ignored (rules.md Rule 6) precisely so a
+      application-local.yml is git-ignored (AGENTS.md Rule 6) precisely so a
       developer's machine-specific overrides and real credentials never enter
       version control — but .gitignore has no effect on Maven, which just
       walks src/main/resources on disk regardless of what git tracks. Left

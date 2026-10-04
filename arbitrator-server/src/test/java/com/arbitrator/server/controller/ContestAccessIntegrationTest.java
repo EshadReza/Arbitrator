@@ -6,6 +6,7 @@
 package com.arbitrator.server.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,11 +57,14 @@ import com.arbitrator.common.dto.LoginResponse;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.common.enums.ContestState;
 import com.arbitrator.common.enums.Language;
+import com.arbitrator.common.enums.Verdict;
 import com.arbitrator.server.entity.Contest;
 import com.arbitrator.server.entity.Problem;
+import com.arbitrator.server.entity.Submission;
 import com.arbitrator.server.entity.User;
 import com.arbitrator.server.repo.ContestRepository;
 import com.arbitrator.server.repo.ProblemRepository;
+import com.arbitrator.server.repo.SubmissionRepository;
 import com.arbitrator.server.repo.UserRepository;
 
 /** Full HTTP/STOMP regression coverage for the contest password boundary. */
@@ -75,6 +79,7 @@ class ContestAccessIntegrationTest {
     @Autowired private TestRestTemplate rest;
     @Autowired private ContestRepository contests;
     @Autowired private ProblemRepository problems;
+    @Autowired private SubmissionRepository submissions;
     @Autowired private UserRepository users;
     @Autowired private PasswordEncoder encoder;
     @Autowired private JdbcTemplate jdbc;
@@ -82,6 +87,7 @@ class ContestAccessIntegrationTest {
     @Autowired private AdminContestController adminContests;
     private final List<Long> contestIds = new ArrayList<>();
     private final List<Long> userIds = new ArrayList<>();
+    private final java.util.Map<Long, ContestState> savedContestStates = new java.util.HashMap<>();
 
     @AfterEach
     void cleanUp() {
@@ -93,6 +99,10 @@ class ContestAccessIntegrationTest {
         for (long userId : userIds) {
             users.findById(userId).ifPresent(users::delete);
         }
+        savedContestStates.forEach((id, state) -> contests.findById(id).ifPresent(contest -> {
+            contest.setState(state);
+            contests.saveAndFlush(contest);
+        }));
     }
 
     @Test
@@ -164,6 +174,90 @@ class ContestAccessIntegrationTest {
     }
 
     @Test
+    void joinedLobbyDirectRouteMatrixKeepsReleasedDataClosed() {
+        Fixture f = fixture(ContestState.LOBBY);
+        assertStatus(HttpStatus.OK, join(f.studentToken(), f.contestId(), CONTEST_PASSWORD));
+        Submission prior = submission(f);
+
+        assertStatus(HttpStatus.FORBIDDEN, get(f.studentToken(), "/api/problems/" + f.problemId()));
+        assertStatus(HttpStatus.FORBIDDEN,
+                get(f.studentToken(), "/api/problems/" + f.problemId() + "/statement.pdf"));
+        assertStatus(HttpStatus.FORBIDDEN, post(f.studentToken(), "/api/run",
+                new CustomRunRequest(f.problemId(), Language.PYTHON310, "print(input())", "x")));
+        assertStatus(HttpStatus.FORBIDDEN, post(f.studentToken(), "/api/submissions",
+                new SubmitRequest(f.problemId(), Language.PYTHON310, "print(2)")));
+        assertStatus(HttpStatus.FORBIDDEN, get(f.studentToken(),
+                "/api/contests/" + f.contestId() + "/participants/" + f.username()
+                        + "/problems/A/attempts"));
+        assertStatus(HttpStatus.FORBIDDEN,
+                get(f.studentToken(), "/api/submissions/" + prior.getId() + "/source"));
+        assertStatus(HttpStatus.FORBIDDEN,
+                get(f.studentToken(), "/api/submissions/" + prior.getId() + "/tests"));
+
+        assertEquals("[]", get(f.studentToken(), "/api/problems").getBody());
+        ResponseEntity<LeaderboardDto> board = rest.exchange(base() + "/api/leaderboard",
+                HttpMethod.GET, authorized(f.studentToken(), null), LeaderboardDto.class);
+        assertStatus(HttpStatus.OK, board);
+        assertTrue(board.getBody().problemCodes().isEmpty());
+        assertTrue(board.getBody().rows().isEmpty());
+
+        // Explicit holding-room policy: communications and state are available.
+        assertStatus(HttpStatus.OK, get(f.studentToken(), "/api/contests/" + f.contestId()));
+        assertStatus(HttpStatus.OK, get(f.studentToken(), "/api/materials?contestId=" + f.contestId()));
+        assertStatus(HttpStatus.OK, get(f.studentToken(), "/api/announcements?contestId=" + f.contestId()));
+        assertStatus(HttpStatus.OK, get(f.studentToken(), "/api/clarifications?contestId=" + f.contestId()));
+        assertStatus(HttpStatus.OK,
+                get(f.studentToken(), "/api/contests/" + f.contestId() + "/clarification-privacy"));
+        assertStatus(HttpStatus.OK, post(f.studentToken(), "/api/clarifications",
+                new ClarificationController.AskRequest(null, f.contestId(), "Lobby question", true)));
+
+        // Characterization: history is grant-gated, but not release-gated. A
+        // normally impossible pre-start row therefore exposes its problem code.
+        ResponseEntity<String> history = get(f.studentToken(),
+                "/api/submissions/mine?contestId=" + f.contestId());
+        assertStatus(HttpStatus.OK, history);
+        assertTrue(history.getBody().contains("\"problemCode\":\"A\""), history.getBody());
+    }
+
+    @Test
+    void endedContestRejectsScoringButAllowsIntentionalReviewAndPractice() {
+        // Global /api/problems and /api/leaderboard select a live contest first.
+        // Temporarily retire earlier suites' live fixtures so this ended fixture
+        // is current; restore their states in cleanup rather than changing policy.
+        for (Contest existing : contests.findAll()) {
+            if (existing.getState() != ContestState.DRAFT && existing.getState() != ContestState.ENDED) {
+                savedContestStates.put(existing.getId(), existing.getState());
+                existing.setState(ContestState.DRAFT);
+                contests.saveAndFlush(existing);
+            }
+        }
+        Fixture f = fixture(ContestState.ACTIVE);
+        assertStatus(HttpStatus.OK, join(f.studentToken(), f.contestId(), CONTEST_PASSWORD));
+        Submission prior = submission(f);
+        Contest ended = contests.findById(f.contestId()).orElseThrow();
+        ended.setState(ContestState.ENDED);
+        ended.setEndedAt(Instant.now());
+        contests.saveAndFlush(ended);
+
+        assertStatus(HttpStatus.FORBIDDEN, post(f.studentToken(), "/api/submissions",
+                new SubmitRequest(f.problemId(), Language.PYTHON310, "print(3)")));
+        assertStatus(HttpStatus.OK, get(f.studentToken(), "/api/problems/" + f.problemId()));
+        assertTrue(get(f.studentToken(), "/api/problems").getBody().contains("\"code\":\"A\""));
+        assertStatus(HttpStatus.OK,
+                get(f.studentToken(), "/api/submissions/" + prior.getId() + "/source"));
+        assertStatus(HttpStatus.OK,
+                get(f.studentToken(), "/api/submissions/" + prior.getId() + "/tests"));
+        assertStatus(HttpStatus.OK,
+                get(f.studentToken(), "/api/submissions/mine?contestId=" + f.contestId()));
+        assertStatus(HttpStatus.OK, get(f.studentToken(),
+                "/api/contests/" + f.contestId() + "/participants/" + f.username()
+                        + "/problems/A/attempts"));
+        assertStatus(HttpStatus.OK, get(f.studentToken(), "/api/leaderboard"));
+        assertStatus(HttpStatus.OK, post(f.studentToken(), "/api/run",
+                new CustomRunRequest(f.problemId(), Language.PYTHON310, "print(input())", "practice")));
+    }
+
+    @Test
     void contestTopicSubscriptionRequiresTheSameGrant() throws Exception {
         Fixture f = fixture(ContestState.ACTIVE);
         RecordingSessionHandler deniedHandler = new RecordingSessionHandler();
@@ -207,8 +301,11 @@ class ContestAccessIntegrationTest {
     private Fixture fixture(ContestState state) {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         String username = "gate_" + suffix;
-        LoginResponse student = rest.postForObject(base() + ApiPaths.AUTH_REGISTER,
+        ResponseEntity<LoginResponse> registration = rest.postForEntity(base() + ApiPaths.AUTH_REGISTER,
                 new LoginRequest(username, "Gate Test", "Orbit7!Lake"), LoginResponse.class);
+        assertStatus(HttpStatus.CREATED, registration);
+        LoginResponse student = registration.getBody();
+        assertNotNull(student);
         User user = users.findByUsername(username).orElseThrow();
         userIds.add(user.getId());
 
@@ -230,12 +327,28 @@ class ContestAccessIntegrationTest {
         problem.setStatementHtml("<p>secret</p>");
         problem.setOrdering(1);
         problems.save(problem);
-        return new Fixture(student.token(), contest.getId(), problem.getId());
+        return new Fixture(student.token(), username, user.getId(), contest.getId(), problem.getId());
+    }
+
+    private Submission submission(Fixture fixture) {
+        Submission submission = new Submission();
+        submission.setUserId(fixture.userId());
+        submission.setProblemId(fixture.problemId());
+        submission.setContestId(fixture.contestId());
+        submission.setLanguage(Language.PYTHON310);
+        submission.setSourceCode("print('historical')");
+        submission.setStatus(Submission.Status.DONE);
+        submission.setVerdict(Verdict.AC);
+        submission.setQueuedAt(Instant.now().minusSeconds(5));
+        return submissions.saveAndFlush(submission);
     }
 
     private LoginResponse login(String username, String password, boolean force) {
-        return rest.postForObject(base() + ApiPaths.AUTH_LOGIN,
+        ResponseEntity<LoginResponse> response = rest.postForEntity(base() + ApiPaths.AUTH_LOGIN,
                 new LoginRequest(username, null, password, null, force), LoginResponse.class);
+        assertStatus(HttpStatus.OK, response);
+        assertNotNull(response.getBody());
+        return response.getBody();
     }
 
     private ResponseEntity<String> join(String token, long contestId, String password) {
@@ -260,6 +373,12 @@ class ContestAccessIntegrationTest {
 
     private void assertStatus(HttpStatus expected, ResponseEntity<?> actual) {
         assertEquals(expected, actual.getStatusCode(), actual.getBody() == null ? "" : actual.getBody().toString());
+        // Item 92: private bodies and authorization errors must not be stored
+        // by a browser/shared HTTP cache, even when the requested URL is identical.
+        String cacheControl = actual.getHeaders().getCacheControl();
+        assertNotNull(cacheControl, "Response is missing Cache-Control");
+        assertTrue(cacheControl.contains("no-store"), cacheControl);
+        assertFalse(cacheControl.contains("public"), cacheControl);
     }
 
     private int grantCount(long contestId) {
@@ -294,7 +413,8 @@ class ContestAccessIntegrationTest {
         }
     }
 
-    private record Fixture(String studentToken, long contestId, long problemId) { }
+    private record Fixture(String studentToken, String username, long userId,
+                           long contestId, long problemId) { }
 
     private static final class RecordingSessionHandler extends StompSessionHandlerAdapter {
         final LinkedBlockingQueue<Throwable> errors = new LinkedBlockingQueue<>();

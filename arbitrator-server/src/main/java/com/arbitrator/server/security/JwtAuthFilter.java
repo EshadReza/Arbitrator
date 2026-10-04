@@ -42,6 +42,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         this.users = users;
     }
 
+    /** A health probe must still respond when role lookup cannot reach the database. */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return "/admin/health/live".equals(path) || "/admin/health/ready".equals(path);
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
@@ -92,6 +99,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 }
                 currentUser.ifPresent(user -> {
                     request.setAttribute(VERIFIED_SESSION_ID, sid);
+                    request.setAttribute(AuditContext.AUTH_ACTOR, username);
                     var auth = new UsernamePasswordAuthenticationToken(
                             username,
                             null,

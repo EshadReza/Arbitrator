@@ -30,8 +30,8 @@ import com.arbitrator.server.repo.ContestRepository;
  * has been running against the wall clock while the server was down, and the
  * problems are released before the instructor is ready.
  *
- * So a freshly booted server holds nothing live (CLAUDE.md, "Contest
- * lifecycle"): the instructor opens the lobby and then starts, deliberately.
+ * When reset-on-boot is enabled (README.md, "Runtime configuration"),
+ * the instructor opens the lobby and then starts, deliberately.
  *
  * ENDED contests are left alone — they are history, not something to reopen.
  * Nothing is deleted: only the state and the clock fields are cleared, and the
@@ -71,19 +71,19 @@ public class ContestBootReset {
             if (!enabled) {
                 for (Contest c : live) {
                     if (c.endTime() != null && !Instant.now().isBefore(c.endTime())) {
-                        log.info("Contest \"{}\" end time passed while server was offline — marking ENDED", c.getTitle());
+                        log.info("Contest {} end time passed while server was offline — marking ENDED", c.getId());
                         c.setState(ContestState.ENDED);
                         contests.save(c);
                     } else {
-                        log.info("Contest \"{}\" remains {} across server restart", c.getTitle(), c.getState());
+                        log.info("Contest {} remains {} across server restart", c.getId(), c.getState());
                     }
                 }
                 return;
             }
 
             for (Contest c : live) {
-                log.info("Boot reset: \"{}\" was {} — returning it to DRAFT",
-                        c.getTitle(), c.getState());
+                log.info("Boot reset: contest {} was {} — returning it to DRAFT",
+                        c.getId(), c.getState());
                 c.setState(ContestState.DRAFT);
                 c.setStartTime(null);
                 c.setPausedAt(null);

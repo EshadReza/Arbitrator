@@ -573,6 +573,10 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
 .dash-card>.hd h3{font-size:14px;font-weight:650}
 .dash-card>.hd .spacer{margin-left:auto}
 .dash-card>.hd .tag{font-size:11px;color:var(--muted);background:var(--surface2);border-radius:999px;padding:2.5px 10px}
+.ops-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.ops-metric{background:var(--surface2);border-radius:10px;padding:9px 11px;min-width:0}
+.ops-metric .k{font-size:11px;color:var(--muted)}
+.ops-metric .v{font-size:16px;font-weight:700;margin-top:3px;overflow-wrap:anywhere}
 
 @keyframes donutIn{from{opacity:0;transform:scale(.82) rotate(-10deg)}to{opacity:1;transform:none}}
 @keyframes drawLine{to{stroke-dashoffset:0}}
@@ -724,6 +728,27 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
       <div class="lede">Live overview of the selected contest — participation, verdicts and problem difficulty at a glance.</div>
       <div class="row" style="margin-bottom:14px">
         <button class="btn sm" onclick="loadDashboard()">⟳ Refresh</button>
+      </div>
+      <div class="dash-stack">
+        <div class="dash-card">
+          <div class="hd"><div class="ic" style="--tile-hue:var(--hue-blue)">🩺</div><h3>Server operations</h3>
+            <span class="spacer"></span><span class="hint" id="opsUpdated">Loading…</span>
+            <button class="btn icon" onclick="loadOperations()" title="Refresh server operations">⟳</button></div>
+          <div class="ops-grid">
+            <div class="ops-metric"><div class="k">Host CPU</div><div class="v" id="opsCpu">—</div></div>
+            <div class="ops-metric"><div class="k">Host RAM used</div><div class="v" id="opsRam">—</div></div>
+            <div class="ops-metric"><div class="k">JVM heap used</div><div class="v" id="opsHeap">—</div></div>
+            <div class="ops-metric"><div class="k">Judge disk free</div><div class="v" id="opsJudgeDisk">—</div></div>
+            <div class="ops-metric"><div class="k">Materials disk free</div><div class="v" id="opsMaterialsDisk">—</div></div>
+            <div class="ops-metric"><div class="k">Judge queue</div><div class="v" id="opsQueue">—</div></div>
+            <div class="ops-metric"><div class="k">Queue wait, avg / max (60 s)</div><div class="v" id="opsWait">—</div></div>
+            <div class="ops-metric"><div class="k">DB pool, active / idle / waiting</div><div class="v" id="opsDb">—</div></div>
+            <div class="ops-metric"><div class="k">HTTP 5xx (60 s)</div><div class="v" id="ops5xx">—</div></div>
+            <div class="ops-metric"><div class="k">Failed logins (60 s)</div><div class="v" id="opsLogins">—</div></div>
+            <div class="ops-metric"><div class="k">Judge failures (60 s)</div><div class="v" id="opsJudgeFailures">—</div></div>
+          </div>
+          <p class="hint">Local, process-only counters reset on restart. This panel cannot detect a stopped server or measure network traffic.</p>
+        </div>
       </div>
       <div id="dashContent"><div class="dash-empty">Loading…</div></div>
     </section>
@@ -1533,7 +1558,7 @@ async function login(force){
   },5000);
   if(!alertsTick){ refreshNotifications(); alertsTick=setInterval(refreshNotifications,6000); }
   if(!dashTick) dashTick=setInterval(()=>{
-    if(selected!=null && !$('sec-dashboard').classList.contains('hide')) loadDashboard();
+    if(!$('sec-dashboard').classList.contains('hide')) loadDashboard();
   },8000);
 }
 
@@ -3264,7 +3289,54 @@ function cssVar(name){ return getComputedStyle(document.documentElement).getProp
    very first time (see the flicker note on .dash-hero.enter above). */
 let dashMounted=false, dashEnter='';
 
+const OPS_VALUES=['opsCpu','opsRam','opsHeap','opsJudgeDisk','opsMaterialsDisk',
+  'opsQueue','opsWait','opsDb','ops5xx','opsLogins','opsJudgeFailures'];
+
+function opsSize(bytes){
+  if(!Number.isFinite(bytes)||bytes<0) return '—';
+  return bytes>=1024*1024*1024 ? (bytes/(1024*1024*1024)).toFixed(1)+' GiB'
+    : (bytes/(1024*1024)).toFixed(1)+' MiB';
+}
+
+function opsDisk(disk){
+  return disk&&disk.available ? opsSize(disk.freeBytes)+' free' : 'Unavailable';
+}
+
+async function loadOperations(){
+  let status, body;
+  try{
+    ({status,body}=await api('GET','/api/admin/operations',null,true));
+  }catch{
+    OPS_VALUES.forEach(id=>$(id).textContent='—');
+    $('opsUpdated').textContent='Metrics unavailable';
+    return;
+  }
+  if(status>=300||!body||!body.recent60Seconds){
+    OPS_VALUES.forEach(id=>$(id).textContent='—');
+    $('opsUpdated').textContent='Metrics unavailable';
+    return;
+  }
+  const recent=body.recent60Seconds;
+  $('opsUpdated').textContent='Updated '+new Date(body.sampledAt).toLocaleTimeString();
+  $('opsCpu').textContent=Number.isFinite(body.hostCpuPercent)?body.hostCpuPercent.toFixed(1)+'%':'—';
+  const total=body.hostMemoryTotalBytes, free=body.hostMemoryFreeBytes;
+  $('opsRam').textContent=total>0&&free>=0?opsSize(total-free)+' / '+opsSize(total):'—';
+  $('opsHeap').textContent=opsSize(body.jvmHeapUsedBytes)+' / '+opsSize(body.jvmHeapMaxBytes);
+  $('opsJudgeDisk').textContent=opsDisk(body.judgeDisk);
+  $('opsMaterialsDisk').textContent=opsDisk(body.materialsDisk);
+  $('opsQueue').textContent=String(body.judgeQueueDepth);
+  $('opsWait').textContent=recent.queueWaitSamples>0
+    ?recent.queueWaitAverageMs+' / '+recent.queueWaitMaximumMs+' ms':'— (no starts)';
+  const pool=body.databasePool;
+  $('opsDb').textContent=pool&&pool.available
+    ?pool.active+' / '+pool.idle+' / '+pool.waiting:'Unavailable';
+  $('ops5xx').textContent=String(recent.http5xx);
+  $('opsLogins').textContent=String(recent.failedLogins);
+  $('opsJudgeFailures').textContent=String(recent.judgeFailures);
+}
+
 async function loadDashboard(){
+  loadOperations();
   const box=$('dashContent');
   if(selected==null){
     box.innerHTML='<div class="dash-empty">Select a contest on the "All contests" page first.</div>';

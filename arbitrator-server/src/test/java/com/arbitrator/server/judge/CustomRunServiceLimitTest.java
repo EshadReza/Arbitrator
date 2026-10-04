@@ -6,6 +6,7 @@
 package com.arbitrator.server.judge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,6 +33,39 @@ import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.service.ContestAccessService;
 
 class CustomRunServiceLimitTest {
+
+    @Test
+    void sandboxFailureDoesNotBecomeStudentFacingInternalDetailAndSlotRecovers() {
+        JudgeProperties props = new JudgeProperties();
+        JudgeProperties.LanguageSpec python = new JudgeProperties.LanguageSpec();
+        python.setSourceFile("main.py");
+        python.setRun("python3 {src}");
+        props.setLanguages(Map.of("python310", python));
+        Problem problem = new Problem();
+        problem.setContestId(1L);
+        ProblemRepository problems = (ProblemRepository) Proxy.newProxyInstance(
+                ProblemRepository.class.getClassLoader(), new Class<?>[] { ProblemRepository.class },
+                (proxy, method, args) -> method.getName().equals("findById")
+                        ? Optional.of(problem) : defaultValue(method.getReturnType()));
+        ContestAccessService access = new ContestAccessService(null, null, null) {
+            @Override public Contest requireReleasedAccess(long contestId, String username) { return new Contest(); }
+        };
+        SandboxExecutor broken = new SandboxExecutor(props) {
+            @Override public Path createWorkDir(long submissionId) throws IOException {
+                throw new IOException("PRIVATE_INTERNAL_SENTINEL /tmp/work SECRET_SQL");
+            }
+            @Override public void cleanup(Path workDir) {}
+        };
+        CustomRunService service = new CustomRunService(problems, broken, props, access);
+        CustomRunRequest run = new CustomRunRequest(1L, Language.PYTHON310, "print(1)", "");
+        for (int attempt = 0; attempt < 2; attempt++) {
+            ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                    () -> service.run("alice", run));
+            assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, error.getStatusCode());
+            assertEquals("Unable to complete this request", error.getReason());
+            assertFalse(error.getReason().contains("PRIVATE_INTERNAL_SENTINEL"));
+        }
+    }
 
     @Test
     void oversizedUtf8SourceIsRejectedBeforeProblemLookup() {

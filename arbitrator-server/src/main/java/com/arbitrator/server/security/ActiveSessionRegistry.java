@@ -190,8 +190,7 @@ public class ActiveSessionRegistry {
             } catch (RuntimeException e) {
                 // Authentication state has already changed and must not be
                 // rolled back merely because transport cleanup had a problem.
-                log.warn("Session {} for {} was invalidated, but a cleanup listener failed",
-                        sid, username, e);
+                log.warn("An invalidated session's cleanup listener failed ({})", e.getClass().getSimpleName());
             }
         });
     }

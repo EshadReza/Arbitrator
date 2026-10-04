@@ -6,6 +6,7 @@
 package com.arbitrator.server.service;
 
 import java.time.Instant;
+import java.text.Normalizer;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
@@ -71,10 +72,11 @@ public class UserService {
         }
         String displayName = req.displayName() == null || req.displayName().isBlank()
                 ? username : req.displayName().trim();
+        displayName = Normalizer.normalize(displayName, Normalizer.Form.NFC);
         if (displayName.codePointCount(0, displayName.length()) > MAX_DISPLAY_NAME_LENGTH
-                || displayName.codePoints().anyMatch(Character::isISOControl)) {
+                || displayName.codePoints().anyMatch(UserService::unsafeDisplayNameCodePoint)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Display name must be at most 128 characters and cannot contain control characters");
+                    "Display name must be at most 128 characters and cannot contain control or invisible formatting characters");
         }
         if (users.existsByUsername(username)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already taken");
@@ -90,6 +92,18 @@ public class UserService {
         sessions.register(u.getUsername(), sid, u.getRole(), true);  // brand new account
         return new LoginResponse(jwt.generate(u.getUsername(), u.getRole(), sid),
                 u.getUsername(), u.getDisplayName(), u.getRole());
+    }
+
+    private static boolean unsafeDisplayNameCodePoint(int cp) {
+        // Preserve visible Unicode and script-shaping ZWJ/ZWNJ; reject only controls
+        // that can reorder or hide a student-chosen name in standings/notifications.
+        return Character.isISOControl(cp)
+                || Character.getType(cp) == Character.SURROGATE
+                || cp == 0x2028 || cp == 0x2029
+                || cp == 0x00AD || cp == 0x061C || cp == 0x200B
+                || cp == 0x200E || cp == 0x200F || cp == 0xFEFF
+                || (cp >= 0x202A && cp <= 0x202E)
+                || (cp >= 0x2060 && cp <= 0x206F);
     }
 
     /**

@@ -48,6 +48,7 @@ public class AdminContestController {
     private final ClarificationService clarifications;
     private final ProblemPackageService packageService;
     private final MaterialService materials;
+    private final com.arbitrator.server.security.AuditService audit;
 
     public AdminContestController(ContestService contestService,
                                   ProblemRepository problems,
@@ -57,7 +58,8 @@ public class AdminContestController {
                                   JdbcTemplate jdbcTemplate,
                                   ClarificationService clarifications,
                                   ProblemPackageService packageService,
-                                  MaterialService materials) {
+                                  MaterialService materials, com.arbitrator.server.security.AuditService audit) {
+        this.audit = audit;
         this.contestService = contestService;
         this.problems = problems;
         this.statePublisher = statePublisher;
@@ -131,7 +133,7 @@ public class AdminContestController {
      * Whether contestants may see the tests behind their own verdicts.
      *
      * Kept off the contest DTOs deliberately: those are a frozen contract
-     * (rules.md Rule 2) and this is one boolean only the console needs.
+     * (AGENTS.md Rule 2) and this is one boolean only the console needs.
      */
     @GetMapping(ApiPaths.ADMIN_CONTEST_TEST_VISIBILITY)
     public Map<String, Boolean> testVisibility(@PathVariable long id) {
@@ -200,6 +202,7 @@ public class AdminContestController {
     @DeleteMapping(ApiPaths.ADMIN_CONTEST_BY_ID)
     @Transactional
     public ResponseEntity<Void> delete(@PathVariable long id) {
+        var before = jdbcTemplate.queryForList("SELECT state,duration_minutes FROM contests WHERE id = ?", id);
         materials.deleteForContest(id);
         jdbcTemplate.update("DELETE FROM submission_results WHERE submission_id IN (SELECT id FROM submissions WHERE contest_id = ?)", id);
         jdbcTemplate.update("DELETE FROM submissions WHERE contest_id = ?", id);
@@ -212,6 +215,7 @@ public class AdminContestController {
         jdbcTemplate.update("DELETE FROM problem_statement_pdfs WHERE problem_id IN (SELECT id FROM problems WHERE contest_id = ?)", id);
         jdbcTemplate.update("DELETE FROM problems WHERE contest_id = ?", id);
         jdbcTemplate.update("DELETE FROM contests WHERE id = ?", id);
+        if (!before.isEmpty()) audit.change("Contest", id, before.get(0), null);
         return ResponseEntity.noContent().build();
     }
 

@@ -4,7 +4,7 @@
   All rights reserved.
 -->
 
-<!-- Shared Eclipse formatter (rules.md Rule 4). Import via:
+<!-- Shared Eclipse formatter (AGENTS.md Rule 4). Import via:
      Window > Preferences > Java > Code Style > Formatter > Import...
      Then enable Save Actions: format source code + organize imports.
      Everyone uses THIS profile — whitespace-only diffs are half of all

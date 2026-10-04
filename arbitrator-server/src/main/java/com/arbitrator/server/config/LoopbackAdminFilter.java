@@ -24,7 +24,7 @@ import jakarta.servlet.http.HttpServletResponse;
  * requires the ADMIN role on /api/admin/**. Runs before the security chain.
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 2)
 public class LoopbackAdminFilter extends OncePerRequestFilter {
 
     @Override

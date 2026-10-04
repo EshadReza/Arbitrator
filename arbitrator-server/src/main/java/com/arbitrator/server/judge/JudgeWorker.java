@@ -8,6 +8,7 @@ package com.arbitrator.server.judge;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,7 @@ import com.arbitrator.server.entity.Problem;
 import com.arbitrator.server.entity.Submission;
 import com.arbitrator.server.entity.TestCase;
 import com.arbitrator.server.leaderboard.LeaderboardBroadcaster;
+import com.arbitrator.server.monitor.OperationalMetrics;
 import com.arbitrator.server.realtime.VerdictPublisher;
 import com.arbitrator.server.repo.ProblemRepository;
 import com.arbitrator.server.repo.SubmissionRepository;
@@ -59,6 +61,7 @@ public class JudgeWorker {
     private final LeaderboardBroadcaster leaderboardBroadcaster;
     private final JudgeProperties props;
     private final JdbcTemplate jdbc;
+    private final OperationalMetrics metrics;
 
     public JudgeWorker(SubmissionRepository submissions,
                        ProblemRepository problems,
@@ -70,7 +73,8 @@ public class JudgeWorker {
                        VerdictPublisher publisher,
                        LeaderboardBroadcaster leaderboardBroadcaster,
                        JudgeProperties props,
-                       JdbcTemplate jdbc) {
+                       JdbcTemplate jdbc,
+                       OperationalMetrics metrics) {
         this.submissions = submissions;
         this.problems = problems;
         this.testCases = testCases;
@@ -82,6 +86,7 @@ public class JudgeWorker {
         this.leaderboardBroadcaster = leaderboardBroadcaster;
         this.props = props;
         this.jdbc = jdbc;
+        this.metrics = metrics;
     }
 
     public void judge(long submissionId) {
@@ -89,6 +94,9 @@ public class JudgeWorker {
         if (sub == null) {
             log.warn("Submission {} vanished before judging", submissionId);
             return;
+        }
+        if (sub.getQueuedAt() != null) {
+            metrics.recordQueueWait(Duration.between(sub.getQueuedAt(), Instant.now()).toMillis());
         }
         sub.setStatus(Submission.Status.JUDGING);
         submissions.save(sub);
@@ -99,7 +107,7 @@ public class JudgeWorker {
             Outcome outcome = evaluate(sub, workDir);
             record(sub, outcome);
         } catch (Exception e) {
-            log.error("Judging {} failed internally", submissionId, e);
+            log.error("Judging {} failed internally ({})", submissionId, e.getClass().getSimpleName());
             record(sub, Outcome.internalError(e.getMessage()));
         } finally {
             sandbox.cleanup(workDir);
@@ -194,13 +202,14 @@ public class JudgeWorker {
             saveTestResult(sub.getId(), tc.getIdx(), v, r);
 
             if (v != Verdict.AC) {
-                return new Outcome(v, maxTime, maxMem, null, testIndex);   // fail-fast BR-05
+                return new Outcome(v, maxTime, maxMem, null, testIndex, false);   // fail-fast BR-05
             }
         }
-        return new Outcome(Verdict.AC, maxTime, maxMem, null, -1);
+        return new Outcome(Verdict.AC, maxTime, maxMem, null, -1, false);
     }
 
     private void record(Submission sub, Outcome o) {
+        if (o.judgeError) metrics.recordJudgeFailure();
         sub.setStatus(Submission.Status.DONE);
         sub.setVerdict(o.verdict);
         sub.setExecTimeMs(o.execTimeMs);
@@ -321,10 +330,10 @@ public class JudgeWorker {
     }
 
     private record Outcome(Verdict verdict, long execTimeMs, long peakMemoryKb,
-                           String compilerOutput, int failedTestIndex) {
+                           String compilerOutput, int failedTestIndex, boolean judgeError) {
 
         static Outcome ce(String compilerOutput) {
-            return new Outcome(Verdict.CE, -1, -1, compilerOutput, -1);
+            return new Outcome(Verdict.CE, -1, -1, compilerOutput, -1, false);
         }
 
         /**
@@ -338,7 +347,7 @@ public class JudgeWorker {
          */
         static Outcome internalError(String message) {
             return new Outcome(Verdict.RE, -1, -1,
-                    message == null ? null : truncate("Judge error: " + message), -1);
+                    message == null ? null : truncate("Judge error: " + message), -1, true);
         }
     }
 }

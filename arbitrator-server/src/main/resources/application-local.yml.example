@@ -1,5 +1,5 @@
 # Copy to application-local.yml (git-ignored) and fill in YOUR local values.
-# Each developer runs their own MySQL 8 instance (rules.md Rule 6).
+# Each developer runs their own MySQL 8 instance (AGENTS.md Rule 6).
 # No JWT signing-key setup is required; the server generates a temporary private key.
 spring:
   datasource:

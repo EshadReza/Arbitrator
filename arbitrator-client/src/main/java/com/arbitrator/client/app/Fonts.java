@@ -14,7 +14,7 @@ import javafx.scene.text.Font;
  * for code — before any scene loads, instead of trusting the OS to have them.
  *
  * A lab of "basic Dell premade" Windows machines has neither font installed
- * by default (CLAUDE.md's target hardware); without this, every CSS
+ * by default (AGENTS.md's target hardware); without this, every CSS
  * `-fx-font-family: "Inter", ...` and `"JetBrains Mono", ...` silently falls
  * through to whatever the fallback chain resolves to on that machine — a
  * different UI typeface per PC, and worse, a different *monospace* face in

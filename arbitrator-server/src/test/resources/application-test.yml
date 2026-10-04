@@ -20,6 +20,11 @@ spring:
     locations: classpath:db/migration
 
 arbitrator:
+  api-rate-limit:
+    ip:
+      # Integration fixtures share localhost; the dedicated rate-limit attack
+      # test overrides this to 3 and still verifies registration throttling.
+      registration: 300
   admin:
     auto-open: false               # a test run must never launch a browser
   jwt:

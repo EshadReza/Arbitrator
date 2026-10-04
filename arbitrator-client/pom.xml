@@ -18,9 +18,9 @@
   <artifactId>arbitrator-client</artifactId>
   <name>Arbitrator :: JavaFX Client</name>
 
-  <!-- Owner: Zahin — entire module (rules.md Rule 1).
+  <!-- Owner: Zahin — entire module (AGENTS.md Rule 1).
        JavaFX comes in as plain Maven dependencies; NEVER configure an
-       Eclipse JavaFX SDK / module-path (rules.md, WORKFLOW_PLAN §2).
+       Eclipse JavaFX SDK / module-path (AGENTS.md, README.md architecture).
        Run with:  java -cp <deps> com.arbitrator.client.app.Launcher
        or in Eclipse: Run As -> Java Application on Launcher (no VM args).
        NOTE: `mvn javafx:run` puts JavaFX on the MODULE path, where javafx-web
@@ -28,7 +28,7 @@
        on Maven Central. Classpath launching avoids the module graph entirely.
        Mock mode: mvn -pl arbitrator-client javafx:run -Darbitrator.mock=true
 
-       Cross-platform packaging (rules.md Rule 1 — build config, not app code):
+       Cross-platform packaging (AGENTS.md Rule 1 — build config, not app code):
        JavaFX publishes separate native libraries per OS/arch, so a jar built
        on one platform silently only runs on that platform — plain `mvn
        package` on the build machine only bundles e.g. mac-aarch64 natives.

@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Eshad Bin Reza, Mahir Labib, Zahin Ahmad.
 # All rights reserved.
-# scripts/docker/Dockerfile — owner: Mahir (rules.md Rule 1)
+# scripts/docker/Dockerfile — owner: Mahir (AGENTS.md Rule 1)
 #
 # The judge's sandbox image (FR-10, NFR-S03/S04). One shared image for every
 # language in languages.yml, same design as SandboxExecutor itself: the image

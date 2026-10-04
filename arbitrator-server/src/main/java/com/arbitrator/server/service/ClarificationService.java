@@ -237,7 +237,7 @@ public class ClarificationService {
             template.convertAndSend(StompDestinations.contestClarifications(contestId),
                     Map.of("contestId", contestId, "changedAtMs", System.currentTimeMillis()));
         } catch (RuntimeException e) {
-            log.warn("Clarification broadcast failed for contest {}", contestId, e);
+            log.warn("Clarification broadcast failed for contest {} ({})", contestId, e.getClass().getSimpleName());
         }
     }
 

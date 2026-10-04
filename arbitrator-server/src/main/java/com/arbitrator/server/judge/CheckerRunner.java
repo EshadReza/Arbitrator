@@ -30,8 +30,9 @@ import com.arbitrator.server.entity.Problem;
  * {@code checker <input_file> <contestant_output_file> <expected_output_file>}.
  *
  * Checkers run under their own resource limits (configured in {@link JudgeProperties}).
- * Checker failure modes (crash, timeout, non-zero unmapped exit code) produce an {@code RE} verdict
- * and are logged loudly server-side.
+ * Checker failure modes (crash, timeout, memory/output limit, non-zero unmapped exit code) produce
+ * an {@code RE} verdict and are logged loudly server-side. They must not be reported as contestant
+ * MLE/OLE because the instructor-provided checker, rather than the student's program, failed.
  */
 @Component
 public class CheckerRunner {
@@ -71,7 +72,7 @@ public class CheckerRunner {
         try {
             binaryPath = getOrCompileChecker(problem.getId(), problem.getCheckerSource());
         } catch (CheckerCompilationException e) {
-            log.error("Checker compilation failed for problem {}: {}", problem.getId(), e.getCompilerOutput());
+            log.error("Checker compilation failed for problem {}", problem.getId());
             return Verdict.RE;
         }
 
@@ -99,6 +100,15 @@ public class CheckerRunner {
                 log.error("Checker execution timed out after {} ms for problem {}", timeLimitMs, problem.getId());
                 return Verdict.RE;
             }
+            if (r.peakMemoryKb() > 0 && r.peakMemoryKb() > memoryLimitKb) {
+                log.error("Checker for problem {} exceeded its memory limit: {} KiB used, {} KiB allowed",
+                        problem.getId(), r.peakMemoryKb(), memoryLimitKb);
+                return Verdict.RE;
+            }
+            if (r.outputLimitExceeded()) {
+                log.error("Checker for problem {} exceeded the sandbox output limit", problem.getId());
+                return Verdict.RE;
+            }
 
             int exitCode = r.exitCode();
             if (exitCode == 0) {
@@ -106,12 +116,11 @@ public class CheckerRunner {
             } else if (exitCode == 1 || exitCode == 2) {
                 return Verdict.WA;
             } else {
-                log.error("Checker for problem {} failed with unmapped exit code {}: {}",
-                        problem.getId(), exitCode, r.stderr().isBlank() ? r.stdout() : r.stderr());
+                log.error("Checker for problem {} failed with unmapped exit code {}", problem.getId(), exitCode);
                 return Verdict.RE;
             }
         } catch (Exception e) {
-            log.error("Checker execution threw exception for problem {}", problem.getId(), e);
+            log.error("Checker execution failed for problem {} ({})", problem.getId(), e.getClass().getSimpleName());
             return Verdict.RE;
         } finally {
             sandbox.cleanup(workDir);

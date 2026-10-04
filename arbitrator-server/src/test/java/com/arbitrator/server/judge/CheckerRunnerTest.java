@@ -23,6 +23,9 @@ import org.junit.jupiter.api.Test;
 import com.arbitrator.common.enums.CheckerType;
 import com.arbitrator.common.enums.Verdict;
 import com.arbitrator.server.entity.Problem;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
 
 /**
  * Tests for {@link CheckerRunner} (FR-14).
@@ -66,7 +69,7 @@ class CheckerRunnerTest {
 
     @AfterEach
     void tearDown() {
-        sandbox.cleanup(workDir);
+        sandbox.cleanup(Path.of(props.getWorkRoot()));
     }
 
     @Test
@@ -127,6 +130,40 @@ class CheckerRunnerTest {
     }
 
     @Test
+    void checkerCompilerAndRuntimeOutputNeverEnterOperationalLog() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        Logger logger = (Logger) LoggerFactory.getLogger(CheckerRunner.class);
+        var appender = new ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start(); logger.addAppender(appender);
+        try {
+            assertEquals(Verdict.RE, check(901L, "#error PRIVATE_CHECKER_SOURCE_SENTINEL\nint main(){return 0;}"));
+            Problem problem = createCustomProblem(902L, """
+                    #include <fstream>
+                    #include <iostream>
+                    #include <string>
+                    int main(int argc, char* argv[]) {
+                        std::ifstream expected(argv[3]);
+                        std::string secret;
+                        std::getline(expected, secret);
+                        std::cerr << secret;
+                        return 42;
+                    }
+                    """);
+            Path input = createFile("secret-input.txt", "1\n");
+            Path actual = createFile("secret-actual.txt", "1\n");
+            Path expected = createFile("secret-expected.txt", "PRIVATE_HIDDEN_TEST_SENTINEL\n");
+            assertEquals(Verdict.RE, checkerRunner.check(problem, input, actual, expected));
+            assertEquals(2, appender.list.size());
+            for (var event : appender.list) {
+                assertFalse(event.getFormattedMessage().contains("PRIVATE_"));
+                assertTrue(event.getThrowableProxy() == null);
+            }
+        } finally {
+            logger.detachAppender(appender); appender.stop();
+        }
+    }
+
+    @Test
     void checkerHangsKilledByTimeoutReturnsRuntimeError() throws Exception {
         assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
 
@@ -150,6 +187,132 @@ class CheckerRunnerTest {
 
         assertEquals(Verdict.RE, v, "Checker hang must produce RE verdict");
         assertTrue(elapsed < 4000, "Checker timeout must kill promptly, took " + elapsed + " ms");
+    }
+
+    @Test
+    void checkerExceedingConfiguredMemoryLimitReturnsRuntimeError() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        props.setCheckerMemoryLimitKb(64 * 1024); // container receives ~128 MiB headroom
+        String source = """
+                #include <sys/resource.h>
+                #include <vector>
+                int main() {
+                    std::vector<unsigned char> memory(96ULL * 1024 * 1024);
+                    volatile unsigned char* touched = memory.data();
+                    for (std::size_t i = 0; i < memory.size(); i += 4096) touched[i] = 1;
+                    rusage usage{};
+                    if (getrusage(RUSAGE_SELF, &usage) != 0) return 42;
+                    return usage.ru_maxrss > 64 * 1024 ? 0 : 43;
+                }
+                """;
+        // The container retains observation headroom, but the checker policy
+        // must reject measured usage above the configured limit.
+        assertEquals(Verdict.RE, check(201L, source));
+    }
+
+    @Test
+    void checkerCannotReachNetworkEndpoints() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        String source = """
+                #include <arpa/inet.h>
+                #include <sys/socket.h>
+                #include <unistd.h>
+                bool connects(const char* ip, int port) {
+                    int fd = socket(AF_INET, SOCK_STREAM, 0);
+                    if (fd < 0) return false;
+                    sockaddr_in address{}; address.sin_family = AF_INET;
+                    address.sin_port = htons(port); inet_pton(AF_INET, ip, &address.sin_addr);
+                    bool ok = connect(fd, (sockaddr*)&address, sizeof(address)) == 0;
+                    close(fd); return ok;
+                }
+                int main() {
+                    return connects("127.0.0.1", 3306)
+                        || connects("169.254.169.254", 80)
+                        || connects("1.1.1.1", 53) ? 42 : 0;
+                }
+                """;
+        assertEquals(Verdict.AC, check(202L, source));
+    }
+
+    @Test
+    void checkerCannotReadHostOrSiblingFilesOrWriteRuntimeMount() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        Path root = Path.of(props.getWorkRoot());
+        Path hostSecret = root.resolve("host-secret.txt");
+        Path sibling = sandbox.createWorkDir(999);
+        Path siblingSecret = sibling.resolve("sibling-secret.txt");
+        Files.writeString(hostSecret, "HOST-CHECKER-SECRET");
+        Files.writeString(siblingSecret, "SIBLING-CHECKER-SECRET");
+        String source = """
+                #include <fstream>
+                #include <string>
+                bool readable(const std::string& p) { std::ifstream f(p); return bool(f); }
+                bool writable(const std::string& p) {
+                    std::ofstream f(p); f << "attack" << std::flush; return bool(f);
+                }
+                int main() {
+                    const std::string host = "%s", sibling = "%s";
+                    if (readable(host) || readable(sibling)
+                        || readable("/proc/1/root" + host)
+                        || readable("/proc/1/root" + sibling)
+                        || readable("/base/host-secret.txt")) return 41;
+                    if (writable("/sandbox/new-file") || writable("/sandbox/input.txt")
+                        || writable("/etc/checker-attack")) return 42;
+                    return 0;
+                }
+                """.formatted(hostSecret, siblingSecret);
+        assertEquals(Verdict.AC, check(203L, source));
+        assertEquals("HOST-CHECKER-SECRET", Files.readString(hostSecret));
+        assertEquals("SIBLING-CHECKER-SECRET", Files.readString(siblingSecret));
+        assertFalse(Files.exists(workDir.resolve("new-file")));
+    }
+
+    @Test
+    void checkerForkPressureHitsPidLimitAndRecovers() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        String source = """
+                #include <sys/wait.h>
+                #include <unistd.h>
+                #include <vector>
+                int main() {
+                    int gate[2]; if (pipe(gate) != 0) return 41;
+                    std::vector<pid_t> children;
+                    bool limited = false;
+                    for (int i = 0; i < 256; ++i) {
+                        pid_t child = fork();
+                        if (child < 0) { limited = true; break; }
+                        if (child == 0) { close(gate[1]); char c; read(gate[0], &c, 1); _exit(0); }
+                        children.push_back(child);
+                    }
+                    close(gate[0]); close(gate[1]);
+                    for (pid_t child : children) waitpid(child, nullptr, 0);
+                    return limited && children.size() < 64 ? 0 : 42;
+                }
+                """;
+        assertEquals(Verdict.AC, check(204L, source));
+        assertEquals(Verdict.AC, check(205L, "int main() { return 0; }"),
+                "PID exhaustion must not affect the next checker container");
+    }
+
+    @Test
+    void checkerOutputFloodIsKilledAndReturnsRuntimeError() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        String source = """
+                #include <iostream>
+                int main() { while (true) std::cerr.put(' '); }
+                """;
+        long start = System.currentTimeMillis();
+        assertEquals(Verdict.RE, check(206L, source));
+        assertTrue(System.currentTimeMillis() - start < 10_000,
+                "output flood must be stopped promptly");
+    }
+
+    private Verdict check(long problemId, String source) throws Exception {
+        Problem problem = createCustomProblem(problemId, source);
+        Path input = createFile("input-" + problemId + ".txt", "1\n");
+        Path actual = createFile("actual-" + problemId + ".txt", "1\n");
+        Path expected = createFile("expected-" + problemId + ".txt", "1\n");
+        return checkerRunner.check(problem, input, actual, expected);
     }
 
     private Problem createCustomProblem(long id, String checkerSource) {

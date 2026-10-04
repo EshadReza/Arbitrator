@@ -149,6 +149,35 @@ class UserServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, overlong.getStatusCode());
     }
 
+    @ParameterizedTest
+    @MethodSource("deceptiveDisplayNames")
+    void registrationRejectsDeceptiveUnicodeBeforePersistence(String displayName) {
+        var fixture = fixture();
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> fixture.service.register(new LoginRequest("student1", displayName, "Orbit7!Lake")));
+
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        assertEquals(null, fixture.checkedUsername.get());
+        assertEquals(null, fixture.savedUser.get());
+    }
+
+    static Stream<String> deceptiveDisplayNames() {
+        return Stream.of("Ada\u202Eadmin", "Ada\u2066admin", "Ada\u061Cadmin",
+                "Ada\u200Badmin", "Ada\u2060admin", "Ada\uFEFFadmin",
+                "Ada\u00ADadmin", "Ada\u2028admin", "Ada\uD800admin");
+    }
+
+    @Test
+    void registrationNormalizesOrdinaryMultilingualDisplayNameWithoutRemovingJoiners() {
+        var fixture = fixture();
+        String decomposed = "  Cafe\u0301 রাহিম می\u200Cخواهم \uD83D\uDE80  ";
+
+        fixture.service.register(new LoginRequest("student1", decomposed, "Orbit7!Lake"));
+
+        assertEquals("Café রাহিম می\u200Cخواهم \uD83D\uDE80", fixture.savedUser.get().getDisplayName());
+    }
+
     private static Fixture fixture() {
         AtomicReference<String> checkedUsername = new AtomicReference<>();
         AtomicReference<User> savedUser = new AtomicReference<>();

@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
 
 import org.junit.jupiter.api.Test;
 
@@ -77,5 +80,26 @@ class ActiveSessionRegistryTest {
 
         assertTrue(sessions.register("alice", "sid-2", com.arbitrator.common.enums.Role.STUDENT, true));
         assertTrue(sessions.isActive("alice", "sid-2"));
+    }
+
+    @Test
+    void cleanupFailureDoesNotLogSessionIdOrExceptionMessage() {
+        Logger logger = (Logger) LoggerFactory.getLogger(ActiveSessionRegistry.class);
+        var appender = new ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start(); logger.addAppender(appender);
+        try {
+            ActiveSessionRegistry sessions = new ActiveSessionRegistry();
+            sessions.onInvalidated((username, sid) -> {
+                throw new IllegalStateException("PRIVATE_EXCEPTION_SENTINEL");
+            });
+            sessions.register("alice", "PRIVATE_SESSION_SENTINEL", com.arbitrator.common.enums.Role.STUDENT, false);
+            assertTrue(sessions.register("alice", "replacement", com.arbitrator.common.enums.Role.STUDENT, true));
+            assertTrue(sessions.isActive("alice", "replacement"));
+            assertEquals(1, appender.list.size());
+            assertFalse(appender.list.get(0).getFormattedMessage().contains("PRIVATE_"));
+            assertTrue(appender.list.get(0).getThrowableProxy() == null);
+        } finally {
+            logger.detachAppender(appender); appender.stop();
+        }
     }
 }

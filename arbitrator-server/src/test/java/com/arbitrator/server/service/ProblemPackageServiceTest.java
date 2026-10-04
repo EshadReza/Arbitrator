@@ -8,6 +8,7 @@ package com.arbitrator.server.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -37,7 +39,7 @@ import com.arbitrator.server.repo.TestCaseRepository;
  *
  * Deliberately Mockito-free: Byte Buddy (pinned by the Spring Boot 3.2.5 BOM)
  * supports Java 22 at most, and a dev machine on a newer JDK cannot mock at
- * all. Hand-rolled fakes run on every JDK — see CLAUDE.md "things that bite".
+ * all. Hand-rolled fakes run on every JDK — see AGENTS.md "things that bite".
  */
 class ProblemPackageServiceTest {
 
@@ -86,10 +88,11 @@ class ProblemPackageServiceTest {
             }
         };
 
-        service = new ProblemPackageService(problems, testCases, contestService, null, null);
+        var audit = new com.arbitrator.server.security.AuditService(null, new com.fasterxml.jackson.databind.ObjectMapper());
+        service = new ProblemPackageService(problems, testCases, contestService, null, null, audit);
         recordingJdbc = new RecordingJdbc();
         pdfService = new ProblemPackageService(problems, testCases, contestService,
-                null, recordingJdbc);
+                null, recordingJdbc, audit);
     }
 
     // --- happy path ----------------------------------------------------
@@ -213,6 +216,19 @@ class ProblemPackageServiceTest {
         assertEquals(1, recordingJdbc.inserts, "the PDF bytes must be stored");
     }
 
+    @Test
+    void nonPdfBytesRenamedToPdfAreRejected() {
+        Map<String, String> files = baseFiles();
+        files.put("statement/statement.pdf", "<html><script>not a PDF</script></html>");
+        files.remove("statement/statement.html");
+
+        ProblemPackageResultDto r = pdfService.importPackage(zip(files));
+
+        assertFalse(r.accepted());
+        assertTrue(r.errors().stream().anyMatch(e -> e.contains("missing %PDF header")));
+        assertEquals(0, recordingJdbc.inserts, "disguised content must not reach PDF storage");
+    }
+
     /** A package with neither an HTML nor a PDF statement is still rejected. */
     @Test
     void statementlessPackageIsStillRejected() {
@@ -247,6 +263,56 @@ class ProblemPackageServiceTest {
         ProblemPackageResultDto r = service.importPackage(zip(files));
         assertFalse(r.accepted());
         assertTrue(r.errors().stream().anyMatch(e -> e.contains("timeLimitMs")));
+    }
+
+    @Test
+    void missingLimitsRetainDefaultsAndExactBoundsAreAccepted() {
+        Map<String, String> files = baseFiles();
+        files.put("config.json", "{\"title\":\"Two Sum\"}");
+        ProblemPackageResultDto defaults = service.importPackage(zip(files));
+        assertTrue(defaults.accepted(), () -> defaults.errors().toString());
+        assertEquals(2000, savedProblem.getTimeLimitMs());
+        assertEquals(262144, savedProblem.getMemoryLimitKb());
+
+        for (int[] limits : new int[][] {
+                {ProblemPackageService.MIN_TIME_LIMIT_MS, ProblemPackageService.MIN_MEMORY_KB},
+                {ProblemPackageService.MAX_TIME_LIMIT_MS, ProblemPackageService.MAX_MEMORY_KB}}) {
+            files.put("config.json", limitConfig(Integer.toString(limits[0]), Integer.toString(limits[1])));
+            ProblemPackageResultDto result = service.importPackage(zip(files));
+            assertTrue(result.accepted(), () -> result.errors().toString());
+            assertEquals(limits[0], savedProblem.getTimeLimitMs());
+            assertEquals(limits[1], savedProblem.getMemoryLimitKb());
+        }
+    }
+
+    @Test
+    void malformedTimeLimitsAreRejectedBeforePersistence() {
+        for (String value : List.of("-1", "0", "99", "30001", "4294969296",
+                "999999999999999999999999999999", "2000.9", "2000.0", "\"2000\"", "null", "true")) {
+            Map<String, String> files = baseFiles();
+            files.put("config.json", limitConfig(value, "262144"));
+            ProblemPackageResultDto result = service.importPackage(zip(files));
+            assertFalse(result.accepted(), "timeLimitMs=" + value + " was accepted");
+            assertTrue(result.errors().stream().anyMatch(e -> e.contains("timeLimitMs")),
+                    () -> "timeLimitMs=" + value + ": " + result.errors());
+            assertNull(savedProblem, "malformed limit must not persist a problem");
+            assertTrue(savedTests.isEmpty(), "malformed limit must not persist test cases");
+        }
+    }
+
+    @Test
+    void malformedMemoryLimitsAreRejectedBeforePersistence() {
+        for (String value : List.of("-1", "0", "1023", "1048577", "4295229440",
+                "999999999999999999999999999999", "262144.5", "262144.0", "\"262144\"", "null", "true")) {
+            Map<String, String> files = baseFiles();
+            files.put("config.json", limitConfig("2000", value));
+            ProblemPackageResultDto result = service.importPackage(zip(files));
+            assertFalse(result.accepted(), "memoryLimitKb=" + value + " was accepted");
+            assertTrue(result.errors().stream().anyMatch(e -> e.contains("memoryLimitKb")),
+                    () -> "memoryLimitKb=" + value + ": " + result.errors());
+            assertNull(savedProblem, "malformed limit must not persist a problem");
+            assertTrue(savedTests.isEmpty(), "malformed limit must not persist test cases");
+        }
     }
 
     /**
@@ -350,6 +416,71 @@ class ProblemPackageServiceTest {
                 && e.contains("tests/01.in")));
     }
 
+    @Test
+    void highlyCompressedPackageAtAggregateLimitIsAccepted() {
+        ProblemPackageResultDto r = service.importPackage(zip(packageSizedTo(
+                ProblemPackageService.MAX_TOTAL_UNCOMPRESSED)));
+
+        assertTrue(r.accepted(), () -> "exact aggregate limit was rejected: " + r.errors());
+    }
+
+    @Test
+    void highlyCompressedPackageOverAggregateLimitIsRejected() {
+        byte[] archive = zip(packageSizedTo(ProblemPackageService.MAX_TOTAL_UNCOMPRESSED + 1));
+        assertTrue(archive.length < 1024 * 1024,
+                "fixture must exercise decompression ratio, not HTTP upload size");
+
+        ProblemPackageResultDto r = service.importPackage(archive);
+
+        assertFalse(r.accepted());
+        assertTrue(r.errors().stream().anyMatch(e -> e.contains("more than 64 MB")));
+    }
+
+    @Test
+    void packageWithFiveThousandAndOneEntriesIsRejected() {
+        List<ZipContent> entries = new ArrayList<>();
+        for (int i = 0; i < 5_001; i++) {
+            entries.add(new ZipContent("extras/entry-" + i, new byte[0]));
+        }
+
+        ProblemPackageResultDto r = service.importPackage(zip(entries));
+
+        assertFalse(r.accepted());
+        assertTrue(r.errors().stream().anyMatch(e -> e.contains("too many entries")
+                && e.contains("5000")));
+    }
+
+    @Test
+    void nestedZipIsOpaqueAndNotRecursivelyImported() {
+        List<ZipContent> outer = zipContents(baseFiles());
+        Map<String, String> nestedFiles = baseFiles();
+        nestedFiles.put("tests/02.in", "nested input");
+        nestedFiles.put("tests/02.out", "nested output");
+        outer.add(new ZipContent("extras/nested.zip", zip(nestedFiles)));
+
+        ProblemPackageResultDto r = service.importPackage(zip(outer));
+
+        assertTrue(r.accepted(), () -> "outer package was rejected: " + r.errors());
+        assertEquals(1, r.testCaseCount(), "nested test data must not be interpreted");
+        assertEquals(1, savedTests.size());
+    }
+
+    @Test
+    void linkTargetPayloadRemainsBytesAndCreatesNoFilesystemEntry() {
+        String probeName = "zip-link-probe-" + UUID.randomUUID();
+        java.nio.file.Path probe = java.nio.file.Path.of(probeName).toAbsolutePath();
+        assertFalse(java.nio.file.Files.exists(probe));
+        List<ZipContent> entries = zipContents(baseFiles());
+        entries.add(new ZipContent("extras/" + probeName,
+                probe.toString().getBytes(StandardCharsets.UTF_8)));
+
+        ProblemPackageResultDto r = service.importPackage(zip(entries));
+
+        assertTrue(r.accepted(), () -> "opaque link-like entry was rejected: " + r.errors());
+        assertFalse(java.nio.file.Files.exists(probe),
+                "ZIP entry payloads must never be materialized as links or files");
+    }
+
     // --- helpers --------------------------------------------------------
 
     @Test
@@ -375,6 +506,11 @@ class ProblemPackageServiceTest {
     private static final String CONFIG = """
             {"code":"A","title":"Two Sum","timeLimitMs":2000,"memoryLimitKb":262144}""";
 
+    private static String limitConfig(String timeLimitMs, String memoryLimitKb) {
+        return "{\"title\":\"Two Sum\",\"timeLimitMs\":" + timeLimitMs
+                + ",\"memoryLimitKb\":" + memoryLimitKb + "}";
+    }
+
     private static Map<String, String> baseFiles() {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("config.json", CONFIG);
@@ -399,6 +535,19 @@ class ProblemPackageServiceTest {
         List<ZipContent> contents = new ArrayList<>();
         files.forEach((name, value) -> contents.add(
                 new ZipContent(name, value.getBytes(StandardCharsets.UTF_8))));
+        return contents;
+    }
+
+    private static List<ZipContent> packageSizedTo(long uncompressedBytes) {
+        List<ZipContent> contents = zipContents(baseFiles());
+        long current = contents.stream().mapToLong(file -> file.data().length).sum();
+        long remaining = uncompressedBytes - current;
+        int index = 0;
+        while (remaining > 0) {
+            int chunk = Math.toIntExact(Math.min(remaining, ProblemPackageService.MAX_SINGLE_FILE));
+            contents.add(new ZipContent("extras/padding-" + index++ + ".bin", new byte[chunk]));
+            remaining -= chunk;
+        }
         return contents;
     }
 

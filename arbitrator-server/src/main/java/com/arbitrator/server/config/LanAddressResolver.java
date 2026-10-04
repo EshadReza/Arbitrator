@@ -70,7 +70,7 @@ public class LanAddressResolver {
                 }
             }
         } catch (SocketException e) {
-            log.warn("Could not enumerate network interfaces: {}", e.getMessage());
+            log.warn("Could not enumerate network interfaces ({})", e.getClass().getSimpleName());
         }
 
         // Real NICs before virtual ones, then site-local (10/172.16-31/192.168)

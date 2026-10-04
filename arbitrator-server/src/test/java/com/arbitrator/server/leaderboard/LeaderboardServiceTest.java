@@ -37,7 +37,7 @@ import com.arbitrator.server.service.ContestService;
 
 /**
  * Penalty and ranking rules: FR-17, FR-18, BR-03, BR-04, BR-06.
- * Mockito-free (see CLAUDE.md) — plain proxies over the repository interfaces.
+ * Mockito-free (see AGENTS.md) — plain proxies over the repository interfaces.
  */
 class LeaderboardServiceTest {
 
@@ -98,6 +98,35 @@ class LeaderboardServiceTest {
         assertEquals(1, row.solved());
         // 20 (first-AC minute) + 2 x 20 (prior rejects) = 60
         assertEquals(60, row.penaltyMinutes());
+    }
+
+    @Test
+    @DisplayName("valid manual adjustments across submissions do not overflow the leaderboard")
+    void manualAdjustmentsAccumulateWithoutOverflow() {
+        User alice = user("alice");
+        Problem p1 = problem("A", "Two Sum");
+
+        submission(alice, p1, Verdict.WA, 5).setManualPenaltyDelta(Integer.MAX_VALUE);
+        Submission accepted = submission(alice, p1, Verdict.AC, 10);
+        accepted.setManualPenaltyDelta(Integer.MAX_VALUE);
+
+        assertEquals(2L * Integer.MAX_VALUE + 30,
+                service.current().rows().get(0).penaltyMinutes());
+
+        accepted.setManualPenaltyDelta(-Integer.MAX_VALUE);
+        assertEquals(30, service.current().rows().get(0).penaltyMinutes(),
+                "negative instructor corrections must remain valid");
+    }
+
+    @Test
+    void ordinaryUnicodeDisplayNameRemainsVisibleInStandings() {
+        User alice = user("alice");
+        alice.setDisplayName("Café রাহিম \uD83D\uDE80");
+        Problem p1 = problem("A", "Two Sum");
+        submission(alice, p1, Verdict.AC, 5);
+
+        assertEquals("Café রাহিম \uD83D\uDE80", service.current().rows().get(0).displayName());
+        assertEquals("alice", service.current().rows().get(0).username());
     }
 
     // --- individual rules -----------------------------------------------
@@ -275,7 +304,7 @@ class LeaderboardServiceTest {
         return p;
     }
 
-    private void submission(User user, Problem problem, Verdict verdict, int minuteFromStart) {
+    private Submission submission(User user, Problem problem, Verdict verdict, int minuteFromStart) {
         Submission s = new Submission();
         s.setUserId(user.getId());
         s.setProblemId(problem.getId());
@@ -286,6 +315,7 @@ class LeaderboardServiceTest {
         s.setQueuedAt(START.plus(minuteFromStart, ChronoUnit.MINUTES));
         setField(s, "id", ids.incrementAndGet());
         allSubmissions.add(s);
+        return s;
     }
 
     @SuppressWarnings("unchecked")

@@ -61,7 +61,7 @@ class ContestMaterialDeletionTest {
         transaction = new TransactionTemplate(transactionManager);
         service = new MaterialService(materials, null, null, root.toString());
         controller = new AdminContestController(null, null, null, null, null,
-                jdbc, null, null, service);
+                jdbc, null, null, service, new com.arbitrator.server.security.AuditService(jdbc, new com.fasterxml.jackson.databind.ObjectMapper()));
     }
 
     @AfterEach

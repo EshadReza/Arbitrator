@@ -14,6 +14,7 @@ import java.util.Locale;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -26,9 +27,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 
-/** Rejects oversized JSON before Jackson materializes attacker-controlled strings. */
+/** Rejects oversized JSON, including application/*+json, before Jackson materializes it. */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 2)
+@Order(Ordered.HIGHEST_PRECEDENCE + 4)
 public class JsonBodyLimitFilter extends OncePerRequestFilter {
 
     static final int MAX_JSON_BYTES = 1024 * 1024;
@@ -37,8 +38,21 @@ public class JsonBodyLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         String contentType = request.getContentType();
-        if (contentType == null
-                || !contentType.toLowerCase(Locale.ROOT).startsWith(MediaType.APPLICATION_JSON_VALUE)) {
+        if (contentType == null) {
+            chain.doFilter(request, response);
+            return;
+        }
+        MediaType mediaType;
+        try {
+            mediaType = MediaType.parseMediaType(contentType);
+        } catch (InvalidMediaTypeException ignored) {
+            // Let Spring reject malformed media types through its normal response path.
+            chain.doFilter(request, response);
+            return;
+        }
+        String subtype = mediaType.getSubtype().toLowerCase(Locale.ROOT);
+        if (!"application".equalsIgnoreCase(mediaType.getType())
+                || !("json".equals(subtype) || subtype.endsWith("+json"))) {
             chain.doFilter(request, response);
             return;
         }

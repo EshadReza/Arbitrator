@@ -95,6 +95,16 @@ public class JudgeQueue {
         return outstanding.get();
     }
 
+    /** True when the worker executor is running and a new submission can reserve a slot. */
+    public boolean canAcceptWork() {
+        return workersAvailable() && backlogSlots.availablePermits() > 0;
+    }
+
+    /** Executor availability, not proof that an individual long-running judge job will finish. */
+    public boolean workersAvailable() {
+        return !pool.isShutdown() && !pool.isTerminating() && !pool.isTerminated();
+    }
+
     /** NFR-R02: requeue everything the previous process never finished. */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverUnfinished() {

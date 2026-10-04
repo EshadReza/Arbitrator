@@ -12,6 +12,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.mock.web.MockHttpServletRequest;
 import com.arbitrator.server.entity.Problem;
+import com.arbitrator.server.config.SecurityHeadersFilter;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
 
 class PersistenceConflictAdviceTest {
     final PersistenceConflictAdvice advice = new PersistenceConflictAdvice();
@@ -41,5 +45,23 @@ class PersistenceConflictAdviceTest {
         var result = advice.staleWrite(new ObjectOptimisticLockingFailureException(Problem.class, 1L), request);
         assertEquals(409, result.getStatusCode().value());
         assertTrue(result.getBody().get("message").toString().contains("Reload"));
+    }
+
+    @Test void unexpectedDatabaseFailureDoesNotLogDriverValues() {
+        Logger logger = (Logger) LoggerFactory.getLogger(PersistenceConflictAdvice.class);
+        var appender = new ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start(); logger.addAppender(appender);
+        try {
+            var result = advice.integrity(new DataIntegrityViolationException("PRIVATE_WRAPPER_SENTINEL",
+                    new SQLException("PRIVATE_SQL_SENTINEL", "23000", 1452)), request);
+            assertEquals(500, result.getStatusCode().value());
+            assertEquals(SecurityHeadersFilter.requestId(request), result.getBody().get("requestId"));
+            assertFalse(result.getBody().containsKey("path"));
+            assertEquals(1, appender.list.size());
+            assertFalse(appender.list.get(0).getFormattedMessage().contains("PRIVATE_"));
+            assertTrue(appender.list.get(0).getThrowableProxy() == null);
+        } finally {
+            logger.detachAppender(appender); appender.stop();
+        }
     }
 }

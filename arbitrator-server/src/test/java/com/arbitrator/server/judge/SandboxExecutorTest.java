@@ -13,16 +13,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * S1-B3 / S4-B1 fixture suite: each fixture program must produce its verdict
@@ -36,7 +43,7 @@ import org.junit.jupiter.api.Test;
  * Linux-only because they depended on kernel namespaces/prlimit; a cgroup
  * memory/pids limit works identically wherever Docker runs, so they're no
  * longer OS-gated — this is the first time this suite has actually verified
- * them (STATUS.md known issues 1 and 9).
+ * them (docs/audit-history.md (historical sandbox verification)).
  */
 class SandboxExecutorTest {
 
@@ -272,6 +279,152 @@ class SandboxExecutorTest {
     }
 
     @Test
+    void cloudMetadataHttpPortIsUnroutableDuringCompileAndExecution() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        Path probe = workDir.resolve("metadata_probe.py");
+        Files.writeString(probe, """
+                import errno
+                import socket
+                from pathlib import Path
+
+                # A local positive control proves socket operations work;
+                # the denied metadata connection must be a routing boundary.
+                with socket.socket() as listener:
+                    listener.bind(('127.0.0.1', 0))
+                    listener.listen(1)
+                    with socket.create_connection(listener.getsockname(), timeout=0.5):
+                        pass
+
+                routes = Path('/proc/net/route').read_text().splitlines()[1:]
+                assert all(row.split()[0] == 'lo' for row in routes if row.strip()), routes
+                try:
+                    connection = socket.create_connection(('169.254.169.254', 80), timeout=0.5)
+                except OSError as failure:
+                    # Refusal or timeout could simply mean no metadata service
+                    # exists on this host. Require an actual unreachable route.
+                    assert failure.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH), failure
+                else:
+                    connection.close()
+                    raise AssertionError('Metadata HTTP port is reachable')
+                # No HTTP request is sent and no credentials are retrieved.
+                print('metadata-network-isolated')
+                """, StandardCharsets.UTF_8);
+        List<String> command = List.of("python3", probe.toString());
+        // Exercise both flag sets, including the writable compiler sandbox.
+        ExecutionResult compiled = sandbox.compile(workDir, command);
+        assertTrue(compiled.ok(), compiled.stdout() + compiled.stderr());
+        assertEquals("metadata-network-isolated\n", compiled.stdout());
+
+        ExecutionResult executed = sandbox.run(workDir, command, null, 3_000, MEM_KB);
+        assertTrue(executed.ok(), executed.stdout() + executed.stderr());
+        assertEquals("metadata-network-isolated\n", executed.stdout());
+    }
+
+    @Test
+    void externalDnsIsUnavailableDuringCompileAndExecution() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        Path probe = workDir.resolve("dns_probe.py");
+        Files.writeString(probe, """
+                import errno
+                import ipaddress
+                import os
+                import socket
+                import struct
+                from pathlib import Path
+
+                os.environ['RES_OPTIONS'] = 'attempts:1 timeout:1'
+                # Local hosts-file resolution is legitimate, not DNS egress.
+                assert socket.getaddrinfo('localhost', 53)
+                assert all(row.split()[0] == 'lo'
+                           for row in Path('/proc/net/route').read_text().splitlines()[1:]
+                           if row.strip())
+                targets = {'1.1.1.1', '8.8.8.8', '127.0.0.11'}
+                for line in Path('/etc/resolv.conf').read_text().splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0] == 'nameserver':
+                        targets.add(parts[1])
+
+                name = 'arbitrator-dns-isolation.invalid'
+                query = struct.pack('!HHHHHH', 0x4242, 0x0100, 1, 0, 0, 0)
+                for label in name.split('.'):
+                    query += bytes([len(label)]) + label.encode('ascii')
+                query += bytes([0]) + struct.pack('!HH', 1, 1)
+                unreachable = {errno.ENETUNREACH, errno.EHOSTUNREACH,
+                               errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL}
+                for target in targets:
+                    address = ipaddress.ip_address(target)
+                    family = socket.AF_INET if address.version == 4 else socket.AF_INET6
+                    for kind in (socket.SOCK_DGRAM, socket.SOCK_STREAM):
+                        try:
+                            with socket.socket(family, kind) as channel:
+                                channel.settimeout(0.2)
+                                if kind == socket.SOCK_DGRAM:
+                                    channel.sendto(query, (target, 53))
+                                    channel.recvfrom(4096)
+                                else:
+                                    channel.connect((target, 53))
+                        except OSError as failure:
+                            if not address.is_loopback:
+                                # Mere refusal/timeout is not proof of isolation.
+                                assert failure.errno in unreachable, 'DNS target had a route'
+                            else:
+                                # A local resolver must not answer/forward DNS.
+                                assert isinstance(failure, TimeoutError) or failure.errno in (
+                                    unreachable | {errno.ECONNREFUSED}), failure
+                        else:
+                            raise AssertionError('DNS resolver reachable')
+
+                try:
+                    socket.getaddrinfo(name, 53, type=socket.SOCK_DGRAM)
+                except socket.gaierror:
+                    pass
+                else:
+                    raise AssertionError('External DNS name resolved')
+                print('dns-network-isolated')
+                """, StandardCharsets.UTF_8);
+        List<String> command = List.of("python3", probe.toString());
+        ExecutionResult compiled = sandbox.compile(workDir, command);
+        assertTrue(compiled.ok(), compiled.stdout() + compiled.stderr());
+        assertEquals("dns-network-isolated\n", compiled.stdout());
+
+        ExecutionResult executed = sandbox.run(workDir, command, null, 5_000, MEM_KB);
+        assertTrue(executed.ok(), executed.stdout() + executed.stderr());
+        assertEquals("dns-network-isolated\n", executed.stdout());
+    }
+
+    @Test
+    void procSystemMetadataVisibilityIsCharacterizedWithoutDumpingValues() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        Path probe = workDir.resolve("proc_visibility.py");
+        Files.writeString(probe, """
+                from pathlib import Path
+
+                # Characterization, not proof that shared-hardware side channels
+                # are prevented. Report readability only, never the raw values.
+                for name in ('cpuinfo', 'meminfo', 'uptime', 'stat', 'loadavg'):
+                    try:
+                        with Path('/proc', name).open('rb') as source:
+                            source.read(1)
+                        state = 'readable'
+                    except OSError:
+                        state = 'blocked'
+                    print(name + ':' + state)
+                """, StandardCharsets.UTF_8);
+        ExecutionResult result = sandbox.run(workDir,
+                List.of("python3", probe.toString()), null, 1_000, MEM_KB);
+        assertTrue(result.ok(), result.stderr());
+        List<String> states = result.stdout().lines().toList();
+        assertEquals(5, states.size());
+        List<String> names = List.of("cpuinfo", "meminfo", "uptime", "stat", "loadavg");
+        for (int index = 0; index < names.size(); index++) {
+            String name = names.get(index);
+            assertTrue(states.get(index).equals(name + ":readable")
+                    || states.get(index).equals(name + ":blocked"), states.get(index));
+        }
+        System.out.println("Sandbox /proc visibility (values omitted): " + String.join(", ", states));
+    }
+
+    @Test
     void excessiveStdoutIsStoppedAndReported() throws Exception {
         assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
         Path src = workDir.resolve("output.cpp");
@@ -339,9 +492,11 @@ class SandboxExecutorTest {
     void startupPinsMutableImageTagToImmutableImageId() {
         assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
 
+        assertFalse(sandbox.isRuntimeReady());
         sandbox.verifyDockerReady();
 
         assertTrue(sandbox.sandboxImageReference().matches("sha256:[0-9a-fA-F]{64}"));
+        assertTrue(sandbox.isRuntimeReady());
     }
 
     @Test
@@ -517,6 +672,213 @@ class SandboxExecutorTest {
         assertEquals("host-workspace-protected\n", result.stdout());
         assertFalse(Files.isSymbolicLink(workDir.resolve("__input.txt")));
         assertFalse(Files.exists(workDir.resolve("new-link")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"cpp", "java", "python"})
+    void supportedLanguagesCannotAccessHostSecretsOrEscapeRuntimeIsolation(String language) throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        Path hostSecret = workDir.getParent().resolve("fake-host-secret.txt");
+        Path sibling = Files.createDirectory(workDir.getParent().resolve("fake-sibling"));
+        Path siblingSecret = sibling.resolve("fake-secret.txt");
+        Files.writeString(hostSecret, "FAKE-HOST-SECRET");
+        Files.writeString(siblingSecret, "FAKE-SIBLING-SECRET");
+        try {
+            // Ensure denial is not just the host temp directory's default mode 0700.
+            assertTrue(workDir.getParent().toFile().setReadable(true, false));
+            assertTrue(workDir.getParent().toFile().setExecutable(true, false));
+            assertTrue(sibling.toFile().setReadable(true, false));
+            assertTrue(sibling.toFile().setExecutable(true, false));
+            assertTrue(hostSecret.toFile().setReadable(true, false));
+            assertTrue(siblingSecret.toFile().setReadable(true, false));
+            List<String> command = compileLanguageIsolationFixture(language);
+            Files.writeString(workDir.resolve("positive-control.txt"), "mounted-control");
+            ExecutionResult result = runLanguageProbe(command,
+                    "isolation\n" + hostSecret + "\n" + siblingSecret + "\n", 3_000);
+            assertTrue(result.ok(), result.toString());
+            assertEquals("isolation-ok\n", result.stdout());
+            assertEquals("FAKE-HOST-SECRET", Files.readString(hostSecret));
+            assertEquals("FAKE-SIBLING-SECRET", Files.readString(siblingSecret));
+            assertFalse(Files.exists(workDir.resolve("forbidden-write")));
+        } finally {
+            Files.deleteIfExists(hostSecret);
+            Files.deleteIfExists(siblingSecret);
+            Files.deleteIfExists(sibling);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"cpp", "java", "python"})
+    void supportedLanguagesHaveRuntimeTimeBounds(String language) throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        List<String> command = compileLanguageIsolationFixture(language);
+        assertLanguagePositiveControl(command);
+        ExecutionResult result = runLanguageProbe(command, "loop\n", TL_MS);
+        assertTrue(result.timedOut(), result.toString());
+        assertTrue(result.wallTimeMs() < 15_000, "bounded timeout must terminate the probe");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"cpp", "java", "python"})
+    void supportedLanguagesHaveIndependentStdoutAndStderrBounds(String language) throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        List<String> command = compileLanguageIsolationFixture(language);
+        assertLanguagePositiveControl(command);
+        for (String stream : List.of("stdout", "stderr")) {
+            ExecutionResult result = runLanguageProbe(command, stream + "\n", 3_000);
+            assertTrue(result.outputLimitExceeded(), language + " " + stream + " must be capped");
+            assertTrue(result.stdout().length() <= SandboxExecutor.OUTPUT_CAP);
+            assertTrue(result.stderr().length() <= SandboxExecutor.OUTPUT_CAP);
+        }
+    }
+
+    private void assertLanguagePositiveControl(List<String> command) throws Exception {
+        ExecutionResult result = runLanguageProbe(command, "control\n", 3_000);
+        assertTrue(result.ok(), result.toString());
+        assertEquals("control-ok\n", result.stdout());
+    }
+
+    private ExecutionResult runLanguageProbe(List<String> command, String input, int timeMs) throws Exception {
+        Path in = workDir.resolve("__input.txt");
+        Files.writeString(in, input, StandardCharsets.UTF_8);
+        return sandbox.run(workDir, command, in, timeMs, MEM_KB);
+    }
+
+    private List<String> compileLanguageIsolationFixture(String language) throws Exception {
+        Path source = copyFixture("isolation." + switch (language) {
+            case "cpp" -> "cpp";
+            case "java" -> "java";
+            case "python" -> "py";
+            default -> throw new IllegalArgumentException(language);
+        });
+        if (language.equals("java")) {
+            source = Files.move(source, workDir.resolve("Main.java"));
+        }
+        Path exe = workDir.resolve("prog");
+        String key = switch (language) {
+            case "cpp" -> "cpp17";
+            case "java" -> "java17";
+            default -> "python310";
+        };
+        JudgeProperties props = new JudgeProperties();
+        configureLanguages(props);
+        JudgeProperties.LanguageSpec spec = props.getLanguages().get(key);
+        if (spec.getCompile() != null && !spec.getCompile().isBlank()) {
+            ExecutionResult result = sandbox.compile(workDir,
+                    LanguageCommandPolicy.render(spec.getCompile(), source, exe, workDir));
+            assertTrue(result.ok(), result.stderr());
+        }
+        return LanguageCommandPolicy.render(spec.getRun(), source, exe, workDir);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"threads", "tmpfs", "file-size", "privilege"})
+    void boundedResourceAndPrivilegeAttacksAreContainedAndRecover(String mode) throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        List<String> command = List.of("python3", copyFixture("hostile_bounds.py").toString());
+        assertLanguagePositiveControl(command);
+        ExecutionResult result = runLanguageProbe(command, mode + "\n", 5_000);
+        assertTrue(result.ok(), result.toString());
+        assertEquals(mode + "-contained\n", result.stdout());
+        assertLanguagePositiveControl(command);
+    }
+
+    @Test
+    void oversizedSyntheticCompilerWorkspaceIsRejectedWithoutFillingHostDisk() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        Path probe = workDir.resolve("compiler_size_probe.py");
+        Files.writeString(probe, """
+                from pathlib import Path
+                # Diagnostic compiler-mode invocation, not a toolchain exploit.
+                # Sparse files measure logical output size without filling disk.
+                for index in range(3):
+                    with Path('oversized-' + str(index)).open('wb') as output:
+                        output.truncate(48 * 1024 * 1024)
+                print('compiler-output-created')
+                """);
+        ExecutionResult result;
+        try {
+            result = sandbox.compile(workDir, List.of("python3", probe.toString()));
+            assertEquals("compiler-output-created\n", result.stdout());
+            assertFalse(result.ok());
+            assertTrue(result.stderr().contains("Compilation workspace exceeded 128 MiB"), result.stderr());
+            for (int index = 0; index < 3; index++) {
+                assertEquals(48L * 1024 * 1024, Files.size(workDir.resolve("oversized-" + index)));
+            }
+        } finally {
+            for (int index = 0; index < 3; index++) {
+                Files.deleteIfExists(workDir.resolve("oversized-" + index));
+            }
+        }
+        assertLanguagePositiveControl(List.of("python3", copyFixture("hostile_bounds.py").toString()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"signals", "detached-timeout", "orphan"})
+    void signalAndDetachedChildAttacksLeaveNoContainerBehind(String mode) throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        List<String> command = List.of("python3", copyFixture("hostile_bounds.py").toString());
+        assertLanguagePositiveControl(command);
+        long start = System.nanoTime();
+        ExecutionResult result = runLanguageProbe(command, mode + "\n", TL_MS);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        // Must finish before the child's private 10-second fallback; otherwise
+        // natural child exit could falsely look like successful container cleanup.
+        assertTrue(elapsedMs < (mode.equals("orphan") ? 5_000 : 8_000),
+                "child/signal attack must terminate promptly, took " + elapsedMs + " ms");
+        if (mode.equals("orphan")) {
+            assertTrue(result.ok(), result.toString());
+        } else {
+            assertFalse(result.ok(), "timeout evasion must not finish successfully");
+        }
+        List<String> lines = result.stdout().lines().toList();
+        assertEquals(2, lines.size(), result.stdout());
+        assertEquals(mode + "-ready", lines.get(1));
+        String containerId = lines.get(0);
+        assertTrue(containerId.matches("[a-f0-9]{12}"), "expected this probe's Docker hostname");
+        assertContainerRemoved(containerId);
+        assertLanguagePositiveControl(command);
+    }
+
+    @Test
+    void runningHostLoopbackServiceIsNotReachableFromSubmission() throws Exception {
+        assumeTrue(dockerReady, "docker (with arbitrator-judge image) not available");
+        List<String> command = List.of("python3", copyFixture("hostile_bounds.py").toString());
+        try (ServerSocket listener = new ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+            listener.setSoTimeout(500);
+            // Host positive control proves a listening service, not an unused port.
+            try (Socket client = new Socket("127.0.0.1", listener.getLocalPort());
+                 Socket accepted = listener.accept()) {
+                assertTrue(client.isConnected() && accepted.isConnected());
+            }
+            ExecutionResult result = runLanguageProbe(command,
+                    "host-loopback\n" + listener.getLocalPort() + "\n", 3_000);
+            assertTrue(result.ok(), result.toString());
+            assertEquals("host-loopback-contained\n", result.stdout());
+            assertThrows(SocketTimeoutException.class, () -> {
+                try (Socket unexpected = listener.accept()) {
+                    throw new AssertionError("submission connected to the host listener");
+                }
+            });
+        }
+        assertLanguagePositiveControl(command);
+    }
+
+    private static void assertContainerRemoved(String containerId) throws Exception {
+        // Read-only lookup of one exact probe identity; never enumerate/remove
+        // unrelated containers or interpret daemon failure as proof of cleanup.
+        for (int attempt = 0; attempt < 20; attempt++) {
+            Process inspect = new ProcessBuilder("docker", "container", "inspect", containerId)
+                    .redirectErrorStream(true).start();
+            assertTrue(inspect.waitFor(5, TimeUnit.SECONDS), "Docker inspect must finish");
+            String output = new String(inspect.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (inspect.exitValue() != 0) {
+                assertTrue(output.contains("No such container") || output.contains("No such object"), output);
+                return;
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("probe container survived completion: " + containerId);
     }
 
     private Path compileProbe(String name, String source) throws Exception {

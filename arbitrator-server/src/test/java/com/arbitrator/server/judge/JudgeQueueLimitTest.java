@@ -111,7 +111,8 @@ class JudgeQueueLimitTest {
     }
 
     private static JudgeWorker worker(JudgeProperties props, java.util.function.LongConsumer action) {
-        return new JudgeWorker(null, null, null, null, null, null, null, null, null, props, null) {
+        return new JudgeWorker(null, null, null, null, null, null, null, null, null, props, null,
+                new com.arbitrator.server.monitor.OperationalMetrics()) {
             @Override public void judge(long id) { action.accept(id); }
         };
     }
@@ -140,15 +141,19 @@ class JudgeQueueLimitTest {
         props.setMaxBacklog(2);
         JudgeQueue queue = new JudgeQueue(props, null, null);
         try {
+            assertTrue(queue.workersAvailable());
+            assertTrue(queue.canAcceptWork());
             assertTrue(queue.tryReserve());
             assertTrue(queue.tryReserve());
+            assertFalse(queue.canAcceptWork());
             assertFalse(queue.tryReserve());
             queue.releaseReservation();
+            assertTrue(queue.canAcceptWork());
             assertTrue(queue.tryReserve());
             queue.releaseReservation();
             queue.releaseReservation();
-        } finally {
-            queue.shutdown();
-        }
+        } finally { queue.shutdown(); }
+        assertFalse(queue.workersAvailable());
+        assertFalse(queue.canAcceptWork());
     }
 }

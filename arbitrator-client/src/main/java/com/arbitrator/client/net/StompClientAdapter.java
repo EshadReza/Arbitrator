@@ -76,11 +76,11 @@ public class StompClientAdapter implements AutoCloseable {
             public void handleException(StompSession s, StompCommand command,
                                         StompHeaders h, byte[] payload, Throwable ex) {
                 // Surfaced through the connection banner in S3-C7; log for now.
-                System.err.println("STOMP error: " + ex.getMessage());
+                System.err.println("STOMP error (" + ex.getClass().getSimpleName() + ")");
             }
 
             /**
-             * The gap STATUS.md's known issue #8 describes: this callback is the
+             * The historical reconnect gap (docs/audit-history.md): this callback is the
              * ONLY notification a dropped WebSocket sends — a heartbeat timeout,
              * a killed server, a network blip. StompSessionHandlerAdapter's
              * default implementation is a no-op, so without this override
@@ -100,7 +100,7 @@ public class StompClientAdapter implements AutoCloseable {
              */
             @Override
             public void handleTransportError(StompSession s, Throwable ex) {
-                System.err.println("STOMP transport lost: " + ex.getMessage());
+                System.err.println("STOMP transport lost (" + ex.getClass().getSimpleName() + ")");
                 synchronized (StompClientAdapter.this) {
                     if (session == s) {
                         session = null;

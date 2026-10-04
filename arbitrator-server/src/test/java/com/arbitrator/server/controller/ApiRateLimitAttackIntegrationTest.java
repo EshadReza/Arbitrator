@@ -55,6 +55,7 @@ class ApiRateLimitAttackIntegrationTest {
                 assertEquals(429, rejected.statusCode(), path);
                 assertNotNull(rejected.headers().firstValue("Retry-After").orElse(null));
                 assertTrue(rejected.body().contains("Too many requests"));
+                assertSecurityHeaders(rejected);
                 assertNotEquals(429, send("POST", path, other.token(), "{}", 200).statusCode());
             }
             var relogin = send("POST", "/api/auth/login", null,
@@ -89,6 +90,16 @@ class ApiRateLimitAttackIntegrationTest {
         if (body != null) builder.header("Content-Type", "application/json");
         return http.send(builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+    }
+    private static void assertSecurityHeaders(HttpResponse<?> response) {
+        assertEquals("nosniff", response.headers().firstValue("X-Content-Type-Options").orElse(null));
+        assertEquals("DENY", response.headers().firstValue("X-Frame-Options").orElse(null));
+        assertEquals("no-referrer", response.headers().firstValue("Referrer-Policy").orElse(null));
+        assertEquals("camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+                response.headers().firstValue("Permissions-Policy").orElse(null));
+        assertTrue(response.headers().firstValue("Content-Security-Policy").orElse("")
+                .contains("frame-ancestors 'none'"));
+        assertFalse(response.headers().firstValue("Strict-Transport-Security").isPresent());
     }
     static boolean mysqlIsReachable() {
         try (Socket socket = new Socket()) { socket.connect(new InetSocketAddress("localhost", 3306), 500); return true; }

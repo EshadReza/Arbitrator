@@ -258,7 +258,11 @@ public class AdminStandingsController {
         }
 
         Submission latest = userSubs.get(userSubs.size() - 1);
-        latest.setManualPenaltyDelta(latest.getManualPenaltyDelta() + delta);
+        long adjusted = (long) latest.getManualPenaltyDelta() + delta;
+        if (adjusted < Integer.MIN_VALUE || adjusted > Integer.MAX_VALUE) {
+            return ResponseEntity.badRequest().build();
+        }
+        latest.setManualPenaltyDelta((int) adjusted);
         submissionRepository.save(latest);
 
         return ResponseEntity.ok().build();

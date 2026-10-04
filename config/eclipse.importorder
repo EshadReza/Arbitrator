@@ -1,4 +1,4 @@
-#Organize Import Order (rules.md Rule 4)
+#Organize Import Order (AGENTS.md Rule 4)
 #java, javax/jakarta, org, com, everything else
 0=java
 1=javax

@@ -29,7 +29,7 @@ import com.arbitrator.server.service.MaterialService;
 
 /**
  * FR-07 sibling, contestant side: read and download a contest's materials.
- * Owner: Mahir (rules.md Rule 1 — controller/material).
+ * Owner: Mahir (AGENTS.md Rule 1 — controller/material).
  */
 @RestController
 public class MaterialController {
@@ -66,7 +66,10 @@ public class MaterialController {
         Path file = materials.fileOf(m);
         Resource body = new FileSystemResource(file);
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(m.getContentType()))
+                // Materials intentionally support every file type and are
+                // opaque downloads, so never reflect the uploader-asserted
+                // MIME type into a participant's response.
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment().filename(m.getFilename()).build().toString())
                 .contentLength(m.getSizeBytes())

@@ -20,7 +20,7 @@ import com.arbitrator.server.service.ContestService;
 
 /**
  * FR-07, contestant side: read the announcements for a contest.
- * Owner: Mahir (rules.md Rule 1 — controller/announcement).
+ * Owner: Mahir (AGENTS.md Rule 1 — controller/announcement).
  */
 @RestController
 public class AnnouncementController {

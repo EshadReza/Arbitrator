@@ -44,7 +44,7 @@ public class ContestStatePublisher {
             ContestStateDto dto = contestService.stateOf(contest);
             template.convertAndSend(StompDestinations.contestState(contest.getId()), dto);
         } catch (RuntimeException e) {
-            log.warn("Contest state push failed for contest {}", contest.getId(), e);
+            log.warn("Contest state push failed for contest {} ({})", contest.getId(), e.getClass().getSimpleName());
         }
     }
 

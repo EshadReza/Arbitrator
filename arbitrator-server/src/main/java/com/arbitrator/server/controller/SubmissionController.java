@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.arbitrator.common.api.ApiPaths;
 import com.arbitrator.common.dto.CustomRunRequest;
@@ -27,6 +28,9 @@ import com.arbitrator.common.dto.SubmitAckDto;
 import com.arbitrator.common.dto.SubmitRequest;
 import com.arbitrator.server.judge.CustomRunService;
 import com.arbitrator.server.service.SubmissionService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -35,18 +39,22 @@ public class SubmissionController {
 
     private final SubmissionService submissionService;
     private final CustomRunService customRunService;
+    private final ObjectMapper objectMapper;
 
     public SubmissionController(SubmissionService submissionService,
-                                CustomRunService customRunService) {
+                                CustomRunService customRunService,
+                                ObjectMapper objectMapper) {
         this.submissionService = submissionService;
         this.customRunService = customRunService;
+        this.objectMapper = objectMapper;
     }
 
     /** FR-09 EARS: 202 Accepted + queue position. */
     @PostMapping(ApiPaths.SUBMISSIONS)
-    public ResponseEntity<SubmitAckDto> submit(@RequestBody SubmitRequest req,
+    public ResponseEntity<SubmitAckDto> submit(@RequestBody JsonNode body,
                                                Principal principal,
                                                HttpServletRequest http) {
+        SubmitRequest req = requestWithValidProblemId(body, SubmitRequest.class);
         SubmitAckDto ack = submissionService.submit(
                 principal.getName(), req, http.getRemoteAddr());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ack);
@@ -58,8 +66,23 @@ public class SubmissionController {
      * submission cooldown.
      */
     @PostMapping(ApiPaths.RUN_CUSTOM)
-    public CustomRunResultDto runCustom(@RequestBody CustomRunRequest req, Principal principal) {
+    public CustomRunResultDto runCustom(@RequestBody JsonNode body, Principal principal) {
+        CustomRunRequest req = requestWithValidProblemId(body, CustomRunRequest.class);
         return customRunService.run(principal.getName(), req);
+    }
+
+    private <T> T requestWithValidProblemId(JsonNode body, Class<T> type) {
+        JsonNode id = body == null ? null : body.get("problemId");
+        if (id == null || !id.isIntegralNumber() || !id.canConvertToLong() || id.longValue() <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "problemId must be a positive whole number");
+        }
+        try {
+            // Keep the configured DTO binding, including unknown-field rejection.
+            return objectMapper.treeToValue(body, type);
+        } catch (JsonProcessingException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid request body", e);
+        }
     }
 
     /** UIF-12: the code behind one of my submissions. */

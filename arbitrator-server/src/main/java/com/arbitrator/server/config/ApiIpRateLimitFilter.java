@@ -14,7 +14,7 @@ import com.arbitrator.server.security.ApiRateLimitFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+@Order(Ordered.HIGHEST_PRECEDENCE + 3)
 public class ApiIpRateLimitFilter extends ApiRateLimitFilter {
     public ApiIpRateLimitFilter(ApiRateLimiter limiter, ObjectMapper json) { super(limiter, json, false); }
 }

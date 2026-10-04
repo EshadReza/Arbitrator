@@ -20,6 +20,7 @@ import com.arbitrator.common.dto.LoginResponse;
 import com.arbitrator.server.service.UserService;
 import com.arbitrator.server.security.JwtAuthFilter;
 import com.arbitrator.server.security.LoginThrottle;
+import com.arbitrator.server.security.AuditContext;
 import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
@@ -35,18 +36,23 @@ public class AuthController {
 
     /** FR-01 EARS: 201 Created on success. */
     @PostMapping(ApiPaths.AUTH_REGISTER)
-    public ResponseEntity<LoginResponse> register(@RequestBody LoginRequest req) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(userService.register(req));
+    public ResponseEntity<LoginResponse> register(@RequestBody LoginRequest req, HttpServletRequest request) {
+        request.setAttribute(AuditContext.AUTH_SUBJECT, AuditContext.safeIdentity(req.username()));
+        LoginResponse response = userService.register(req);
+        request.setAttribute(AuditContext.AUTH_ACTOR, response.username());
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /** FR-02. */
     @PostMapping(ApiPaths.AUTH_LOGIN)
     public LoginResponse login(@RequestBody LoginRequest req, HttpServletRequest request) {
+        request.setAttribute(AuditContext.AUTH_SUBJECT, AuditContext.safeIdentity(req.username()));
         LoginThrottle.Ticket ticket = loginThrottle.begin(req.username(), request.getRemoteAddr());
         Boolean verified = null;
         try {
             LoginResponse response = userService.login(req, username -> loginThrottle.bindAccount(ticket, username));
             verified = true;
+            request.setAttribute(AuditContext.AUTH_ACTOR, response.username());
             return response;
         } catch (ResponseStatusException e) {
             int status = e.getStatusCode().value();
@@ -72,6 +78,7 @@ public class AuthController {
         if (principal == null || !(sid instanceof String)) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not signed in");
         }
+        request.setAttribute(AuditContext.AUTH_ACTOR, principal.getName());
         userService.logout(principal.getName(), (String) sid);
     }
 

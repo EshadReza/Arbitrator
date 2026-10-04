@@ -196,7 +196,7 @@ public class SandboxExecutor {
      * search entirely, on the theory that "an operator who pointed at a
      * specific path wants exactly that path." In practice that's backwards:
      * this override almost always comes from a personal, git-ignored
-     * application-local.yml (rules.md Rule 6) that one developer set up by
+     * application-local.yml (AGENTS.md Rule 6) that one developer set up by
      * copying a path that worked on THEIR machine (see this same file's
      * history — the exact bug this comment is about: a macOS Homebrew path,
      * {@code /usr/local/bin/docker}, hardcoded here and then copied onto a
@@ -234,11 +234,10 @@ public class SandboxExecutor {
         String failure = runCapture(dockerBinary, "version");
         if (failure != null) {
             log.error("Docker sandbox is NOT ready — every submission will fail (as a judge-error RE) "
-                    + "until this is fixed.\n  Tried to run: {} version\n  Result: {}\n{}",
-                    dockerBinary, failure, remediationFor(failure));
+                    + "until this is fixed.\n{}", remediationFor(failure));
         } else if (!runsCleanly(dockerBinary, "image", "inspect", props.getDockerImage())) {
-            log.error("Sandbox image '{}' not found. Run this platform's image-load/build script before "
-                    + "judging any submission.", props.getDockerImage());
+            log.error("Configured sandbox image not found. Run this platform's image-load/build script before "
+                    + "judging any submission.");
         } else {
             String imageId = captureSuccessfulOutput(dockerBinary, "image", "inspect",
                     "--format={{.Id}}", props.getDockerImage());
@@ -247,8 +246,7 @@ public class SandboxExecutor {
                         + props.getDockerImage() + "' to an immutable Docker image ID");
             }
             sandboxImageReference = imageId;
-            log.info("Docker sandbox ready: image {} pinned for this server run as {} via {}",
-                    props.getDockerImage(), imageId, dockerBinary);
+            log.info("Docker sandbox ready: image pinned for this server run as {}", imageId);
         }
 
         Path root = Path.of(props.getWorkRoot());
@@ -733,6 +731,44 @@ public class SandboxExecutor {
 
     String sandboxImageReference() {
         return sandboxImageReference;
+    }
+
+    /** Bounded, read-only readiness check; never starts a submission container. */
+    public boolean isRuntimeReady() {
+        String image = sandboxImageReference;
+        if (image == null || !image.matches("sha256:[0-9a-fA-F]{64}")) return false;
+        try {
+            Path root = Path.of(props.getWorkRoot());
+            if (!Files.isDirectory(root) || Files.getFileStore(root).getUsableSpace() < MIN_FREE_BYTES) {
+                return false;
+            }
+        } catch (IOException | SecurityException unavailable) {
+            return false;
+        }
+        return probeDocker("version") && probeDocker("image", "inspect", image);
+    }
+
+    private boolean probeDocker(String... args) {
+        List<String> command = new ArrayList<>(args.length + 1);
+        command.add(dockerBinary);
+        command.addAll(List.of(args));
+        Process process = null;
+        try {
+            process = new ProcessBuilder(command)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            if (process != null) process.destroyForcibly();
+            return false;
+        } catch (IOException | SecurityException unavailable) {
+            return false;
+        }
     }
 
     /** @return null on success, or the combined stdout/stderr (or exception message) on failure. */

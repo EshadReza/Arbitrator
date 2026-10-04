@@ -50,6 +50,16 @@ class AdminRenderingSafetyTest {
         assertFalse(html.contains("$('annPreview').innerHTML = $('annBody').value"));
     }
 
+    @Test
+    void operationsSnapshotUsesTextOnlyFields() throws IOException {
+        String html = adminHtml();
+
+        assertTrue(html.contains("'/api/admin/operations'"));
+        assertTrue(html.contains("$('opsCpu').textContent="));
+        assertTrue(html.contains("$('opsJudgeFailures').textContent="));
+        assertFalse(html.contains("$('opsCpu').innerHTML="));
+    }
+
     private static String adminHtml() throws IOException {
         try (var in = AdminRenderingSafetyTest.class.getResourceAsStream("/static/admin/index.html")) {
             if (in == null) throw new IOException("admin/index.html not found on classpath");

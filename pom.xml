@@ -11,7 +11,7 @@
 
   <!-- Root aggregator. Inherits the Spring Boot BOM so every module gets
        consistent, curated dependency versions. Versions are managed HERE
-       and only here (rules.md Rule 1: Eshad owns this file). -->
+       and only here (AGENTS.md Rule 1: Eshad owns this file). -->
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
@@ -38,6 +38,9 @@
     <maven.compiler.target>17</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <javafx.version>21.0.3</javafx.version>
+    <!-- Keep the embedded server and standalone WebSocket client on a Tomcat
+         release that fixes CVE-2026-77791 (WebSocket close busy wait). -->
+    <tomcat.version>10.1.60</tomcat.version>
     <jjwt.version>0.12.5</jjwt.version>
     <richtextfx.version>0.11.2</richtextfx.version>
     <!-- Rasterises PDF statements in the client (FR-05). Pure Java, no native

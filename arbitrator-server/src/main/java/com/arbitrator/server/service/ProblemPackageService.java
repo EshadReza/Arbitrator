@@ -62,7 +62,7 @@ public class ProblemPackageService {
 
     /** Zip-bomb guards. A real lab package is a few hundred KB. */
     private static final int MAX_ENTRIES = 5_000;
-    private static final long MAX_TOTAL_UNCOMPRESSED = 256L * 1024 * 1024;   // 256 MiB
+    static final long MAX_TOTAL_UNCOMPRESSED = 64L * 1024 * 1024;            // 64 MiB
     static final long MAX_SINGLE_FILE = 32L * 1024 * 1024;                   // 32 MiB
 
     /** A statement is a few pages; anything larger is a mistake, not a problem. */
@@ -85,13 +85,15 @@ public class ProblemPackageService {
     private final CheckerRunner checkerRunner;
     /** Only for the statement-PDF side table; everything else goes through JPA. */
     private final JdbcTemplate jdbc;
+    private final com.arbitrator.server.security.AuditService audit;
     private final ObjectMapper json = new ObjectMapper();
 
     public ProblemPackageService(ProblemRepository problems,
                                  TestCaseRepository testCases,
                                  ContestService contestService,
                                  CheckerRunner checkerRunner,
-                                 JdbcTemplate jdbc) {
+                                 JdbcTemplate jdbc, com.arbitrator.server.security.AuditService audit) {
+        this.audit = audit;
         this.problems = problems;
         this.testCases = testCases;
         this.contestService = contestService;
@@ -139,19 +141,13 @@ public class ProblemPackageService {
         // assigned below and kept in sync by reorder(). A code in config.json
         // from an older package is simply ignored, not an error.
         String title = text(config, "title");
-        int timeLimitMs = config.path("timeLimitMs").asInt(2000);
-        int memoryLimitKb = config.path("memoryLimitKb").asInt(262144);
+        int timeLimitMs = integerLimit(config, "timeLimitMs", 2000,
+                MIN_TIME_LIMIT_MS, MAX_TIME_LIMIT_MS, errors);
+        int memoryLimitKb = integerLimit(config, "memoryLimitKb", 262144,
+                MIN_MEMORY_KB, MAX_MEMORY_KB, errors);
 
         if (title == null || title.isBlank()) {
             errors.add("config.json: \"title\" is required");
-        }
-        if (timeLimitMs < MIN_TIME_LIMIT_MS || timeLimitMs > MAX_TIME_LIMIT_MS) {
-            errors.add("config.json: \"timeLimitMs\" must be between "
-                    + MIN_TIME_LIMIT_MS + " and " + MAX_TIME_LIMIT_MS);
-        }
-        if (memoryLimitKb < MIN_MEMORY_KB || memoryLimitKb > MAX_MEMORY_KB) {
-            errors.add("config.json: \"memoryLimitKb\" must be between "
-                    + MIN_MEMORY_KB + " and " + MAX_MEMORY_KB);
         }
 
         // --- statement (HTML preferred; PDF supported since V59) ---
@@ -166,6 +162,8 @@ public class ProblemPackageService {
         if (statementPdf != null && statementPdf.length > MAX_STATEMENT_PDF_BYTES) {
             errors.add("The PDF statement is larger than "
                     + (MAX_STATEMENT_PDF_BYTES / 1024 / 1024) + " MB");
+        } else if (statementPdf != null && !looksLikePdf(statementPdf)) {
+            errors.add("The PDF statement does not look like a PDF (missing %PDF header)");
         }
 
         // --- checker (optional custom checker, FR-14) ---
@@ -349,6 +347,8 @@ public class ProblemPackageService {
             p.setStatementIsPdf(true);
             problems.save(p);
         }
+        audit.change("ProblemStatementPdf", problemId, Map.of("present", rows > 0),
+                Map.of("present", true, "bytes", pdfBytes.length));
     }
 
     private static boolean looksLikePdf(byte[] bytes) {
@@ -598,6 +598,21 @@ public class ProblemPackageService {
 
     private static String escapeHtml(String s) {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private static int integerLimit(JsonNode config, String field, int defaultValue,
+                                    int min, int max, List<String> errors) {
+        JsonNode value = config.path(field);
+        if (value.isMissingNode()) return defaultValue;
+        if (!value.isIntegralNumber() || !value.canConvertToInt()) {
+            errors.add("config.json: \"" + field + "\" must be an integer between " + min + " and " + max);
+            return defaultValue;
+        }
+        int limit = value.intValue();
+        if (limit < min || limit > max) {
+            errors.add("config.json: \"" + field + "\" must be between " + min + " and " + max);
+        }
+        return limit;
     }
 
     private static String text(JsonNode node, String field) {

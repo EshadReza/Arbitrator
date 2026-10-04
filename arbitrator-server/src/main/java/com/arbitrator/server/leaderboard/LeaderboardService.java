@@ -244,7 +244,7 @@ public class LeaderboardService {
         Instant acceptedAt;
         int rejects;            // all rejected attempts (for the unsolved display)
         int rejectsBeforeAc;    // only those before the first AC — what FR-18 charges
-        int manualDelta;
+        long manualDelta;
         int ceAttempts;         // BR-04: never a reject, but still shown as "touched"
 
         void accept(Submission s, Instant contestStart) {

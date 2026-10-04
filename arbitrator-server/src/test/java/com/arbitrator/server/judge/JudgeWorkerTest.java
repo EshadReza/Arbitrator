@@ -158,7 +158,8 @@ class JudgeWorkerTest {
         judgeWorker = new JudgeWorker(
                 submissionRepo, problemRepo, testCaseRepo, userRepo,
                 sandbox, new VerdictEvaluator(), checkerRunner,
-                publisher, leaderboard, props, jdbc
+                publisher, leaderboard, props, jdbc,
+                new com.arbitrator.server.monitor.OperationalMetrics()
         );
     }
 

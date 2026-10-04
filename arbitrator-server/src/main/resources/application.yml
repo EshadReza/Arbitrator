@@ -1,4 +1,4 @@
-# Committed with placeholders ONLY (rules.md Rule 6).
+# Committed with placeholders ONLY (AGENTS.md Rule 6).
 # Real credentials go in application-local.yml (git-ignored) or env vars.
 spring:
   application:
@@ -6,7 +6,7 @@ spring:
   profiles:
     include: local        # picks up application-local.yml if present
   config:
-    # languages.yml (owned by Mahir, rules.md Rule 1) is a separate file and
+    # languages.yml (owned by Mahir, AGENTS.md Rule 1) is a separate file and
     # Spring Boot does NOT load it automatically — only application.yml and
     # profile variants load on their own. Without this import,
     # JudgeProperties.languages silently binds empty and every submission
@@ -39,6 +39,10 @@ server:
     # between submissions", "password must be at least 8 characters") is
     # silently dropped before it reaches the student.
     include-message: always
+    # SafeErrorAttributes masks 5xx while existing 4xx guidance remains visible.
+    include-stacktrace: never
+    include-exception: false
+    include-binding-errors: never
 
 arbitrator:
   api-rate-limit:
@@ -108,3 +112,5 @@ arbitrator:
 logging:
   level:
     com.arbitrator: INFO
+    # JDBC diagnostics can echo unique-field values supplied by users.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF

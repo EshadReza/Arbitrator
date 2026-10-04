@@ -5,6 +5,7 @@
 
 package com.arbitrator.client.controller;
 
+import java.text.Normalizer;
 import java.util.regex.Pattern;
 
 import com.arbitrator.client.app.AppState;
@@ -64,7 +65,7 @@ public class RegisterController {
     @FXML
     private void onRegister() {
         String username = usernameField.getText().trim();
-        String displayName = displayNameField.getText().trim();
+        String displayName = Normalizer.normalize(displayNameField.getText().trim(), Normalizer.Form.NFC);
         String password = passwordField.getText();
         String confirm = confirmField.getText();
 
@@ -77,7 +78,7 @@ public class RegisterController {
             return;
         }
         if (displayName.codePointCount(0, displayName.length()) > MAX_DISPLAY_NAME_LENGTH
-                || displayName.codePoints().anyMatch(Character::isISOControl)) {
+                || displayName.codePoints().anyMatch(RegisterController::unsafeDisplayNameCodePoint)) {
             showError(SceneRouter.bundle().getString("register.error.display.invalid"));
             return;
         }
@@ -114,6 +115,17 @@ public class RegisterController {
         }, "register-io");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    private static boolean unsafeDisplayNameCodePoint(int cp) {
+        // Mirror the server's registration rule; the server remains authoritative.
+        return Character.isISOControl(cp)
+                || Character.getType(cp) == Character.SURROGATE
+                || cp == 0x2028 || cp == 0x2029
+                || cp == 0x00AD || cp == 0x061C || cp == 0x200B
+                || cp == 0x200E || cp == 0x200F || cp == 0xFEFF
+                || (cp >= 0x202A && cp <= 0x202E)
+                || (cp >= 0x2060 && cp <= 0x206F);
     }
 
     @FXML

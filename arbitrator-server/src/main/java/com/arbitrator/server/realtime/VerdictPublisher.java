@@ -31,8 +31,7 @@ public class VerdictPublisher {
 
     public void publishVerdict(String username, VerdictEventDto event) {
         template.convertAndSendToUser(username, StompDestinations.QUEUE_VERDICTS, event);
-        log.debug("Pushed verdict {} for submission {} to {}",
-                event.verdict(), event.submissionId(), username);
+        log.debug("Pushed verdict {} for submission {}", event.verdict(), event.submissionId());
         // If the client is disconnected the message is simply dropped; the
         // client re-fetches /api/submissions/mine on reconnect (UC-05 exception).
     }

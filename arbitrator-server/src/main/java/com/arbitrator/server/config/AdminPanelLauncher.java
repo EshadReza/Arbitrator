@@ -95,7 +95,7 @@ public class AdminPanelLauncher {
             // server. The URL is already in the log above; that is enough.
             log.info("Could not open a browser automatically ({}). Open {} yourself, "
                     + "or set arbitrator.admin.auto-open=false to stop trying.",
-                    e.getMessage(), url);
+                    e.getClass().getSimpleName(), url);
         }
     }
 

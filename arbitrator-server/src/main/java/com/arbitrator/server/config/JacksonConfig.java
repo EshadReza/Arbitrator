@@ -14,13 +14,10 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 @Configuration
 public class JacksonConfig {
 
-    /**
-     * Tolerate unknown fields so ADDING a DTO field in arbitrator-common never
-     * breaks an older client mid-contest (rules.md Rule 2: additions are safe).
-     */
+    /** Reject unrecognized API request fields instead of silently discarding them. */
     @Bean
     Jackson2ObjectMapperBuilderCustomizer arbitratorJackson() {
         return builder -> builder
-                .featuresToDisable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+                .featuresToEnable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 }

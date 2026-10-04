@@ -81,7 +81,7 @@ public class CustomRunService {
                 props.getLanguages().get(req.language().configKey());
         if (spec == null) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Language not configured: " + req.language());
+                    "Unable to complete this request");
         }
 
         if (!activeUsers.add(username)) {
@@ -128,10 +128,11 @@ public class CustomRunService {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Run interrupted");
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Unable to complete this request");
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Could not run: " + e.getMessage());
+                    "Unable to complete this request");
         } finally {
             sandbox.cleanup(workDir);
             runSlots.release();
