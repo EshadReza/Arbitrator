@@ -4,6 +4,13 @@ Archived from the working copy of `STATUS.md` during the documentation consolida
 
 Legacy plain-text references are historical: `CLAUDE.md` and `rules.md` were consolidated into `AGENTS.md`; `WORKFLOW_PLAN.md` was retired; `OPEN_SECURITY_ITEMS.md` became `docs/security.md`; `INCIDENT_RECOVERY.md` became `docs/recovery.md`. Repository paths in the record are relative to the repository root. The old “next actions” and v1.0 proposals are not implementation approval.
 
+## Verification update — 2026-10-20 (Export for AArchive)
+
+- Added the Export for AArchive ZIP (`AArchiveExportService`, `AdminAArchiveExportController`, console button) and its specification, [aarchive-export.md](aarchive-export.md). Read-only; no migration or new dependency.
+- `AArchiveExportIntegrationTest` (real MySQL 8.4, `arbitrator_test`) checks contents, SHA-256/size integrity of every ZIP entry, HTML re-sanitization, absence of bcrypt hashes, standings/penalty values, audit-event scoping, access control (student 403, unknown contest 404) and that the export is audited. It passed three consecutive runs. `AArchiveExportPenaltyTest` pins the exported penalty constant to the leaderboard's.
+- Finding, not fixed: MySQL here runs with session time zone `SYSTEM` (+06) while the JDBC URL declares UTC, so columns filled by a `CURRENT_TIMESTAMP` default (`users.created_at`, `audit_events.occurred_at`, `contest_access_grants.granted_at` from join) read back six hours ahead through `getTimestamp()`. Java-written instants round-trip correctly. The export reads those three columns with `UNIX_TIMESTAMP()`; the existing `/api/admin/audit` page still shows the shifted values.
+- `mvn -o -pl arbitrator-server test`, JDK 17: **335 server tests passed; zero failures, errors or skips** (Docker `SandboxExecutorTest` 40/40). The client module and a packaged/live run were not part of this check; the console button was not exercised in a browser.
+
 ## Verification update — 2026-10-04
 
 - Full Maven command: `mvn -B test -Djavafx.platform=linux`, run with JDK 17, finished 13:02:06 +06. Result: **332 server tests and one client source-policy test passed; zero failures, errors or skips**. Docker-dependent `SandboxExecutorTest` passed 40/40. Database integration tests used the isolated `arbitrator_test` schema.

@@ -974,7 +974,7 @@ tr.sub-row td{padding:6px 10px;font-size:13px;border-bottom:1px solid var(--bord
 
     <section id="sec-standings" class="hide">
       <h1>Standings & Marks</h1>
-      <div class="lede">Assign marks based on standings. Ranked by most solved, then least penalty. <button class="btn sm" onclick="loadStandings()" style="margin-left:8px">⟳ Refresh</button> <button class="btn sm" onclick="openExport()">⭳ Export…</button></div>
+      <div class="lede">Assign marks based on standings. Ranked by most solved, then least penalty. <button class="btn sm" onclick="loadStandings()" style="margin-left:8px">⟳ Refresh</button> <button class="btn sm" onclick="openExport()">⭳ Export…</button> <button class="btn sm" id="aarchiveBtn" onclick="exportAArchive()" title="Every stored fact about this contest as one ZIP, for upload to AArchive">⭳ Export for AArchive</button></div>
       <div class="dash-grid">
         <div class="dash-tile" style="grid-column:span 6;--tile-hue:var(--hue-purple)">
           <div class="ic">🧑‍🎓</div><div class="lbl">Participants</div>
@@ -3057,6 +3057,35 @@ function buildReport(rows,codes,problems,o){
     });
   }
   return h+'</body></html>';
+}
+
+/* Export for AArchive: the server builds the whole archive (docs/aarchive-export.md);
+   the console only fetches it as a blob, which api() cannot, since it reads text. */
+async function exportAArchive(){
+  if(selected==null){ log(400,'Select a contest first'); return; }
+  if(state&&state.state&&state.state!=='ENDED'
+     &&!confirm(`This contest is ${state.state}, not ENDED. Its data can still change after the export. Export anyway?`)) return;
+  const btn=$('aarchiveBtn'); btn.disabled=true;
+  try{
+    const res=await fetch(`/api/admin/contests/${selected}/export/aarchive`,
+                          {headers:token?{Authorization:'Bearer '+token}:{}});
+    if(res.status===401&&token){
+      token=null; alert('Your session ended. Please sign in again.'); window.location.reload(); return;
+    }
+    if(!res.ok){
+      const text=await res.text(); let body; try{body=JSON.parse(text)}catch{body=text}
+      log(res.status,(body&&body.message)||'Could not build the AArchive export'); return;
+    }
+    const cd=res.headers.get('Content-Disposition')||'';
+    const m=/filename="?([^";]+)"?/.exec(cd);
+    const name=m?m[1]:`aarchive_contest-${selected}.zip`;
+    const url=URL.createObjectURL(await res.blob());
+    const a=document.createElement('a');
+    a.href=url; a.download=name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    log(200,`Exported ${name} for AArchive`);
+  } finally { btn.disabled=false; }
 }
 
 function download(filename,text,mime){

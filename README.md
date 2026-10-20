@@ -337,6 +337,10 @@ Audit history is stored in MySQL automatically using the normal Flyway startup m
 
 `COMMITTED_CHANGE` records identify administrative database changes with safe before/after metadata. Separate request records describe HTTP outcomes for admin mutations and login/register/logout, not proof of commit. Passwords, tokens, source, upload content and raw requests are excluded. Failed-request details are capped at 200/minute with overflow summaries. A minute sweep retains at most 90 days/the newest 100,000 ID slots; temporary excess is possible. This is bounded investigation history, not a tamper-proof archive. See [audit history](docs/audit-history.md), item 58, for coverage and limitations.
 
+### Export for AArchive
+
+*Standings → ⭳ Export for AArchive* (or `GET /api/admin/contests/{id}/export/aarchive`, loopback + `ADMIN`) downloads one ZIP holding everything stored about the contest: settings, problems with statements/PDFs/checkers/test data, participants, every submission with source and per-test results, final standings, announcements, clarifications, materials, and contest-related audit records. It is meant for upload to the AArchive online repository and is fully specified in [docs/aarchive-export.md](docs/aarchive-export.md). Password hashes are never included; workstation IPs and MAC addresses are, and are marked sensitive in the specification. The console asks for confirmation when the contest has not ended. Each export is written to the audit history.
+
 Operational logs record checker failure reasons and IDs without checker output or hidden test content, and omit session IDs and raw database diagnostics. The instructor's checker validation response still includes useful compiler feedback. Default Hibernate SQL exception logging is disabled because duplicate-value diagnostics can echo submitted identifiers. See [audit history](docs/audit-history.md), item 59, for verification and limits.
 
 ## Frontend experiment
@@ -385,5 +389,6 @@ The subsequent live check started the packaged server and real JavaFX client aga
 - [docs/security.md](docs/security.md) — current unresolved risks, decisions, and verification status.
 - [docs/recovery.md](docs/recovery.md) — operator incident procedures.
 - [docs/audit-history.md](docs/audit-history.md) — preserved dated audit and implementation evidence.
+- [docs/aarchive-export.md](docs/aarchive-export.md) — the Export for AArchive archive format (for building the importer).
 
 Generated `target/`, `dist/`, and `arbitrator-data/` directories are not source. `ARBITRATOR_BUNDLE.txt` is a stale legacy snapshot, not authoritative documentation. Historical filenames in the audit record and applied migration comments refer to documents consolidated here.
