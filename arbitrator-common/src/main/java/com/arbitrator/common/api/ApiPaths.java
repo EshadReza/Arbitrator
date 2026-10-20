@@ -62,6 +62,8 @@ public final class ApiPaths {
     public static final String ADMIN_CONTEST_BY_ID = "/api/admin/contests/{id}"; // DELETE
     /** A fresh DRAFT contest with a copy of {id}'s problems; POST body is the new title. */
     public static final String ADMIN_CONTEST_CLONE = "/api/admin/contests/{id}/clone";
+    /** GET: ZIP of every stored fact about one contest, for AArchive (docs/aarchive-export.md). */
+    public static final String ADMIN_CONTEST_AARCHIVE_EXPORT = "/api/admin/contests/{id}/export/aarchive";
     public static final String ADMIN_CONTEST_OPEN = "/api/admin/contests/{id}/open";
     public static final String ADMIN_CONTEST_START = "/api/admin/contests/{id}/start";
     public static final String ADMIN_CONTEST_END = "/api/admin/contests/{id}/end";
