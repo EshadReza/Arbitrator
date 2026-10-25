@@ -178,7 +178,40 @@ java -jar arbitrator-client/target/arbitrator-client-linux.jar
 
 To use a `server.properties` file beside a copied JAR, first change into that directory, then launch the JAR there. A Java runtime is still required; this is not a bundled-JRE installer.
 
-Other platforms produce `arbitrator-client-<platform>.jar`. The existing `scripts/prepare-zero-download-bundles.py` still expects the older generic filename and must be corrected before it is used as a release process.
+Other platforms produce `arbitrator-client-<platform>.jar`. `scripts/prepare-zero-download-bundles.py` supports the `--platform <name>` flag (defaulting to `linux`) to bundle the matching classified client artifact.
+
+## Standalone distribution bundles (Zero-Download Packages)
+
+Standalone packages for Admin and Participant machines can be assembled into `dist/admin-bundle/` and `dist/participant-bundle/`:
+
+### 1. Build the artifacts
+```bash
+mvn clean package -DskipTests -Djavafx.platform=linux
+```
+
+### 2. Assemble the bundles
+```bash
+python3 scripts/prepare-zero-download-bundles.py --platform linux
+```
+
+To bundle an extracted standalone JRE (so target machines require zero downloads or Java installation):
+```bash
+python3 scripts/prepare-zero-download-bundles.py --platform linux --jre /path/to/extracted/jdk-17-jre
+```
+*(If `dist/*/jre` directories already exist, they are preserved automatically without `--jre`).*
+
+### 3. Running from the bundles
+* **Admin / Instructor PC:**
+  Enter `dist/admin-bundle` and run:
+  ```bash
+  ./start-server.sh
+  ```
+  The script automatically checks/installs Docker, builds the `arbitrator-judge:latest` sandbox image, provisions and health-checks MySQL 8 in Docker, configures permissions, and launches the server. The instructor console is at `http://localhost:8080/admin`. Pre-flight setup can also be run independently via `./setup.sh`.
+* **Participant PCs:**
+  Enter `dist/participant-bundle`, configure `server.host` in `server.properties` to the instructor PC's IP, and run:
+  ```bash
+  ./start-client.sh
+  ```
 
 ## Problem-package format
 

@@ -17,4 +17,8 @@ CREATE DATABASE IF NOT EXISTS arbitrator
 CREATE USER IF NOT EXISTS 'arbitrator'@'localhost';
 ALTER USER 'arbitrator'@'localhost' IDENTIFIED BY 'changeme';
 GRANT ALL PRIVILEGES ON arbitrator.* TO 'arbitrator'@'localhost';
+
+CREATE USER IF NOT EXISTS 'arbitrator'@'%';
+ALTER USER 'arbitrator'@'%' IDENTIFIED BY 'changeme';
+GRANT ALL PRIVILEGES ON arbitrator.* TO 'arbitrator'@'%';
 FLUSH PRIVILEGES;
