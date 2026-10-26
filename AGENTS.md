@@ -173,6 +173,6 @@ Do not use Mockito while tests must run on JDKs newer than the Byte Buddy versio
 - A solved problem remains visually solved after later failed attempts. Reset development submissions when testing status badges.
 - Source-ban regexes scan raw source rather than a parsed syntax tree and can match prohibited API names inside comments or strings.
 - The judge has a bounded global backlog, per-user submission controls, per-user/global custom-run limits, and shared active-container/aggregate-memory admission.
-- `scripts/prepare-zero-download-bundles.py` expects an obsolete client JAR filename. `scripts/make-bundle.py` also assumes all repository files are UTF-8 text despite binary assets. Neither script is currently a reliable release path.
+- `scripts/prepare-zero-download-bundles.py` assembles `dist/{linux,windows,mac}` from `scripts/bundle-templates/<os>/`; `.bat` templates are written with CRLF. Its Windows/macOS launchers are unvalidated on those systems. `scripts/make-bundle.py` assumes all repository files are UTF-8 text despite binary assets and is not a reliable release path.
 
 Update current user-facing behavior in README, unresolved security decisions in docs/security.md, and dated verification evidence in docs/audit-history.md. Keep historical audit chronology out of README and AGENTS. `ARBITRATOR_BUNDLE.txt` is a stale generated snapshot and is not authoritative.

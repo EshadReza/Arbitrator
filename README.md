@@ -178,40 +178,58 @@ java -jar arbitrator-client/target/arbitrator-client-linux.jar
 
 To use a `server.properties` file beside a copied JAR, first change into that directory, then launch the JAR there. A Java runtime is still required; this is not a bundled-JRE installer.
 
-Other platforms produce `arbitrator-client-<platform>.jar`. `scripts/prepare-zero-download-bundles.py` supports the `--platform <name>` flag (defaulting to `linux`) to bundle the matching classified client artifact.
+Other platforms produce `arbitrator-client-<platform>.jar`; the standalone bundles below package them per operating system.
 
-## Standalone distribution bundles (Zero-Download Packages)
+## Standalone distribution bundles
 
-Standalone packages for Admin and Participant machines can be assembled into `dist/admin-bundle/` and `dist/participant-bundle/`:
+`scripts/prepare-zero-download-bundles.py` assembles one one-click distribution per operating system:
+
+| Folder | Target | Instructor PC (`admin/`) | Participant PC (`client/`) |
+|---|---|---|---|
+| `dist/linux/` | Ubuntu 22.04 x86_64 | `./start-server.sh` | `./start-client.sh` |
+| `dist/windows/` | Windows 10/11 x64 | double-click `start-server.bat` | double-click `start-client.bat` |
+| `dist/mac/` | macOS, Intel and Apple Silicon | double-click `start-server.command` | double-click `start-client.command` |
+
+Each OS folder also contains a `README.txt` quick start for the people receiving it.
 
 ### 1. Build the artifacts
+
+The server JAR is platform-independent; the client needs one build per JavaFX platform. Run `clean` only on the first build so earlier client JARs stay in `arbitrator-client/target/`:
+
 ```bash
 mvn clean package -DskipTests -Djavafx.platform=linux
+mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=win
+mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=mac
+mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=mac-aarch64
 ```
+
+Skip the platforms you do not ship; the script warns about any missing client JAR.
 
 ### 2. Assemble the bundles
+
 ```bash
-python3 scripts/prepare-zero-download-bundles.py --platform linux
+python3 scripts/prepare-zero-download-bundles.py                 # all three
+python3 scripts/prepare-zero-download-bundles.py --target windows  # just one
 ```
 
-To bundle an extracted standalone JRE (so target machines require zero downloads or Java installation):
-```bash
-python3 scripts/prepare-zero-download-bundles.py --platform linux --jre /path/to/extracted/jdk-17-jre
-```
-*(If `dist/*/jre` directories already exist, they are preserved automatically without `--jre`).*
+To bundle a Java 17 runtime so target machines need no Java installation, pass an extracted JRE **for that OS** (for example, Eclipse Temurin 17 JRE). A JRE is OS- and CPU-specific:
 
-### 3. Running from the bundles
-* **Admin / Instructor PC:**
-  Enter `dist/admin-bundle` and run:
-  ```bash
-  ./start-server.sh
-  ```
-  The script automatically checks/installs Docker, builds the `arbitrator-judge:latest` sandbox image, provisions and health-checks MySQL 8 in Docker, configures permissions, and launches the server. The instructor console is at `http://localhost:8080/admin`. Pre-flight setup can also be run independently via `./setup.sh`.
-* **Participant PCs:**
-  Enter `dist/participant-bundle`, configure `server.host` in `server.properties` to the instructor PC's IP, and run:
-  ```bash
-  ./start-client.sh
-  ```
+```bash
+python3 scripts/prepare-zero-download-bundles.py \
+    --jre-linux   /path/to/jdk-17-jre-linux-x64 \
+    --jre-windows /path/to/jdk-17-jre-windows-x64 \
+    --jre-mac     /path/to/jdk-17.jre            # Contents/Home layout is accepted
+```
+
+`--jre DIR` is accepted with a single `--target`. Previously bundled `dist/<os>/*/jre` folders are preserved when no JRE is passed; without one, the launchers fall back to the system `java`. A macOS JRE matches one CPU type, so a bundled mac JRE serves only Intel or only Apple Silicon participants.
+
+### 3. What the launchers do
+
+- **Instructor PC:** `start-server` runs `setup` first, then launches the server with the bundled or system Java. `setup` installs Docker if it is missing (Ubuntu: Docker's apt repository, with sudo; Windows: Docker Desktop via `winget`; macOS: Docker Desktop via Homebrew), starts the Docker engine, builds `arbitrator-judge:latest` from the bundled `docker/Dockerfile`, creates or starts the `arbitrator-mysql` container (volume `arbitrator-mysql-data`), waits for MySQL, and synchronizes the database user. Steps that are already complete are skipped. If port 3306 is already in use, the container is skipped and the existing MySQL is used. On Windows, a fresh Docker Desktop install needs a sign-out/restart and a second run.
+- **Participant PCs:** set `server.host` in `client/server.properties` to the instructor PC's LAN IP, then run the client launcher. Docker and MySQL are not needed. The macOS launcher picks the Apple Silicon or Intel JAR automatically.
+- **Credentials:** `DB_USER` / `DB_PASS` default to `arbitrator` / `changeme` and are passed to both MySQL and the server. Use the same values on every run; the MySQL root password is set from `DB_PASS` when the container is first created. `ARBITRATOR_DOCKER_IMAGE` and `ARBITRATOR_DOCKER_PLATFORM` (default `linux/amd64`) are honored as in the judge setup above.
+
+Package a folder with `tar -czf arbitrator-linux-admin.tar.gz -C dist/linux admin` (or zip the folder on Windows/macOS). On Linux, `setup.sh` grants socket access for the current session by making `/var/run/docker.sock` world-writable when the new `docker` group membership is not yet active. Treat the instructor PC as single-user.
 
 ## Problem-package format
 
@@ -402,7 +420,7 @@ Before product integration, decide its purpose and design routing, REST/STOMP cl
 The current [security index](docs/security.md) and preserved [audit findings](docs/audit-history.md) supersede the retired workflow plan. Remaining product and release work includes:
 
 - Rejudge and float-tolerance judging; bulk user import/password-reset UI remain unsupported.
-- Supported installers and repeatable Ubuntu packaging; the existing bundle scripts have obsolete artifact/path assumptions and are not a reliable release process.
+- Signed installers. The per-OS standalone bundles are script-assembled; the Windows and macOS launchers have not yet been validated on those systems.
 - Coordinated database/material backup and a verified restore/rollback drill.
 - Fix the immediate-start submission rejection and repeated paused-state log messages found during [live validation](docs/audit-history.md#live-validation-2026-09-27).
 - Broader JavaFX visual acceptance, native file-dialog checks, realistic LAN load/reconnect tests, and a multi-client rehearsal.
