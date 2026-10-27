@@ -11,6 +11,7 @@ Arbitrator is an offline, LAN-first programming contest platform for university 
 - [Setup](#first-time-setup)
 - [Run the application](#run-locally)
 - [Package the client](#client-packaging)
+- [Build lab bundles (Linux, Windows, macOS)](#standalone-distribution-bundles)
 - [Create a problem ZIP](#problem-package-format)
 - [Configuration](#runtime-configuration)
 - [Run tests](#testing)
@@ -48,7 +49,7 @@ Target deployment is Ubuntu 26.04 LTS ("Resolute Raccoon") x86_64 with:
 - MySQL 8
 - Docker Engine, the Docker Buildx plugin, and daemon access for the account running the server
 
-macOS and Windows with Docker Desktop are supported for development and judge testing, but the planned lab deployment remains Linux.
+macOS and Windows with Docker Desktop are supported for development and judge testing, but the planned lab deployment remains Linux. These prerequisites are for building and developing from source. Lab PCs running a [standalone bundle](#standalone-distribution-bundles) need no JDK, Maven or host MySQL.
 
 The commands below assume Ubuntu x86_64, a graphical desktop for the JavaFX client, and a terminal opened at the repository root. Initial Maven dependency downloads and the Docker image build require internet access unless their inputs are already cached. The configured application can then run on the LAN without internet access.
 
@@ -176,25 +177,39 @@ The Ubuntu artifact is `arbitrator-client/target/arbitrator-client-linux.jar`. R
 java -jar arbitrator-client/target/arbitrator-client-linux.jar
 ```
 
-To use a `server.properties` file beside a copied JAR, first change into that directory, then launch the JAR there. A Java runtime is still required; this is not a bundled-JRE installer.
+To use a `server.properties` file beside a copied JAR, first change into that directory, then launch the JAR there. A bare JAR needs an installed Java runtime; for lab PCs, use the [standalone bundles](#standalone-distribution-bundles), which include one.
 
 Other platforms produce `arbitrator-client-<platform>.jar`; the standalone bundles below package them per operating system.
 
 ## Standalone distribution bundles
 
-`scripts/prepare-zero-download-bundles.py` assembles one one-click distribution per operating system:
+`scripts/prepare-zero-download-bundles.py` assembles a ready-to-copy distribution per operating system under `dist/` (git-ignored). Each has an `admin/` folder for the instructor PC (server, judge image, MySQL setup) and a `client/` folder for participant PCs, plus a `README.txt` quick start for the people receiving it.
 
 | Folder | Target | Instructor PC (`admin/`) | Participant PC (`client/`) |
 |---|---|---|---|
-| `dist/linux/` | Ubuntu 26.04 x86_64 | `./start-server.sh` | `./start-client.sh` |
+| `dist/linux/` | Ubuntu 26.04 x86_64 | `bash start-server.sh` | `bash start-client.sh` |
 | `dist/windows/` | Windows 10/11 x64 | double-click `start-server.bat` | double-click `start-client.bat` |
 | `dist/mac/` | macOS, Intel and Apple Silicon | double-click `start-server.command` | double-click `start-client.command` |
 
-Each OS folder also contains a `README.txt` quick start for the people receiving it.
+The Windows and macOS launchers have not yet been run on those systems.
 
-### 1. Build the artifacts
+### Recommended: build a lab-ready Linux bundle
 
-The server JAR is platform-independent; the client needs one build per JavaFX platform. Run `clean` only on the first build so earlier client JARs stay in `arbitrator-client/target/`:
+On the build machine (Docker, JDK 17 and Maven installed):
+
+```bash
+mvn clean package -DskipTests -Djavafx.platform=linux
+scripts/docker/build-sandbox-image.sh
+python3 scripts/prepare-zero-download-bundles.py --target linux \
+    --jre-linux /path/to/extracted/jdk-17-jre-linux-x64 --with-images
+tar -czf arbitrator-linux.tar.gz -C dist linux
+```
+
+The result, about 0.9 GB, needs no Java or Docker Hub downloads on lab PCs. Only installing Docker itself on the instructor PC uses the network (the Ubuntu archive), and only if it is not installed yet.
+
+### Build options
+
+Client JARs are built once per JavaFX platform. Run `clean` only on the first build, so earlier client JARs stay in `arbitrator-client/target/`. The script warns about any that are missing.
 
 ```bash
 mvn clean package -DskipTests -Djavafx.platform=linux
@@ -203,39 +218,44 @@ mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=mac
 mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=mac-aarch64
 ```
 
-Skip the platforms you do not ship; the script warns about any missing client JAR.
+| Option | Effect |
+|---|---|
+| *(none)* / `--target all` | Assemble `linux`, `windows` and `mac`. |
+| `--target linux\|windows\|mac` | Assemble one OS. |
+| `--jre-linux DIR`, `--jre-windows DIR`, `--jre-mac DIR` | Bundle an extracted Java 17 runtime (for example, Eclipse Temurin 17 JRE) for that OS. A JRE is OS- and CPU-specific; a macOS JRE (`Contents/Home` layout accepted) serves only Intel or only Apple Silicon Macs. |
+| `--jre DIR` | The same, with a single `--target`. |
+| `--with-images` | Linux only. Save `mysql:8.0` and the judge image into `dist/linux/admin/images/` (about 0.5 GB compressed); `start-server.sh` loads them instead of downloading. Build the judge image first; `mysql:8.0` is pulled automatically. Unchanged images are not re-exported. |
 
-### 2. Assemble the bundles
+Previously bundled `jre/` folders are kept when no JRE is passed. Without a bundled JRE, the Linux launchers use an installed Java 17+ or install OpenJDK 21 from the Ubuntu archive (which needs sudo). The Windows and macOS launchers require an installed Java.
 
-```bash
-python3 scripts/prepare-zero-download-bundles.py                 # all three
-python3 scripts/prepare-zero-download-bundles.py --target windows  # just one
-```
+### Linux (Ubuntu 26.04)
 
-To bundle a Java 17 runtime so target machines need no Java installation, pass an extracted JRE **for that OS** (for example, Eclipse Temurin 17 JRE). A JRE is OS- and CPU-specific:
+**Instructor PC: `bash start-server.sh`** (in `admin/`). It runs these steps, skipping any that are already done:
 
-```bash
-python3 scripts/prepare-zero-download-bundles.py \
-    --jre-linux   /path/to/jdk-17-jre-linux-x64 \
-    --jre-windows /path/to/jdk-17-jre-windows-x64 \
-    --jre-mac     /path/to/jdk-17.jre            # Contents/Home layout is accepted
-```
+1. **Docker.** Installs `docker.io` and `docker-buildx` from the Ubuntu archive if missing, starts the service, and gives the account access. If an earlier bundle left a `download.docker.com` apt source whose key failed to download (`NO_PUBKEY`), that source is renamed to `*.disabled-by-arbitrator`.
+2. **Judge image.** Loads it from `images/`, or builds it from `docker/Dockerfile`.
+3. **MySQL.** Runs MySQL 8 in its own Docker container, `arbitrator-mysql`. Its data is in the `arbitrator-mysql-data` volume, which survives container re-creation. The container is published on `127.0.0.1` only, at 3306 or, if another MySQL already uses that port, the next free port up to 3330. Before starting the server, the script checks that the database user can log in.
+4. **Server.** Checks that port 8080 is free, then starts the server with the bundled Java, pointed at the container's port. The instructor console is at `http://localhost:8080/admin`; Ctrl+C stops the server.
 
-For labs with slow or unreliable internet, add `--with-images`. It saves `mysql:8.0` and the judge image from the build machine into `dist/linux/admin/images/` (about 0.5 GB compressed), and the Linux `start-server.sh` loads them instead of downloading. Build the judge image first with `scripts/docker/build-sandbox-image.sh`; `mysql:8.0` is pulled automatically. Re-runs skip images that have not changed.
+`bash start-server.sh --setup-only` stops after step 3. Apt installs, image pulls and the judge build are retried with increasing waits.
 
-`--jre DIR` is accepted with a single `--target`. Previously bundled `dist/<os>/*/jre` folders are preserved when no JRE is passed; without one, the launchers fall back to the system `java`. A macOS JRE matches one CPU type, so a bundled mac JRE serves only Intel or only Apple Silicon participants.
+**Participant PCs:** set `server.host` in `client/server.properties` to the instructor PC's LAN IP, then run `bash start-client.sh`. Docker and MySQL are not needed. The client runs through XWayland on the Wayland-only desktop.
 
-### 3. What the launchers do
+**Errors and logs.** Both scripts save their full output under `logs/` next to the script. On any failure, they keep the terminal open until Enter is pressed. Started from the file manager without a terminal, they reopen in Ptyxis or GNOME Terminal.
 
-- **Instructor PC:** `start-server` prepares the host, then launches the server with the bundled or system Java. On Linux this is a single script (`./start-server.sh --setup-only` stops before launching); on Windows and macOS it calls the separate `setup` script. Preparation installs Docker if it is missing (Ubuntu: the archive's `docker.io` and `docker-buildx` packages, with sudo; Windows: Docker Desktop via `winget`; macOS: Docker Desktop via Homebrew), starts the Docker engine, builds `arbitrator-judge:latest` from the bundled `docker/Dockerfile`, creates or starts the `arbitrator-mysql` container (volume `arbitrator-mysql-data`), waits for MySQL, and synchronizes the database user. Steps that are already complete are skipped. On Windows and macOS, if port 3306 is already in use, the container is skipped and the existing MySQL is used. On Linux, the server always uses the bundle's own container: it is published on `127.0.0.1` only, on 3306 or the next free port up to 3330, and the server is pointed at that port. Before Java starts, the Linux script also checks the database login and that the server port (8080) is free. It saves its full output to `admin/logs/`, and on any failure it keeps the terminal open until Enter is pressed. Launched from the file manager without a terminal, it reopens itself in Ptyxis/GNOME Terminal; the Linux client launcher behaves the same way. On Windows, a fresh Docker Desktop install needs a sign-out/restart and a second run.
-- **Participant PCs:** set `server.host` in `client/server.properties` to the instructor PC's LAN IP, then run the client launcher. Without a bundled JRE, the Linux launcher installs OpenJDK 21 from the Ubuntu archive. Docker and MySQL are not needed. The macOS launcher picks the Apple Silicon or Intel JAR automatically.
-- **Credentials:** `DB_USER` / `DB_PASS` default to `arbitrator` / `changeme` and are passed to both MySQL and the server. Use the same values on every run; the MySQL root password is set from `DB_PASS` when the container is first created. `ARBITRATOR_DOCKER_IMAGE` and `ARBITRATOR_DOCKER_PLATFORM` (default `linux/amd64`) are honored as in the judge setup above.
+**USB drives and accounts without sudo.** Copies on FAT32, exFAT or NTFS drives and on network folders lose Linux executable permissions; `chmod` and the file manager's "run as program" switch then have no effect. Copy the folder into the home directory and start it with `bash`. The scripts restore the bundled JRE's executable bits. If the location forbids running programs (`noexec`), they print the drive type and the copy command. Participant PCs need no sudo when the JRE is bundled. An account without sudo cannot install Docker; the script prints what an administrator must run once (install `docker.io docker-buildx`, add the account to the `docker` group).
 
-Linux network steps (apt, image pulls, and the judge build) are retried with increasing waits. If an earlier bundle left a Docker apt repository whose signing key failed to download (`NO_PUBKEY` from `download.docker.com`), `start-server.sh` renames that source to `*.disabled-by-arbitrator` and installs Docker from the Ubuntu archive instead.
+**Security note.** When the account has just been added to the `docker` group, membership applies only to new logins. For the current session, `start-server.sh` therefore makes `/var/run/docker.sock` world-writable, which gives every local account root-equivalent access to Docker. Treat the instructor PC as single-user; see [security.md](docs/security.md#linux-bundle--docker-socket-access).
 
-Copies on FAT32/exFAT/NTFS drives or network folders lose Linux executable permissions, so copy the folder into the home directory and start it with `bash start-client.sh` (or `bash start-server.sh`). The scripts restore the bundled JRE's executable bits, and if the location forbids running programs (`noexec`), they print the drive type and the copy command. Accounts without sudo get a clear message instead of a failed install: participant PCs need no sudo when the JRE is bundled, and the instructor PC needs an administrator to install Docker and add the account to the `docker` group once.
+### Windows and macOS
 
-Package a folder with `tar -czf arbitrator-linux-admin.tar.gz -C dist/linux admin` (or zip the folder on Windows/macOS). On Linux, `start-server.sh` grants socket access for the current session by making `/var/run/docker.sock` world-writable when the new `docker` group membership is not yet active. Treat the instructor PC as single-user.
+`start-server` calls the separate `setup` script and then starts the server. Setup installs Docker Desktop if it is missing (Windows via `winget`, macOS via Homebrew), starts it and waits for its engine. It then builds the judge image and creates or starts the `arbitrator-mysql` container. On Windows, a fresh Docker Desktop install needs a sign-out or restart, then a second run. Unlike the Linux script, these use an existing MySQL on port 3306 if one is present, publish the container on all interfaces, and do not load bundled images.
+
+Participants set `server.host` in `client/server.properties`, then double-click the client launcher. The macOS launcher picks the Apple Silicon or Intel JAR automatically.
+
+### Credentials and overrides
+
+`DB_USER` / `DB_PASS` default to `arbitrator` / `changeme` and are passed to both MySQL and the server. Use the same values on every run: the MySQL root password is set from `DB_PASS` when the container is first created. `ARBITRATOR_DOCKER_IMAGE` and `ARBITRATOR_DOCKER_PLATFORM` (default `linux/amd64`) are honored as in the [judge image setup](#4-build-the-judge-image).
 
 ## Problem-package format
 
@@ -426,7 +446,7 @@ Before product integration, decide its purpose and design routing, REST/STOMP cl
 The current [security index](docs/security.md) and preserved [audit findings](docs/audit-history.md) supersede the retired workflow plan. Remaining product and release work includes:
 
 - Rejudge and float-tolerance judging; bulk user import/password-reset UI remain unsupported.
-- Signed installers. The per-OS standalone bundles are script-assembled; the Windows and macOS launchers have not yet been validated on those systems.
+- Signed installers and validation of the standalone bundles on their target systems. The Linux bundle was checked on Fedora, not run end to end on Ubuntu 26.04; the Windows and macOS launchers have not been run on those systems.
 - Coordinated database/material backup and a verified restore/rollback drill.
 - Fix the immediate-start submission rejection and repeated paused-state log messages found during [live validation](docs/audit-history.md#live-validation-2026-09-27).
 - Broader JavaFX visual acceptance, native file-dialog checks, realistic LAN load/reconnect tests, and a multi-client rehearsal.

@@ -4,6 +4,15 @@ Archived from the working copy of `STATUS.md` during the documentation consolida
 
 Legacy plain-text references are historical: `CLAUDE.md` and `rules.md` were consolidated into `AGENTS.md`; `WORKFLOW_PLAN.md` was retired; `OPEN_SECURITY_ITEMS.md` became `docs/security.md`; `INCIDENT_RECOVERY.md` became `docs/recovery.md`. Repository paths in the record are relative to the repository root. The old “next actions” and v1.0 proposals are not implementation approval.
 
+## Verification update — 2026-10-27 (Linux standalone bundle)
+
+- Scope: `scripts/bundle-templates/linux/` and `scripts/prepare-zero-download-bundles.py` (commit `d5dccb1`). Checked on Fedora 44 with Docker 29.8.1 and the bundled Temurin 17.0.20 JRE. **Not run on Ubuntu 26.04**; Windows and macOS launchers were not run at all.
+- The packaged server JAR started against a throwaway `mysql:8.0` container. With a wrong password it failed at `flywayInitializer` with `Access denied`, the suspected lab failure when the old script used a pre-existing host MySQL on 3306.
+- The real `start-server.sh`, run with host MySQL already on 3306, published its container on `127.0.0.1:3307`, passed the database-login pre-check, and started the server. With 8080 occupied, it reported the port's owner, saved its log, and waited for Enter in a pseudo-terminal.
+- `--with-images` exported `mysql:8.0` (234 MB) and the judge image (274 MB); after removing `mysql:8.0` locally, the script loaded it from the bundle without pulling, with a matching image ID.
+- Simulated with stubs, not on a real system: `NO_PUBKEY` repair of a leftover `download.docker.com` source, and bundled-JRE handling after executable bits were stripped (restored) or the binary was unrunnable (explanation printed). Docker install, OpenJDK install, the no-sudo paths, and the terminal relaunch were not exercised.
+- Ubuntu 26.04 package availability (`docker.io`, `docker-buildx`, `openjdk-21-jre(-headless)`, `openjdk-17-jre(-headless)`) was confirmed from the `resolute` archive indexes only. Test containers and volumes were removed afterwards.
+
 ## Verification update — 2026-10-20 (Export for AArchive)
 
 - Added the Export for AArchive ZIP (`AArchiveExportService`, `AdminAArchiveExportController`, console button) and its specification, [aarchive-export.md](aarchive-export.md). Read-only; no migration or new dependency.

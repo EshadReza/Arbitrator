@@ -74,6 +74,8 @@ The review reached the end of the 105-item checklist. That does **not** mean eve
 
 **Decision:** MySQL host investigation/binding change declined. This is not proof of LAN/internet reachability; firewall and other DB clients are unverified.
 
+Separately, since 2026-10-27, the Linux standalone bundle publishes its own `arbitrator-mysql` container on `127.0.0.1` only. This does not change the host MySQL decision above. The Windows and macOS bundle scripts still publish their container on all interfaces.
+
 ## Deferred hardening and operational limitations
 
 ### Items 16, 49 — Content Security Policy
@@ -91,6 +93,12 @@ Admin MFA was deferred; password-based authentication remains.
 ### Item 32 — Docker logs
 
 Docker logging inherits daemon behavior; no dedicated logging/disk-hardening change approved. Do not assert demonstrated unlimited persistent logs.
+
+### Linux bundle — Docker socket access
+
+**Finding:** When the account was only just added to the `docker` group, the Linux bundle's `start-server.sh` runs `sudo chmod 666 /var/run/docker.sock` so the current session can use Docker. This lets every local account control Docker, which is root-equivalent. The setting lasts until the Docker service restarts.
+
+**Decision:** Kept from the first bundle commit to keep the one-click start working; documented in README as "treat the instructor PC as single-user". No alternative (re-login, or re-running under `sg docker`) has been approved.
 
 ### Items 50, 51 — Transport encryption
 
