@@ -10,17 +10,25 @@ dist/<target>/client (participant client) with that OS's one-click scripts.
 
 Usage:
   python3 scripts/prepare-zero-download-bundles.py [--target {all,linux,windows,mac}]
-      [--jre-linux DIR] [--jre-windows DIR] [--jre-mac DIR]
+      [--jre-linux DIR] [--jre-windows DIR] [--jre-mac DIR] [--with-images]
 
 A JRE is OS- and CPU-specific, so each target takes its own. --jre DIR is
 accepted only together with a single --target.
+
+--with-images saves the mysql:8.0 and judge Docker images from this machine
+into dist/linux/admin/images/, so the lab's start-server.sh loads them instead
+of downloading (about 0.5 GB compressed). Build the judge image first with
+scripts/docker/build-sandbox-image.sh.
 """
 
 import argparse
+import gzip
 import os
 import shutil
 import stat
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -70,6 +78,57 @@ def copy_script(src: Path, dest: Path):
             make_executable(dest)
 
 
+# (image, file name in admin/images/) loaded by the Linux start-server.sh.
+BUNDLED_IMAGES = [
+    ("mysql:8.0", "mysql-8.0.tar.gz"),
+    (os.environ.get("ARBITRATOR_DOCKER_IMAGE", "arbitrator-judge:latest"), "arbitrator-judge.tar.gz"),
+]
+
+
+def docker_image_id(image: str) -> Optional[str]:
+    result = subprocess.run(["docker", "image", "inspect", "--format", "{{.Id}}", image],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def export_images(admin_dir: Path):
+    images_dir = admin_dir / "images"
+    images_dir.mkdir(exist_ok=True)
+    for image, file_name in BUNDLED_IMAGES:
+        image_id = docker_image_id(image)
+        if image_id is None and image.startswith("mysql:"):
+            for attempt in range(1, 6):
+                print(f"[INFO] Pulling {image} (attempt {attempt}/5)...")
+                if subprocess.run(["docker", "pull", image]).returncode == 0:
+                    break
+                time.sleep(5 * attempt)
+            image_id = docker_image_id(image)
+        if image_id is None:
+            print(f"[ERROR] Docker image {image} is not available on this machine.")
+            if "judge" in file_name:
+                print("Build it first with:  scripts/docker/build-sandbox-image.sh")
+            sys.exit(1)
+
+        dest = images_dir / file_name
+        id_file = images_dir / (file_name + ".id")
+        if dest.exists() and id_file.exists() and id_file.read_text().strip() == image_id:
+            print(f"[OK] {dest.name} is up to date")
+            continue
+
+        print(f"[INFO] Saving {image} -> {dest} (this takes a few minutes)...")
+        partial = dest.with_suffix(".partial")
+        with subprocess.Popen(["docker", "save", image], stdout=subprocess.PIPE) as proc, \
+                gzip.open(partial, "wb", compresslevel=1) as out:
+            shutil.copyfileobj(proc.stdout, out, 1024 * 1024)
+        if proc.returncode != 0:
+            partial.unlink(missing_ok=True)
+            print(f"[ERROR] docker save {image} failed.")
+            sys.exit(1)
+        partial.replace(dest)
+        id_file.write_text(image_id + "\n")
+        print(f"[OK] {dest.name}: {dest.stat().st_size / 1e6:.0f} MB")
+
+
 def find_server_jar() -> Optional[Path]:
     target_dir = ROOT / "arbitrator-server" / "target"
     candidate = target_dir / "arbitrator-server-0.1.0-SNAPSHOT.jar"
@@ -103,7 +162,7 @@ def find_client_jars(platform: str) -> List[Path]:
     return jars
 
 
-def assemble_bundle(target_os: str, server_jar: Path, jre_path: Optional[Path]):
+def assemble_bundle(target_os: str, server_jar: Path, jre_path: Optional[Path], with_images: bool):
     os_dir = DIST_DIR / target_os
     admin_dir = os_dir / "admin"
     client_dir = os_dir / "client"
@@ -175,6 +234,10 @@ def assemble_bundle(target_os: str, server_jar: Path, jre_path: Optional[Path]):
     else:
         print(f"[NOTE] No JRE bundled for {target_os}; target machines need Java 17 installed.")
 
+    # 7. Offline Docker images (only the Linux launcher loads them)
+    if with_images and target_os == "linux":
+        export_images(admin_dir)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Assemble Arbitrator distribution packages.")
@@ -186,6 +249,8 @@ def main():
         parser.add_argument(f"--jre-{os_name}", type=str, dest=f"jre_{os_name}",
                             help=f"Path to an extracted {os_name} JRE 17")
     parser.add_argument("--jre", type=str, help="Path to an extracted JRE (single --target only)")
+    parser.add_argument("--with-images", action="store_true",
+                        help="Bundle the mysql:8.0 and judge Docker images into the Linux admin folder")
     args = parser.parse_args()
 
     target = args.legacy_platform or args.target
@@ -202,6 +267,9 @@ def main():
             parser.error("--jre needs a single --target; use --jre-linux/--jre-windows/--jre-mac instead")
         jres[targets[0]] = args.jre
 
+    if args.with_images and "linux" not in targets:
+        parser.error("--with-images applies to the linux target only")
+
     server_jar = find_server_jar()
     if not server_jar:
         print("[ERROR] Server JAR not found at arbitrator-server/target/.")
@@ -214,7 +282,7 @@ def main():
 
     for t in targets:
         jre_path = resolve_jre(t, Path(jres[t]).resolve()) if jres[t] else None
-        assemble_bundle(t, server_jar, jre_path)
+        assemble_bundle(t, server_jar, jre_path, args.with_images)
 
     print("\n====================================================")
     print("  Distributions assembled under dist/<os>/{admin,client}")

@@ -41,7 +41,7 @@ MySQL stores relational data and PDF statement blobs. Uploaded material bodies l
 
 ## Prerequisites
 
-Target deployment is Ubuntu 22.04 with:
+Target deployment is Ubuntu 26.04 LTS ("Resolute Raccoon") x86_64 with:
 
 - JDK 17
 - Maven 3.8+
@@ -186,7 +186,7 @@ Other platforms produce `arbitrator-client-<platform>.jar`; the standalone bundl
 
 | Folder | Target | Instructor PC (`admin/`) | Participant PC (`client/`) |
 |---|---|---|---|
-| `dist/linux/` | Ubuntu 22.04 x86_64 | `./start-server.sh` | `./start-client.sh` |
+| `dist/linux/` | Ubuntu 26.04 x86_64 | `./start-server.sh` | `./start-client.sh` |
 | `dist/windows/` | Windows 10/11 x64 | double-click `start-server.bat` | double-click `start-client.bat` |
 | `dist/mac/` | macOS, Intel and Apple Silicon | double-click `start-server.command` | double-click `start-client.command` |
 
@@ -221,15 +221,21 @@ python3 scripts/prepare-zero-download-bundles.py \
     --jre-mac     /path/to/jdk-17.jre            # Contents/Home layout is accepted
 ```
 
+For labs with slow or unreliable internet, add `--with-images`. It saves `mysql:8.0` and the judge image from the build machine into `dist/linux/admin/images/` (about 0.5 GB compressed), and the Linux `start-server.sh` loads them instead of downloading. Build the judge image first with `scripts/docker/build-sandbox-image.sh`; `mysql:8.0` is pulled automatically. Re-runs skip images that have not changed.
+
 `--jre DIR` is accepted with a single `--target`. Previously bundled `dist/<os>/*/jre` folders are preserved when no JRE is passed; without one, the launchers fall back to the system `java`. A macOS JRE matches one CPU type, so a bundled mac JRE serves only Intel or only Apple Silicon participants.
 
 ### 3. What the launchers do
 
-- **Instructor PC:** `start-server` runs `setup` first, then launches the server with the bundled or system Java. `setup` installs Docker if it is missing (Ubuntu: Docker's apt repository, with sudo; Windows: Docker Desktop via `winget`; macOS: Docker Desktop via Homebrew), starts the Docker engine, builds `arbitrator-judge:latest` from the bundled `docker/Dockerfile`, creates or starts the `arbitrator-mysql` container (volume `arbitrator-mysql-data`), waits for MySQL, and synchronizes the database user. Steps that are already complete are skipped. If port 3306 is already in use, the container is skipped and the existing MySQL is used. On Windows, a fresh Docker Desktop install needs a sign-out/restart and a second run.
-- **Participant PCs:** set `server.host` in `client/server.properties` to the instructor PC's LAN IP, then run the client launcher. Docker and MySQL are not needed. The macOS launcher picks the Apple Silicon or Intel JAR automatically.
+- **Instructor PC:** `start-server` prepares the host, then launches the server with the bundled or system Java. On Linux this is a single script (`./start-server.sh --setup-only` stops before launching); on Windows and macOS it calls the separate `setup` script. Preparation installs Docker if it is missing (Ubuntu: the archive's `docker.io` and `docker-buildx` packages, with sudo; Windows: Docker Desktop via `winget`; macOS: Docker Desktop via Homebrew), starts the Docker engine, builds `arbitrator-judge:latest` from the bundled `docker/Dockerfile`, creates or starts the `arbitrator-mysql` container (volume `arbitrator-mysql-data`), waits for MySQL, and synchronizes the database user. Steps that are already complete are skipped. On Windows and macOS, if port 3306 is already in use, the container is skipped and the existing MySQL is used. On Linux, the server always uses the bundle's own container: it is published on `127.0.0.1` only, on 3306 or the next free port up to 3330, and the server is pointed at that port. Before Java starts, the Linux script also checks the database login and that the server port (8080) is free. It saves its full output to `admin/logs/`, and on any failure it keeps the terminal open until Enter is pressed. Launched from the file manager without a terminal, it reopens itself in Ptyxis/GNOME Terminal; the Linux client launcher behaves the same way. On Windows, a fresh Docker Desktop install needs a sign-out/restart and a second run.
+- **Participant PCs:** set `server.host` in `client/server.properties` to the instructor PC's LAN IP, then run the client launcher. Without a bundled JRE, the Linux launcher installs OpenJDK 21 from the Ubuntu archive. Docker and MySQL are not needed. The macOS launcher picks the Apple Silicon or Intel JAR automatically.
 - **Credentials:** `DB_USER` / `DB_PASS` default to `arbitrator` / `changeme` and are passed to both MySQL and the server. Use the same values on every run; the MySQL root password is set from `DB_PASS` when the container is first created. `ARBITRATOR_DOCKER_IMAGE` and `ARBITRATOR_DOCKER_PLATFORM` (default `linux/amd64`) are honored as in the judge setup above.
 
-Package a folder with `tar -czf arbitrator-linux-admin.tar.gz -C dist/linux admin` (or zip the folder on Windows/macOS). On Linux, `setup.sh` grants socket access for the current session by making `/var/run/docker.sock` world-writable when the new `docker` group membership is not yet active. Treat the instructor PC as single-user.
+Linux network steps (apt, image pulls, and the judge build) are retried with increasing waits. If an earlier bundle left a Docker apt repository whose signing key failed to download (`NO_PUBKEY` from `download.docker.com`), `start-server.sh` renames that source to `*.disabled-by-arbitrator` and installs Docker from the Ubuntu archive instead.
+
+Copies on FAT32/exFAT/NTFS drives or network folders lose Linux executable permissions, so copy the folder into the home directory and start it with `bash start-client.sh` (or `bash start-server.sh`). The scripts restore the bundled JRE's executable bits, and if the location forbids running programs (`noexec`), they print the drive type and the copy command. Accounts without sudo get a clear message instead of a failed install: participant PCs need no sudo when the JRE is bundled, and the instructor PC needs an administrator to install Docker and add the account to the `docker` group once.
+
+Package a folder with `tar -czf arbitrator-linux-admin.tar.gz -C dist/linux admin` (or zip the folder on Windows/macOS). On Linux, `start-server.sh` grants socket access for the current session by making `/var/run/docker.sock` world-writable when the new `docker` group membership is not yet active. Treat the instructor PC as single-user.
 
 ## Problem-package format
 

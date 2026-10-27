@@ -32,7 +32,7 @@ Ordinary authorized work does not require a new approval merely because this fil
 | # | Decision |
 |---|---|
 | D1 | MySQL 8 is the only application datastore. |
-| D2 | Ubuntu 22.04 is the target lab deployment. Docker also makes judge development possible on macOS/Windows. |
+| D2 | Ubuntu 26.04 LTS ("Resolute Raccoon") is the target lab deployment. Docker also makes judge development possible on macOS/Windows. |
 | D3 | Instructor surfaces require a loopback request; admin API operations additionally require an `ADMIN` JWT. |
 | D4 | HTTPS/WSS is deferred. HTTP/WS and the existing build/run commands are preserved. |
 | D5 | One contest can be joinable/live at a time, although historical contests remain stored. |
