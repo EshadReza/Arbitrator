@@ -74,7 +74,7 @@ The review reached the end of the 105-item checklist. That does **not** mean eve
 
 **Decision:** MySQL host investigation/binding change declined. This is not proof of LAN/internet reachability; firewall and other DB clients are unverified.
 
-Separately, since 2026-10-27, the Linux standalone bundle publishes its own `arbitrator-mysql` container on `127.0.0.1` only. This does not change the host MySQL decision above. The Windows and macOS bundle scripts still publish their container on all interfaces.
+Separately, since 2026-10-27, the standalone bundles for all three operating systems publish their own `arbitrator-mysql` container on `127.0.0.1` only. This does not change the host MySQL decision above.
 
 ## Deferred hardening and operational limitations
 

@@ -183,7 +183,7 @@ Other platforms produce `arbitrator-client-<platform>.jar`; the standalone bundl
 
 ## Standalone distribution bundles
 
-`scripts/prepare-zero-download-bundles.py` assembles a ready-to-copy distribution per operating system under `dist/` (git-ignored). Each has an `admin/` folder for the instructor PC (server, judge image, MySQL setup) and a `client/` folder for participant PCs, plus a `README.txt` quick start for the people receiving it.
+`scripts/prepare-zero-download-bundles.py` assembles a ready-to-copy distribution per operating system under `dist/` (git-ignored). Each has an `admin/` folder for the instructor PC (server, judge image, MySQL setup) and a `client/` folder for participant PCs, with a `README.txt` quick start in the OS folder and in both `admin/` and `client/`, since those are copied to different PCs. Every bundle includes its own Java runtime, and with `--with-images` the judge and MySQL Docker images, so lab PCs download nothing except, on a fresh instructor PC, Docker itself.
 
 | Folder | Target | Instructor PC (`admin/`) | Participant PC (`client/`) |
 |---|---|---|---|
@@ -191,42 +191,38 @@ Other platforms produce `arbitrator-client-<platform>.jar`; the standalone bundl
 | `dist/windows/` | Windows 10/11 x64 | double-click `start-server.bat` | double-click `start-client.bat` |
 | `dist/mac/` | macOS, Intel and Apple Silicon | double-click `start-server.command` | double-click `start-client.command` |
 
-The Windows and macOS launchers have not yet been run on those systems.
+Each side is one launcher. The Windows and macOS launchers have not been run on real Windows or Mac hardware; see [what was tested](docs/audit-history.md#verification-update--2026-10-27-all-three-standalone-bundles).
 
-### Recommended: build a lab-ready Linux bundle
+### Recommended: build all three lab-ready bundles
 
-On the build machine (Docker, JDK 17 and Maven installed):
-
-```bash
-mvn clean package -DskipTests -Djavafx.platform=linux
-scripts/docker/build-sandbox-image.sh
-python3 scripts/prepare-zero-download-bundles.py --target linux \
-    --jre-linux /path/to/extracted/jdk-17-jre-linux-x64 --with-images
-tar -czf arbitrator-linux.tar.gz -C dist linux
-```
-
-The result, about 0.9 GB, needs no Java or Docker Hub downloads on lab PCs. Only installing Docker itself on the instructor PC uses the network (the Ubuntu archive), and only if it is not installed yet.
-
-### Build options
-
-Client JARs are built once per JavaFX platform. Run `clean` only on the first build, so earlier client JARs stay in `arbitrator-client/target/`. The script warns about any that are missing.
+On a Linux build machine with Docker, JDK 17, Maven and internet access:
 
 ```bash
 mvn clean package -DskipTests -Djavafx.platform=linux
 mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=win
 mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=mac
 mvn -pl arbitrator-client -am package -DskipTests -Djavafx.platform=mac-aarch64
+scripts/docker/build-sandbox-image.sh
+python3 scripts/prepare-zero-download-bundles.py --fetch-jres --with-images
 ```
+
+`--fetch-jres` downloads the latest Eclipse Temurin 17 JRE for Linux x64, Windows x64, macOS Intel and macOS Apple Silicon, verifies each SHA-256, and caches them in `dist/.jre-cache/`. The run ends with a bundle check and exits non-zero if any bundle lacks a launcher, quick start, Java runtime of the right CPU type, or image, or if a bundled JAR differs from the current build in `target/` (a client platform that was not built is reported, not silently left stale). Package each OS folder for transfer, for example `tar -czf arbitrator-linux.tar.gz -C dist linux`, or zip `dist/windows` on Windows. Each folder is about 0.7 to 0.9 GB.
+
+### Build options
+
+Client JARs are built once per JavaFX platform, as above. Run `clean` only on the first build, so earlier client JARs stay in `arbitrator-client/target/`.
 
 | Option | Effect |
 |---|---|
 | *(none)* / `--target all` | Assemble `linux`, `windows` and `mac`. |
 | `--target linux\|windows\|mac` | Assemble one OS. |
-| `--jre-linux DIR`, `--jre-windows DIR`, `--jre-mac DIR` | Bundle an extracted Java 17 runtime (for example, Eclipse Temurin 17 JRE) for that OS. A JRE is OS- and CPU-specific; a macOS JRE (`Contents/Home` layout accepted) serves only Intel or only Apple Silicon Macs. |
+| `--fetch-jres` | Download and verify every Java runtime not given explicitly (see above). |
+| `--jre-linux DIR`, `--jre-windows DIR` | Use an extracted Java 17 runtime instead of downloading one. |
+| `--jre-mac DIR` | The same for macOS; give it twice, once for Intel and once for Apple Silicon. The CPU type is read from the JRE's `release` file; the `Contents/Home` layout is accepted. |
 | `--jre DIR` | The same, with a single `--target`. |
-| `--with-images` | Linux only. Save `mysql:8.0` and the judge image into `dist/linux/admin/images/` (about 0.5 GB compressed); `start-server.sh` loads them instead of downloading. Build the judge image first; `mysql:8.0` is pulled automatically. Unchanged images are not re-exported. |
+| `--with-images` | Save `mysql:8.0` and the judge image (about 0.5 GB compressed) once to `dist/.image-cache/` and hard-link them into every `admin/images/`. The launchers load them instead of downloading. Build the judge image first; `mysql:8.0` is pulled automatically. Unchanged images are not re-exported. |
 
-Previously bundled `jre/` folders are kept when no JRE is passed. Without a bundled JRE, the Linux launchers use an installed Java 17+ or install OpenJDK 21 from the Ubuntu archive (which needs sudo). The Windows and macOS launchers require an installed Java.
+Runtimes go to `jre/` (Linux, Windows) or `jre-x64/` and `jre-aarch64/` (macOS); the launchers pick the matching one. Previously bundled runtimes are kept when none is passed. Without one, the Linux launchers use an installed Java 17+ or install OpenJDK 21 from the Ubuntu archive (which needs sudo); the Windows and macOS launchers stop with a message. Obsolete launchers and runtime folders from earlier bundle layouts are removed on assembly.
 
 ### Linux (Ubuntu 26.04)
 
@@ -247,11 +243,26 @@ Previously bundled `jre/` folders are kept when no JRE is passed. Without a bund
 
 **Security note.** When the account has just been added to the `docker` group, membership applies only to new logins. For the current session, `start-server.sh` therefore makes `/var/run/docker.sock` world-writable, which gives every local account root-equivalent access to Docker. Treat the instructor PC as single-user; see [security.md](docs/security.md#linux-bundle--docker-socket-access).
 
-### Windows and macOS
+### Windows (10/11 x64)
 
-`start-server` calls the separate `setup` script and then starts the server. Setup installs Docker Desktop if it is missing (Windows via `winget`, macOS via Homebrew), starts it and waits for its engine. It then builds the judge image and creates or starts the `arbitrator-mysql` container. On Windows, a fresh Docker Desktop install needs a sign-out or restart, then a second run. Unlike the Linux script, these use an existing MySQL on port 3306 if one is present, publish the container on all interfaces, and do not load bundled images.
+**Instructor PC: double-click `start-server.bat`** (in `admin\`). Extract a received ZIP first; the launcher detects being run from inside one. It then:
 
-Participants set `server.host` in `client/server.properties`, then double-click the client launcher. The macOS launcher picks the Apple Silicon or Intel JAR automatically.
+1. **Checks the bundle.** Removes the downloaded-file mark from the folder once (so Windows does not block `java.exe`) and verifies that the bundled Java starts.
+2. **Docker Desktop.** Finds it, also before its first launch adds it to `PATH`. If it is missing, installs it with `winget`; Windows then needs a restart, a first manual launch of Docker Desktop to accept its terms, and a second run. Starts the engine, waiting up to 5 minutes, and switches Docker to Linux containers if needed.
+3. **Judge image** and 4. **MySQL**, as on Linux: loaded from `images\`, own container on `127.0.0.1` at 3306 or the next free port, readiness and login checks.
+5. **Server.** Checks port 8080, adds a Windows Firewall rule for port 8080 (one administrator prompt; if declined, a warning, and Windows asks about Java on first start), then starts the server.
+
+Output is logged to `admin\logs\start-server.log` and `admin\logs\server.log`. On any failure, the window stays open with the reason. If 5 minutes pass without the engine starting, the message lists the usual causes: unaccepted terms, virtualization or WSL 2 disabled, or an account outside `docker-users`.
+
+**Participant PCs:** set `server.host` in `client\server.properties` (the server window shows the address after "Students connect to"), then double-click `start-client.bat`. It needs no installation or administrator rights, warns if `server.host` still points at `127.0.0.1`, and keeps its window open with the error if the client fails.
+
+The batch files use only `goto` control flow (no parenthesized blocks), quote every path, and are written with CRLF line endings and ASCII only, so folder names with spaces, parentheses or `&` work.
+
+### macOS (Intel and Apple Silicon)
+
+**Instructor Mac: double-click `start-server.command`** (in `admin/`). One script does the same steps as Linux. It installs Docker Desktop with Homebrew if missing (otherwise it asks for a manual install) and launches it. On Apple Silicon it pulls a native `mysql:8.0` first and falls back to the bundled Intel image. It uses the bundled Java for the Mac's CPU. Gatekeeper's quarantine mark is removed from the folder, and output is logged under `logs/`.
+
+**Participant Macs:** set `server.host`, then double-click `start-client.command`; the matching JAR and Java runtime are chosen automatically. The scripts are compatible with the bash 3.2 that macOS ships.
 
 ### Credentials and overrides
 
